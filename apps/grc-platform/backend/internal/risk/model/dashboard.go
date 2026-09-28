@@ -25,7 +25,8 @@ package model
 //   - Risk level/likelihood/impact use the effective residual score: the
 //     latest risk_assessment score when one exists, else the gross score.
 //   - Every field is open-risks-only EXCEPT RegisterAnalytics.StatusLevels,
-//     which also includes closed risks (see its own doc comment).
+//     RepeatedCategories and CommonOpenCategories, which also count closed
+//     risks (see their own doc comments).
 type DashboardSummary struct {
 	Summary                 RiskStatusSummary        `json:"summary"`
 	TreatmentByRegister     []RegisterTreatmentCount `json:"treatment_by_register"`
@@ -34,6 +35,8 @@ type DashboardSummary struct {
 	CertDistribution        []RegisterCertShare      `json:"cert_distribution"`
 	Registers               []RegisterAnalytics      `json:"registers"`
 	RepeatedComplianceRisks []RepeatedComplianceRisk `json:"repeated_compliance_risks"`
+	RepeatedCategories      []RepeatedCategory       `json:"repeated_categories"`
+	CommonOpenCategories    []CommonOpenCategory     `json:"common_open_categories"`
 	HighRisks               []HighRiskItem           `json:"high_risks"`
 }
 
@@ -116,6 +119,37 @@ type RepeatedRiskOccurrence struct {
 	Status       string `json:"status"`
 	RiskLevel    string `json:"risk_level"`
 	ColorCode    string `json:"color_code"`
+}
+
+// CategoryCounts is the Open / Acc / Rem / Closed split shared by the two
+// category tables. Accept and Remediate are subsets of Open; TRANSFER, AVOID
+// and untreated open risks count in Open alone, so Open >= Accept + Remediate.
+type CategoryCounts struct {
+	Open      int `json:"open"`
+	Accept    int `json:"accept"`
+	Remediate int `json:"remediate"`
+	Closed    int `json:"closed"`
+}
+
+// RepeatedCategory is one row of the "Repeated Risks Within Each Register"
+// table: a Risk Category held by two or more risks, open or closed, in the
+// same register.
+type RepeatedCategory struct {
+	RegisterID   int    `json:"register_id"`
+	RegisterName string `json:"register_name"`
+	CategoryID   int    `json:"category_id"`
+	CategoryName string `json:"category_name"`
+	CategoryCounts
+}
+
+// CommonOpenCategory is one row of the "Common Open Risks Across All Risk
+// Registers" table: a Risk Category with at least one open risk in each of two
+// or more registers. Counts cover only the registers in RegisterIDs.
+type CommonOpenCategory struct {
+	CategoryID   int    `json:"category_id"`
+	CategoryName string `json:"category_name"`
+	RegisterIDs  []int  `json:"register_ids"`
+	CategoryCounts
 }
 
 // HighRiskItem is one row of the "High Severity Open Risks" table: an open

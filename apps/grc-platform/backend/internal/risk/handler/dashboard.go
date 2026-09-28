@@ -68,6 +68,8 @@ func (d *Deps) handleDashboard(w http.ResponseWriter, r *http.Request) {
 				CertDistribution:        []model.RegisterCertShare{},
 				Registers:               []model.RegisterAnalytics{},
 				RepeatedComplianceRisks: []model.RepeatedComplianceRisk{},
+				RepeatedCategories:      []model.RepeatedCategory{},
+				CommonOpenCategories:    []model.CommonOpenCategory{},
 				HighRisks:               []model.HighRiskItem{},
 			})
 			return

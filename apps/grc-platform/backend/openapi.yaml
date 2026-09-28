@@ -5898,6 +5898,46 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/RepeatedRiskOccurrence'
+    RepeatedCategory:
+      type: object
+      description: A Risk Category held by two or more non-cancelled risks (open or closed) in the same source register. accept/remediate are subsets of open.
+      properties:
+        register_id:
+          type: integer
+        register_name:
+          type: string
+        category_id:
+          type: integer
+        category_name:
+          type: string
+        open:
+          type: integer
+        accept:
+          type: integer
+        remediate:
+          type: integer
+        closed:
+          type: integer
+    CommonOpenCategory:
+      type: object
+      description: A Risk Category with at least one open risk in each of two or more source registers. Counts cover only the registers in register_ids; accept/remediate are subsets of open.
+      properties:
+        category_id:
+          type: integer
+        category_name:
+          type: string
+        register_ids:
+          type: array
+          items:
+            type: integer
+        open:
+          type: integer
+        accept:
+          type: integer
+        remediate:
+          type: integer
+        closed:
+          type: integer
     HighRiskItem:
       type: object
       properties:
@@ -5924,7 +5964,7 @@ components:
           nullable: true
     DashboardSummary:
       type: object
-      description: Full payload for GET /api/v1/risks/dashboard. CANCELLED risks are excluded everywhere; every field is open-risks-only except registers[].status_levels.
+      description: Full payload for GET /api/v1/risks/dashboard. CANCELLED risks are excluded everywhere; every field is open-risks-only except registers[].status_levels, repeated_categories and common_open_categories.
       properties:
         summary:
           $ref: '#/components/schemas/RiskStatusSummary'
@@ -5952,6 +5992,14 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/RepeatedComplianceRisk'
+        repeated_categories:
+          type: array
+          items:
+            $ref: '#/components/schemas/RepeatedCategory'
+        common_open_categories:
+          type: array
+          items:
+            $ref: '#/components/schemas/CommonOpenCategory'
         high_risks:
           type: array
           items:

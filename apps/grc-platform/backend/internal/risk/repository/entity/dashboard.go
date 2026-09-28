@@ -93,6 +93,19 @@ type entDashboard struct {
 			ColorCode    string `json:"colorCode"`
 		} `json:"occurrences"`
 	} `json:"repeatedComplianceRisks"`
+	RepeatedCategories []struct {
+		RegisterID   int    `json:"registerId"`
+		RegisterName string `json:"registerName"`
+		CategoryID   int    `json:"categoryId"`
+		CategoryName string `json:"categoryName"`
+		entCategoryCounts
+	} `json:"repeatedCategories"`
+	CommonOpenCategories []struct {
+		CategoryID   int    `json:"categoryId"`
+		CategoryName string `json:"categoryName"`
+		RegisterIDs  []int  `json:"registerIds"`
+		entCategoryCounts
+	} `json:"commonOpenCategories"`
 	HighRisks []struct {
 		ID                 int     `json:"id"`
 		RiskCode           string  `json:"riskCode"`
@@ -103,6 +116,17 @@ type entDashboard struct {
 		TreatmentStrategy  *string `json:"treatmentStrategy"`
 		ImplementationDate *string `json:"implementationDate"`
 	} `json:"highRisks"`
+}
+
+type entCategoryCounts struct {
+	Open      int `json:"open"`
+	Accept    int `json:"accept"`
+	Remediate int `json:"remediate"`
+	Closed    int `json:"closed"`
+}
+
+func (c entCategoryCounts) toModel() model.CategoryCounts {
+	return model.CategoryCounts{Open: c.Open, Accept: c.Accept, Remediate: c.Remediate, Closed: c.Closed}
 }
 
 type entLevelCount struct {
@@ -152,6 +176,8 @@ func (r *dashboardRepository) Summary(ctx context.Context, registerID *int, regi
 		CertDistribution:        make([]model.RegisterCertShare, 0, len(e.CertDistribution)),
 		Registers:               make([]model.RegisterAnalytics, 0, len(e.Registers)),
 		RepeatedComplianceRisks: make([]model.RepeatedComplianceRisk, 0, len(e.RepeatedComplianceRisks)),
+		RepeatedCategories:      make([]model.RepeatedCategory, 0, len(e.RepeatedCategories)),
+		CommonOpenCategories:    make([]model.CommonOpenCategory, 0, len(e.CommonOpenCategories)),
 		HighRisks:               make([]model.HighRiskItem, 0, len(e.HighRisks)),
 	}
 
@@ -204,6 +230,23 @@ func (r *dashboardRepository) Summary(ctx context.Context, registerID *int, regi
 			})
 		}
 		out.RepeatedComplianceRisks = append(out.RepeatedComplianceRisks, item)
+	}
+	for _, rc := range e.RepeatedCategories {
+		out.RepeatedCategories = append(out.RepeatedCategories, model.RepeatedCategory{
+			RegisterID: rc.RegisterID, RegisterName: rc.RegisterName,
+			CategoryID: rc.CategoryID, CategoryName: rc.CategoryName,
+			CategoryCounts: rc.toModel(),
+		})
+	}
+	for _, cc := range e.CommonOpenCategories {
+		registerIDs := cc.RegisterIDs
+		if registerIDs == nil {
+			registerIDs = []int{}
+		}
+		out.CommonOpenCategories = append(out.CommonOpenCategories, model.CommonOpenCategory{
+			CategoryID: cc.CategoryID, CategoryName: cc.CategoryName,
+			RegisterIDs: registerIDs, CategoryCounts: cc.toModel(),
+		})
 	}
 	for _, h := range e.HighRisks {
 		out.HighRisks = append(out.HighRisks, model.HighRiskItem{
