@@ -53,7 +53,7 @@ func (d *Deps) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	// handleListRisks' equivalent scoping: an empty list means "unrestricted"
 	// downstream, so it must never reach the query.
 	var registerIDs []int
-	if !callerGrants(r.Context()).HasGlobal(privilege.ViewRiskDashboard) {
+	if !auth.AllowAll(r.Context()) && !callerGrants(r.Context()).HasGlobal(privilege.ViewRiskDashboard) {
 		// Register-capable scopes only: a grant on an ASSIGNMENT-only team (HR,
 		// Legal) contributes nothing — there is no register page for it to
 		// appear on. A grant on a BOTH team does contribute, which is why
@@ -68,6 +68,8 @@ func (d *Deps) handleDashboard(w http.ResponseWriter, r *http.Request) {
 				CertDistribution:        []model.RegisterCertShare{},
 				Registers:               []model.RegisterAnalytics{},
 				RepeatedComplianceRisks: []model.RepeatedComplianceRisk{},
+				RepeatedCategories:      []model.RepeatedCategory{},
+				CommonOpenCategories:    []model.CommonOpenCategory{},
 				HighRisks:               []model.HighRiskItem{},
 			})
 			return

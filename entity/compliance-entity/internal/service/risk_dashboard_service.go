@@ -19,6 +19,7 @@ package service
 import (
 	"context"
 	"math"
+	"sort"
 
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/apierror"
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/domain"
@@ -47,6 +48,8 @@ func NewRiskDashboardService(repo repository.RiskDashboardRepository) RiskDashbo
 // statusBucketOrder fixes the x-axis order of each register's status chart.
 var statusBucketOrder = []string{"CLOSED", "REMEDIATE", "ACCEPT", "TRANSFER", "AVOID"}
 
+// Summary validates req and assembles the full dashboard payload, scoped by its
+// register filters.
 func (s *riskDashboardService) Summary(ctx context.Context, req domain.RiskDashboardRequest) (domain.RiskDashboardSummary, error) {
 	if req.RegisterID != nil && *req.RegisterID <= 0 {
 		return domain.RiskDashboardSummary{}, &apierror.ValidationError{Msg: "registerId must be a positive integer"}
@@ -75,6 +78,10 @@ func (s *riskDashboardService) Summary(ctx context.Context, req domain.RiskDashb
 	if err != nil {
 		return domain.RiskDashboardSummary{}, err
 	}
+	categoryFacts, err := s.repo.CategoryRegisterFacts(ctx, registerID, registerIDs)
+	if err != nil {
+		return domain.RiskDashboardSummary{}, err
+	}
 	highRisks, err := s.repo.HighRisks(ctx, registerID, registerIDs)
 	if err != nil {
 		return domain.RiskDashboardSummary{}, err
@@ -95,6 +102,8 @@ func (s *riskDashboardService) Summary(ctx context.Context, req domain.RiskDashb
 		CertDistribution:        buildCertDistribution(certCounts),
 		Registers:               buildRegisterBlocks(facts, statusFacts, levelOrder),
 		RepeatedComplianceRisks: buildRepeatedRisks(repeatedRows),
+		RepeatedCategories:      buildRepeatedCategories(categoryFacts),
+		CommonOpenCategories:    buildCommonOpenCategories(categoryFacts),
 		HighRisks:               highRisks,
 	}, nil
 }
@@ -296,5 +305,123 @@ func buildRepeatedRisks(rows []domain.RepeatedRiskRow) []domain.RepeatedComplian
 	for _, title := range order {
 		out = append(out, *grouped[title])
 	}
+	return out
+}
+
+// categoryCell is one register × category's counts, collapsed from its bucket
+// facts.
+type categoryCell struct {
+	registerID   int
+	registerName string
+	categoryID   int
+	categoryName string
+	counts       domain.CategoryCounts
+}
+
+// collapseCategoryFacts folds bucket facts into one cell per register ×
+// category, in the repository's (register name, category name) order. Keyed on
+// ids, not names, for the reason given on buildTreatmentByRegister.
+func collapseCategoryFacts(facts []domain.CategoryRegisterFact) []*categoryCell {
+	type key struct{ registerID, categoryID int }
+	cells := map[key]*categoryCell{}
+	var order []*categoryCell
+	for _, f := range facts {
+		k := key{f.RegisterID, f.CategoryID}
+		c, ok := cells[k]
+		if !ok {
+			c = &categoryCell{
+				registerID: f.RegisterID, registerName: f.RegisterName,
+				categoryID: f.CategoryID, categoryName: f.CategoryName,
+			}
+			cells[k] = c
+			order = append(order, c)
+		}
+		switch f.Bucket {
+		case domain.CategoryBucketClosed:
+			c.counts.Closed += f.Count
+		case domain.CategoryBucketOpenAccept:
+			c.counts.Open += f.Count
+			c.counts.Accept += f.Count
+		case domain.CategoryBucketOpenRemediate:
+			c.counts.Open += f.Count
+			c.counts.Remediate += f.Count
+		default:
+			c.counts.Open += f.Count
+		}
+	}
+	return order
+}
+
+// buildRepeatedCategories returns every register × category held by two or
+// more non-cancelled risks, open or closed. Registers keep the repository's
+// name order; within a register, most open first, then category name.
+func buildRepeatedCategories(facts []domain.CategoryRegisterFact) []domain.RepeatedCategory {
+	cells := collapseCategoryFacts(facts)
+	registerRank := map[int]int{}
+	out := make([]domain.RepeatedCategory, 0)
+	for _, c := range cells {
+		if _, ok := registerRank[c.registerID]; !ok {
+			registerRank[c.registerID] = len(registerRank)
+		}
+		if c.counts.Open+c.counts.Closed < 2 {
+			continue
+		}
+		out = append(out, domain.RepeatedCategory{
+			RegisterID: c.registerID, RegisterName: c.registerName,
+			CategoryID: c.categoryID, CategoryName: c.categoryName,
+			CategoryCounts: c.counts,
+		})
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if ra, rb := registerRank[a.RegisterID], registerRank[b.RegisterID]; ra != rb {
+			return ra < rb
+		}
+		if a.Open != b.Open {
+			return a.Open > b.Open
+		}
+		return a.CategoryName < b.CategoryName
+	})
+	return out
+}
+
+// buildCommonOpenCategories returns every category with at least one open
+// risk in each of two or more registers. Counts cover only those registers.
+// Most affected registers first, then most open, then category name.
+func buildCommonOpenCategories(facts []domain.CategoryRegisterFact) []domain.CommonOpenCategory {
+	byCategory := map[int]*domain.CommonOpenCategory{}
+	var order []int
+	for _, c := range collapseCategoryFacts(facts) {
+		if c.counts.Open == 0 {
+			continue
+		}
+		g, ok := byCategory[c.categoryID]
+		if !ok {
+			g = &domain.CommonOpenCategory{CategoryID: c.categoryID, CategoryName: c.categoryName}
+			byCategory[c.categoryID] = g
+			order = append(order, c.categoryID)
+		}
+		g.RegisterIDs = append(g.RegisterIDs, c.registerID)
+		g.Open += c.counts.Open
+		g.Accept += c.counts.Accept
+		g.Remediate += c.counts.Remediate
+		g.Closed += c.counts.Closed
+	}
+	out := make([]domain.CommonOpenCategory, 0)
+	for _, id := range order {
+		if g := byCategory[id]; len(g.RegisterIDs) >= 2 {
+			out = append(out, *g)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if len(a.RegisterIDs) != len(b.RegisterIDs) {
+			return len(a.RegisterIDs) > len(b.RegisterIDs)
+		}
+		if a.Open != b.Open {
+			return a.Open > b.Open
+		}
+		return a.CategoryName < b.CategoryName
+	})
 	return out
 }

@@ -40,6 +40,7 @@ type RiskDashboardRepository interface {
 	RegisterStatusFacts(ctx context.Context, registerID *int, registerIDs []int) ([]domain.RegisterStatusFact, error)
 	CertTagCounts(ctx context.Context, registerID *int, registerIDs []int) ([]domain.RegisterCertCount, error)
 	RepeatedComplianceRisks(ctx context.Context, registerID *int, registerIDs []int) ([]domain.RepeatedRiskRow, error)
+	CategoryRegisterFacts(ctx context.Context, registerID *int, registerIDs []int) ([]domain.CategoryRegisterFact, error)
 	HighRisks(ctx context.Context, registerID *int, registerIDs []int) ([]domain.HighRiskItem, error)
 	LevelOrder(ctx context.Context) ([]string, error)
 }
@@ -175,6 +176,54 @@ func (d *riskDashboardRepo) RegisterStatusFacts(ctx context.Context, registerID 
 			&f.RegisterID, &f.RegisterName, &f.RiskLevel, &f.ColorCode, &f.Bucket, &f.Count,
 		); err != nil {
 			return nil, fmt.Errorf("scan register status fact: %w", err)
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+// categoryBucketCase is shared verbatim between CategoryRegisterFacts' SELECT
+// and GROUP BY clauses, for the same ONLY_FULL_GROUP_BY reason as
+// registerStatusBucketCase above.
+const categoryBucketCase = `CASE WHEN r.workflow_status = '` + statusClosed + `' THEN '` + domain.CategoryBucketClosed + `'
+	                WHEN r.treatment_strategy = 'ACCEPT' THEN '` + domain.CategoryBucketOpenAccept + `'
+	                WHEN r.treatment_strategy = 'REMEDIATE' THEN '` + domain.CategoryBucketOpenRemediate + `'
+	                ELSE '` + domain.CategoryBucketOpenOther + `' END`
+
+// CategoryRegisterFacts has no score join: the category views count every
+// categorised risk, including one that has no score to plot.
+func (d *riskDashboardRepo) CategoryRegisterFacts(ctx context.Context, registerID *int, registerIDs []int) ([]domain.CategoryRegisterFact, error) {
+	clause, filterArgs := registerFilter(registerID)
+	scopeClause, scopeArgs := registerScopeFilter("r", registerIDs)
+	args := append([]any{statusCancelled}, filterArgs...)
+	args = append(args, scopeArgs...)
+
+	// #nosec G202 -- concatenated parts are fixed SQL fragments from registerFilter/registerScopeFilter/categoryBucketCase, never user input; values go through args
+	rows, err := d.db.QueryContext(ctx, `
+		SELECT st.id, st.name, cat.id, cat.name,
+		       `+categoryBucketCase+`,
+		       COUNT(*)
+		FROM risk r
+		JOIN risk_team st ON st.id = r.source_register_id
+		JOIN risk_category_reference rcr ON rcr.risk_id = r.id
+		JOIN risk_category cat ON cat.id = rcr.category_id
+		WHERE r.workflow_status <> ?`+clause+scopeClause+`
+		GROUP BY st.id, st.name, cat.id, cat.name, `+categoryBucketCase+`
+		ORDER BY st.name, st.id, cat.name, cat.id`,
+		args...,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("risk dashboard category register facts: %w", err)
+	}
+	defer rows.Close()
+
+	var out []domain.CategoryRegisterFact
+	for rows.Next() {
+		var f domain.CategoryRegisterFact
+		if err := rows.Scan(
+			&f.RegisterID, &f.RegisterName, &f.CategoryID, &f.CategoryName, &f.Bucket, &f.Count,
+		); err != nil {
+			return nil, fmt.Errorf("scan category register fact: %w", err)
 		}
 		out = append(out, f)
 	}
