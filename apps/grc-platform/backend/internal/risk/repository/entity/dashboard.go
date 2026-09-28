@@ -125,6 +125,7 @@ type entCategoryCounts struct {
 	Closed    int `json:"closed"`
 }
 
+// toModel converts the entity's per-category status counts to the backend model.
 func (c entCategoryCounts) toModel() model.CategoryCounts {
 	return model.CategoryCounts{Open: c.Open, Accept: c.Accept, Remediate: c.Remediate, Closed: c.Closed}
 }

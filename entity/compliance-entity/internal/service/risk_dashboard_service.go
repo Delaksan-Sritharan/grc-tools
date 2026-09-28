@@ -48,6 +48,8 @@ func NewRiskDashboardService(repo repository.RiskDashboardRepository) RiskDashbo
 // statusBucketOrder fixes the x-axis order of each register's status chart.
 var statusBucketOrder = []string{"CLOSED", "REMEDIATE", "ACCEPT", "TRANSFER", "AVOID"}
 
+// Summary validates req and assembles the full dashboard payload, scoped by its
+// register filters.
 func (s *riskDashboardService) Summary(ctx context.Context, req domain.RiskDashboardRequest) (domain.RiskDashboardSummary, error) {
 	if req.RegisterID != nil && *req.RegisterID <= 0 {
 		return domain.RiskDashboardSummary{}, &apierror.ValidationError{Msg: "registerId must be a positive integer"}
