@@ -226,3 +226,81 @@ func TestBuildRepeatedRisks(t *testing.T) {
 		t.Errorf("buildRepeatedRisks() = %+v, want %+v", got, want)
 	}
 }
+
+func TestBuildRepeatedCategories(t *testing.T) {
+	const (
+		asg, cho, dio   = 1, 2, 3
+		access, eol, wf = 10, 20, 30
+	)
+	facts := []domain.CategoryRegisterFact{
+		// Asgardeo · Access: 1 open ACCEPT + 1 open TRANSFER + 1 CLOSED → repeated.
+		{RegisterID: asg, RegisterName: "Asgardeo", CategoryID: access, CategoryName: "Access", Bucket: domain.CategoryBucketOpenAccept, Count: 1},
+		{RegisterID: asg, RegisterName: "Asgardeo", CategoryID: access, CategoryName: "Access", Bucket: domain.CategoryBucketOpenOther, Count: 1},
+		{RegisterID: asg, RegisterName: "Asgardeo", CategoryID: access, CategoryName: "Access", Bucket: domain.CategoryBucketClosed, Count: 1},
+		// Asgardeo · WAF: 3 open REMEDIATE → repeated, sorts above Access (more open).
+		{RegisterID: asg, RegisterName: "Asgardeo", CategoryID: wf, CategoryName: "WAF", Bucket: domain.CategoryBucketOpenRemediate, Count: 3},
+		// Choreo · EOL: a single risk → not repeated.
+		{RegisterID: cho, RegisterName: "Choreo", CategoryID: eol, CategoryName: "EOL", Bucket: domain.CategoryBucketOpenAccept, Count: 1},
+		// Digi Ops · EOL: all CLOSED → still repeated.
+		{RegisterID: dio, RegisterName: "Digi Ops", CategoryID: eol, CategoryName: "EOL", Bucket: domain.CategoryBucketClosed, Count: 5},
+	}
+
+	got := buildRepeatedCategories(facts)
+	want := []domain.RepeatedCategory{
+		{RegisterID: asg, RegisterName: "Asgardeo", CategoryID: wf, CategoryName: "WAF",
+			CategoryCounts: domain.CategoryCounts{Open: 3, Remediate: 3}},
+		{RegisterID: asg, RegisterName: "Asgardeo", CategoryID: access, CategoryName: "Access",
+			CategoryCounts: domain.CategoryCounts{Open: 2, Accept: 1, Closed: 1}},
+		{RegisterID: dio, RegisterName: "Digi Ops", CategoryID: eol, CategoryName: "EOL",
+			CategoryCounts: domain.CategoryCounts{Closed: 5}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("buildRepeatedCategories() = %+v, want %+v", got, want)
+	}
+}
+
+func TestBuildRepeatedCategoriesEmpty(t *testing.T) {
+	got := buildRepeatedCategories(nil)
+	if got == nil || len(got) != 0 {
+		t.Errorf("buildRepeatedCategories(nil) = %#v, want non-nil empty", got)
+	}
+}
+
+func TestBuildCommonOpenCategories(t *testing.T) {
+	const (
+		asg, bal, cho, dio = 1, 2, 3, 4
+		access, eol, wf    = 10, 20, 30
+	)
+	facts := []domain.CategoryRegisterFact{
+		// Access: open in Asgardeo and Choreo; Ballerina has it CLOSED only, so
+		// Ballerina is not affected and its closed risks are not counted.
+		{RegisterID: asg, RegisterName: "Asgardeo", CategoryID: access, CategoryName: "Access", Bucket: domain.CategoryBucketOpenAccept, Count: 2},
+		{RegisterID: asg, RegisterName: "Asgardeo", CategoryID: access, CategoryName: "Access", Bucket: domain.CategoryBucketClosed, Count: 1},
+		{RegisterID: bal, RegisterName: "Ballerina", CategoryID: access, CategoryName: "Access", Bucket: domain.CategoryBucketClosed, Count: 3},
+		{RegisterID: cho, RegisterName: "Choreo", CategoryID: access, CategoryName: "Access", Bucket: domain.CategoryBucketOpenOther, Count: 1},
+		// WAF: open in three registers → sorts first despite fewer open risks.
+		{RegisterID: asg, RegisterName: "Asgardeo", CategoryID: wf, CategoryName: "WAF", Bucket: domain.CategoryBucketOpenRemediate, Count: 1},
+		{RegisterID: bal, RegisterName: "Ballerina", CategoryID: wf, CategoryName: "WAF", Bucket: domain.CategoryBucketOpenRemediate, Count: 1},
+		{RegisterID: dio, RegisterName: "Digi Ops", CategoryID: wf, CategoryName: "WAF", Bucket: domain.CategoryBucketOpenAccept, Count: 1},
+		// EOL: open in one register only → not common, however many risks.
+		{RegisterID: dio, RegisterName: "Digi Ops", CategoryID: eol, CategoryName: "EOL", Bucket: domain.CategoryBucketOpenAccept, Count: 5},
+	}
+
+	got := buildCommonOpenCategories(facts)
+	want := []domain.CommonOpenCategory{
+		{CategoryID: wf, CategoryName: "WAF", RegisterIDs: []int{asg, bal, dio},
+			CategoryCounts: domain.CategoryCounts{Open: 3, Accept: 1, Remediate: 2}},
+		{CategoryID: access, CategoryName: "Access", RegisterIDs: []int{asg, cho},
+			CategoryCounts: domain.CategoryCounts{Open: 3, Accept: 2, Closed: 1}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("buildCommonOpenCategories() = %+v, want %+v", got, want)
+	}
+}
+
+func TestBuildCommonOpenCategoriesEmpty(t *testing.T) {
+	got := buildCommonOpenCategories(nil)
+	if got == nil || len(got) != 0 {
+		t.Errorf("buildCommonOpenCategories(nil) = %#v, want non-nil empty", got)
+	}
+}

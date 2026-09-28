@@ -46,6 +46,8 @@ type RiskDashboardSummary struct {
 	CertDistribution        []RegisterCertShare      `json:"certDistribution"`
 	Registers               []RegisterAnalytics      `json:"registers"`
 	RepeatedComplianceRisks []RepeatedComplianceRisk `json:"repeatedComplianceRisks"`
+	RepeatedCategories      []RepeatedCategory       `json:"repeatedCategories"`
+	CommonOpenCategories    []CommonOpenCategory     `json:"commonOpenCategories"`
 	HighRisks               []HighRiskItem           `json:"highRisks"`
 }
 
@@ -123,6 +125,38 @@ type RepeatedRiskOccurrence struct {
 	ColorCode    string `json:"colorCode"`
 }
 
+// CategoryCounts is the Open / Acc / Rem / Closed split shared by the two
+// category views. Accept and Remediate are subsets of Open (open risks with
+// that treatment strategy); TRANSFER, AVOID and untreated open risks count in
+// Open alone, so Open >= Accept + Remediate.
+type CategoryCounts struct {
+	Open      int `json:"open"`
+	Accept    int `json:"accept"`
+	Remediate int `json:"remediate"`
+	Closed    int `json:"closed"`
+}
+
+// RepeatedCategory is a Risk Category held by two or more risks in the same
+// register, counting open and closed risks alike.
+type RepeatedCategory struct {
+	RegisterID   int    `json:"registerId"`
+	RegisterName string `json:"registerName"`
+	CategoryID   int    `json:"categoryId"`
+	CategoryName string `json:"categoryName"`
+	CategoryCounts
+}
+
+// CommonOpenCategory is a Risk Category with at least one open risk in each of
+// two or more registers. RegisterIDs lists those registers, and the counts
+// cover only them — a register where the category is only CLOSED contributes
+// nothing, not even to Closed.
+type CommonOpenCategory struct {
+	CategoryID   int    `json:"categoryId"`
+	CategoryName string `json:"categoryName"`
+	RegisterIDs  []int  `json:"registerIds"`
+	CategoryCounts
+}
+
 // HighRiskItem is one row of the high-risk table, oldest identified first.
 type HighRiskItem struct {
 	ID                 int     `json:"id"`
@@ -176,4 +210,24 @@ type RepeatedRiskRow struct {
 	Status       string
 	RiskLevel    string
 	ColorCode    string
+}
+
+// Category fact buckets: a CLOSED risk, or an open risk by treatment strategy.
+const (
+	CategoryBucketClosed        = "CLOSED"
+	CategoryBucketOpenAccept    = "OPEN_ACCEPT"
+	CategoryBucketOpenRemediate = "OPEN_REMEDIATE"
+	CategoryBucketOpenOther     = "OPEN_OTHER"
+)
+
+// CategoryRegisterFact is every non-cancelled categorised risk grouped by
+// register × category × bucket. A risk with several categories appears under
+// each; an uncategorised risk appears under none.
+type CategoryRegisterFact struct {
+	RegisterID   int
+	RegisterName string
+	CategoryID   int
+	CategoryName string
+	Bucket       string
+	Count        int
 }

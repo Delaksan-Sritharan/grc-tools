@@ -6979,6 +6979,50 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/RepeatedRiskOccurrence'
+    RepeatedCategory:
+      type: object
+      description: >-
+        A Risk Category held by two or more non-cancelled risks (open or
+        closed) in the same register. accept/remediate are subsets of open.
+      properties:
+        registerId:
+          type: integer
+        registerName:
+          type: string
+        categoryId:
+          type: integer
+        categoryName:
+          type: string
+        open:
+          type: integer
+        accept:
+          type: integer
+        remediate:
+          type: integer
+        closed:
+          type: integer
+    CommonOpenCategory:
+      type: object
+      description: >-
+        A Risk Category with at least one open risk in each of two or more
+        registers. Counts cover only the registers in registerIds.
+      properties:
+        categoryId:
+          type: integer
+        categoryName:
+          type: string
+        registerIds:
+          type: array
+          items:
+            type: integer
+        open:
+          type: integer
+        accept:
+          type: integer
+        remediate:
+          type: integer
+        closed:
+          type: integer
     HighRiskItem:
       type: object
       properties:
@@ -7030,6 +7074,14 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/RepeatedComplianceRisk'
+        repeatedCategories:
+          type: array
+          items:
+            $ref: '#/components/schemas/RepeatedCategory'
+        commonOpenCategories:
+          type: array
+          items:
+            $ref: '#/components/schemas/CommonOpenCategory'
         highRisks:
           type: array
           items:
