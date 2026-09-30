@@ -42,6 +42,7 @@ tags:
 - name: Risk Action Plans
 - name: Risk Action Steps
 - name: Risk Escalations
+- name: Risk Reminders
 - name: Risk History
 - name: Risk Evidence
 - name: Users
@@ -3213,6 +3214,38 @@ paths:
                 $ref: '#/components/schemas/Error'
         '503':
           description: The escalation job is not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/risks/reminders/run:
+    post:
+      tags:
+      - Risk Reminders
+      summary: Manually trigger the daily due-date reminder sweep
+      description: >-
+        QA/ops convenience so the reminder sweep can be run without waiting for its fixed daily time.
+        Runs the whole batch exactly as the scheduler does, and works even when SCHEDULER_ENABLED is false.
+        Re-running on the same day is safe: every reminder already sent is claimed in risk_reminder, so a
+        second pass re-sends nothing and only retries sends that failed. There is no way to tell it to treat
+        a different date as today — to exercise a tier, set a test risk's implementation date that many days
+        ahead. The sweep runs detached; the response returns as soon as it has started.
+      operationId: runRiskReminderJob
+      responses:
+        '202':
+          description: Sweep started
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: A sweep is already running
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: The reminder job is not configured
           content:
             application/json:
               schema:

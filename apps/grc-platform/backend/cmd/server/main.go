@@ -39,6 +39,7 @@ import (
 	portalhandler "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/portal/handler"
 	riskhandler "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/handler"
 	riskjob "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/job"
+	riskentity "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/repository/entity"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/scheduler"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/scim"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/adminactivity"
@@ -179,6 +180,18 @@ func main() {
 	// TriggerReminderJob. Wired before RegisterRoutes so the handler sees it.
 	escalationJob := riskjob.NewEscalationJob(riskDeps.Risk, riskDeps.Escalation, riskDeps.NotifyEscalationSync)
 	riskDeps.TriggerEscalationJob = escalationJob.RunOnce
+	// Due-date reminder sweep — the lead-up to that escalation: 15 days out, 5
+	// days out and on the day, per the risk's effective level. Constructed the
+	// same way and for the same reasons as the escalation job above, with
+	// POST /api/v1/risks/reminders/run as its manual trigger. Its claim
+	// repository is built here rather than carried on riskDeps: no handler
+	// reads risk_reminder, only this sweep does.
+	riskReminderJob := riskjob.NewReminderJob(
+		riskDeps.Risk,
+		riskentity.NewReminderRepository(entityCli),
+		riskDeps.SendDueReminderSync,
+	)
+	riskDeps.TriggerReminderJob = riskReminderJob.RunOnce
 	riskhandler.RegisterRoutes(mux, riskDeps)
 	// The HR client reaches the audit module only when lead-escalation emails
 	// are on; nil otherwise, so no lead (line manager) is ever resolved there.
@@ -223,9 +236,10 @@ func main() {
 
 	// Background sweeps, both fired daily at a fixed 02:30 UTC (08:00 Sri Lanka) by one shared
 	// scheduler (internal/scheduler) so a single switch — SCHEDULER_ENABLED —
-	// turns them on or off together. Both jobs (escalationJob above,
-	// reminderJob above) are constructed regardless of this switch, so their
-	// manual-trigger endpoints (POST /api/v1/risks/escalations/run and
+	// turns them on or off together. Every job (escalationJob,
+	// riskReminderJob, reminderJob above) is constructed regardless of this
+	// switch, so their manual-trigger endpoints (POST
+	// /api/v1/risks/escalations/run, POST /api/v1/risks/reminders/run and
 	// POST /api/v1/audits/reminders/run) keep working when it is off.
 	//
 	// jobCtx derives from ctx (the signal context) so a SIGINT/SIGTERM cancels
@@ -238,6 +252,7 @@ func main() {
 	if cfg.SchedulerEnabled {
 		sweeps := []scheduler.Sweep{
 			{Name: "overdue-risk-escalation", Run: escalationJob.RunOnce},
+			{Name: "risk-due-date-reminders", Run: riskReminderJob.RunOnce},
 			{Name: "audit-due-date-reminders", Run: reminderJob.RunOnce},
 		}
 		if runDirectorySync != nil {
@@ -248,7 +263,7 @@ func main() {
 		go scheduler.New(scheduler.SweepHourUTC, scheduler.SweepMinuteUTC, sweeps...).Run(jobCtx)
 	} else {
 		slog.Warn("background scheduler disabled (SCHEDULER_ENABLED=false); " +
-			"overdue-risk escalation, audit due-date reminders and the directory status sync " +
+			"overdue-risk escalation, risk and audit due-date reminders and the directory status sync " +
 			"will not run automatically")
 	}
 	// One IdP verifier (JWKS caches) shared by user auth and the portal ingress.

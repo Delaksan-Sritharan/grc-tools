@@ -318,11 +318,26 @@ func TestSanitizeSubjectTruncatesOnRuneBoundary(t *testing.T) {
 	}
 }
 
-// Every event must label its Actor for itself: a generic label leaves the
-// reader guessing which of the several people on a risk the address belongs to.
+// systemSentEvents are the events nobody performs — the daily due-date
+// reminder sweep sends them off a date passing, not off anyone's action — so
+// they carry no Actor and therefore no label for one. Every other event must
+// have a label, and these must not, so adding an event to this list is a
+// deliberate act rather than a way to silence the check below.
+var systemSentEvents = map[RiskEvent]bool{
+	EventDueIn15Days: true,
+	EventDueIn5Days:  true,
+	EventDueToday:    true,
+}
+
+// Every event that has an Actor must label it for itself: a generic label
+// leaves the reader guessing which of the several people on a risk the address
+// belongs to.
 func TestEveryRiskEventLabelsItsActor(t *testing.T) {
 	for ev, tpl := range eventTemplates {
-		if tpl.actorLabel == "" {
+		switch {
+		case systemSentEvents[ev] && tpl.actorLabel != "":
+			t.Errorf("event %q is system-sent but has actorLabel %q — it never carries an Actor to label", ev, tpl.actorLabel)
+		case !systemSentEvents[ev] && tpl.actorLabel == "":
 			t.Errorf("event %q has no actorLabel", ev)
 		}
 	}
@@ -365,6 +380,50 @@ func TestSendRiskEventRendersTheEventsActorLabel(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The due-date reminders are the only events that set DueDate, and the date is
+// the whole point of them — so the row must render for a reminder and stay
+// absent everywhere else, exactly as the Actor row does.
+func TestSendRiskEventRendersTheImplementationDateRowOnlyForReminders(t *testing.T) {
+	capture := func(decoded *string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			var body struct {
+				Template string `json:"template"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			raw, _ := base64.StdEncoding.DecodeString(body.Template)
+			*decoded = string(raw)
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"message":"ok"}`))
+		}
+	}
+
+	for _, ev := range []RiskEvent{EventDueIn15Days, EventDueIn5Days, EventDueToday} {
+		t.Run(string(ev), func(t *testing.T) {
+			var decoded string
+			cl := newTestClient(t, capture(&decoded))
+			if err := cl.SendRiskEvent(context.Background(), ev, []string{"a@b.com"},
+				RiskEventInfo{RiskCode: "R-1", DueDate: "2026-10-06"}); err != nil {
+				t.Fatalf("SendRiskEvent: %v", err)
+			}
+			if !strings.Contains(decoded, "Implementation date") || !strings.Contains(decoded, "2026-10-06") {
+				t.Error("reminder body is missing the implementation date row")
+			}
+		})
+	}
+
+	t.Run("omitted when unset", func(t *testing.T) {
+		var decoded string
+		cl := newTestClient(t, capture(&decoded))
+		if err := cl.SendRiskEvent(context.Background(), EventCreated, []string{"a@b.com"},
+			RiskEventInfo{RiskCode: "R-1"}); err != nil {
+			t.Fatalf("SendRiskEvent: %v", err)
+		}
+		if strings.Contains(decoded, "Implementation date") {
+			t.Error("implementation date row rendered despite DueDate being empty")
+		}
+	})
 }
 
 // Actor is empty for system-triggered events; the row must disappear rather

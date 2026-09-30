@@ -111,6 +111,22 @@ func (d *Deps) sendRiskEventSync(ctx context.Context, ev emailer.RiskEvent, risk
 // from notifyRiskEvent so the work is callable both detached (via the
 // goroutine above) and synchronously (via sendRiskEventSync).
 func (d *Deps) sendRiskEvent(ctx context.Context, ev emailer.RiskEvent, riskID int, recipientUserIDs []int, actor, comment string) error {
+	emails := d.resolveRecipientEmails(ctx, ev, riskID, recipientUserIDs)
+	if len(emails) == 0 {
+		slog.Warn("risk notification: no deliverable recipients", "event", ev, "riskId", riskID)
+		return fmt.Errorf("no deliverable recipients")
+	}
+
+	return d.sendRiskEventToEmails(ctx, ev, riskID, emails, actor, comment)
+}
+
+// resolveRecipientEmails turns platform user ids into deliverable addresses,
+// dropping anyone unresolvable, inactive or without an address — and
+// de-duplicating, since the same person can fill two roles on one risk. Split
+// out of sendRiskEvent so the due-date reminders can reuse exactly this rule
+// while building their own RiskEventInfo (they carry a due date and the
+// effective level, which the shared path does not).
+func (d *Deps) resolveRecipientEmails(ctx context.Context, ev emailer.RiskEvent, riskID int, recipientUserIDs []int) []string {
 	seen := make(map[int]bool, len(recipientUserIDs))
 	emails := make([]string, 0, len(recipientUserIDs))
 	for _, id := range recipientUserIDs {
@@ -152,12 +168,7 @@ func (d *Deps) sendRiskEvent(ctx context.Context, ev emailer.RiskEvent, riskID i
 		}
 		emails = append(emails, email)
 	}
-	if len(emails) == 0 {
-		slog.Warn("risk notification: no deliverable recipients", "event", ev, "riskId", riskID)
-		return fmt.Errorf("no deliverable recipients")
-	}
-
-	return d.sendRiskEventToEmails(ctx, ev, riskID, emails, actor, comment)
+	return emails
 }
 
 // sendRiskEventToEmails is the tail of sendRiskEvent — load the risk detail,

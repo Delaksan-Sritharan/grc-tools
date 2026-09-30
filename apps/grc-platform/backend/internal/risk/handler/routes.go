@@ -99,6 +99,11 @@ type Deps struct {
 	// Nil disables the manual-trigger endpoint. Mirrors audit's
 	// Deps.TriggerReminderJob.
 	TriggerEscalationJob func(ctx context.Context) error
+	// TriggerReminderJob runs the daily due-date reminder sweep on demand —
+	// wired in cmd/server/main.go to the reminder job's RunOnce, kept as a
+	// plain function for the same no-import-cycle reason as
+	// TriggerEscalationJob. Nil disables the manual-trigger endpoint.
+	TriggerReminderJob func(ctx context.Context) error
 	// ActivityLog records reference-data mutations to admin_activity_log.
 	ActivityLog *adminactivity.Client
 }
@@ -113,6 +118,7 @@ type Deps struct {
 func RegisterRoutes(mux routeguard.Router, deps Deps) {
 	d := &deps
 	ejh := &escalationJobHandler{trigger: deps.TriggerEscalationJob}
+	rjh := &reminderJobHandler{trigger: deps.TriggerReminderJob}
 
 	// Teams
 	mux.HandleFunc("GET /api/v1/risks/teams", d.handleListTeams)
@@ -210,6 +216,11 @@ func RegisterRoutes(mux routeguard.Router, deps Deps) {
 	// without waiting for its fixed daily time. Literal "escalations" first
 	// segment, so it never collides with the /{id}/escalate route above.
 	mux.HandleFunc("POST /api/v1/risks/escalations/run", ejh.run)
+
+	// Manual trigger for the whole daily due-date reminder sweep. Literal
+	// "reminders" first segment, like "escalations" above, so it never
+	// collides with the /{id} routes.
+	mux.HandleFunc("POST /api/v1/risks/reminders/run", rjh.run)
 
 	// Full risk history — every workflow event and field edit, behind the
 	// drawer's History tab.

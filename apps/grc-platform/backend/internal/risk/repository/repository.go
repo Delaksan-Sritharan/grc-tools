@@ -122,6 +122,21 @@ type EscalationRepository interface {
 	Resolve(ctx context.Context, riskID int, updatedBy string) error
 }
 
+// ReminderRepository is the data-access contract for the due-date reminder
+// sweep's de-dup log (risk_reminder). Claim/ReleaseClaim only: nothing ever
+// reads these rows back, they exist to answer "has this reminder already gone
+// out?" atomically across replicas.
+type ReminderRepository interface {
+	// Claim atomically reserves one (risk, tier, due date) reminder — the
+	// insert succeeding IS the de-dup decision, and the caller that wins it
+	// owns sending the email. claimed=false means another replica's sweep
+	// claimed it first; not an error.
+	Claim(ctx context.Context, riskID int, reminderType, dueDateSnapshot string) (claimed bool, reminderID int64, err error)
+	// ReleaseClaim deletes a claim row so the reminder is sendable again —
+	// called only when the email failed after the claim succeeded.
+	ReleaseClaim(ctx context.Context, reminderID int64) error
+}
+
 // HistoryRepository is the data-access contract for a risk's history — the
 // risk_change_log table, which holds both field diffs and workflow events.
 type HistoryRepository interface {

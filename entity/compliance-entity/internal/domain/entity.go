@@ -1422,6 +1422,35 @@ type ListRiskAssessmentsResponse struct {
 }
 
 // =============================================================================
+// Risk Reminder (risk_reminder) — the due-date reminder sweep's de-dup log.
+// One row per reminder sent, keyed per risk/tier/due date rather than per
+// recipient, since one email covers everyone on the risk. See
+// risk_schema.sql's risk_reminder comment.
+// =============================================================================
+
+// ClaimRiskReminderRequest is the payload for POST /risk/reminders/claim — the
+// reminder sweep's atomic de-dup claim. The insert it triggers either succeeds
+// (the caller now owns sending this reminder) or collides on uq_risk_reminder
+// (another replica's sweep already claimed it). This is not a general-purpose
+// insert: it is the only way a row gets into risk_reminder.
+type ClaimRiskReminderRequest struct {
+	RiskID int `json:"riskId"`
+	// ReminderType must be DUE_IN_15_DAYS, DUE_IN_5_DAYS or DUE_TODAY.
+	ReminderType string `json:"reminderType"`
+	// DueDateSnapshot is required (YYYY-MM-DD) — a claim with no date could
+	// not be de-duplicated against a later run.
+	DueDateSnapshot string `json:"dueDateSnapshot"`
+}
+
+// ClaimRiskReminderResponse is returned by POST /risk/reminders/claim. Claimed
+// is false (with ID unset) when another caller already claimed this reminder —
+// the normal outcome of two replicas' sweeps racing, not an error.
+type ClaimRiskReminderResponse struct {
+	Claimed bool  `json:"claimed"`
+	ID      int64 `json:"id,omitempty"`
+}
+
+// =============================================================================
 // Audit Trail (audit_trail) — append-only
 // =============================================================================
 

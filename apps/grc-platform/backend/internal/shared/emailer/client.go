@@ -216,6 +216,19 @@ const (
 	// sent the same two-call way as EventEscalated: notifyRiskEvent to the
 	// three named roles, notifyComplianceAdmins for the role-wide one.
 	EventClosed RiskEvent = "CLOSED"
+	// EventDueIn15Days, EventDueIn5Days and EventDueToday are the due-date
+	// reminder tiers, sent by the daily sweep (internal/risk/job) as a risk's
+	// implementation_date approaches. Which tiers a risk gets depends on its
+	// effective (residual) level: HIGH all three, MEDIUM the last two, LOW
+	// only EventDueToday.
+	//
+	// Their "Who needs to act" block names only the Action Owner and the Risk
+	// Assigner, although the email also goes to the Risk Owner (on the due
+	// date) and the compliance roles — the same split EventEscalated draws,
+	// where the extra recipients are being kept informed rather than tasked.
+	EventDueIn15Days RiskEvent = "DUE_IN_15_DAYS"
+	EventDueIn5Days  RiskEvent = "DUE_IN_5_DAYS"
+	EventDueToday    RiskEvent = "DUE_TODAY"
 )
 
 // RiskEventInfo carries everything any template might render. Fields not
@@ -235,7 +248,12 @@ type RiskEventInfo struct {
 	Actor string
 	// Comment carries a rejection reason or an escalation note. Omitted from
 	// the body when empty.
-	Comment   string
+	Comment string
+	// DueDate is the risk's implementation_date (YYYY-MM-DD), rendered as an
+	// "Implementation date" row. Set only by the due-date reminders, for which
+	// the date IS the message; every other event leaves it empty and the body
+	// omits the row, exactly as it does for Actor and Comment.
+	DueDate   string
 	DetailURL string
 	// People maps a role name (RoleRiskAssigner and friends) to the person
 	// filling it, already formatted as "Display Name (email)". Only the roles
@@ -389,6 +407,29 @@ var eventTemplates = map[RiskEvent]eventTemplate{
 		// No actions: a lead is being informed, not assigned a step. The
 		// "Who needs to act" block is omitted entirely.
 	},
+	EventDueIn15Days: {
+		lead: "This risk's implementation date is 15 days away.",
+		// No actorLabel: the daily sweep sends these, and "Sent by: system"
+		// tells the reader nothing they can act on.
+		actions: []roleInstruction{
+			{RoleActionOwner, "Complete the outstanding action plan steps."},
+			{RoleRiskAssigner, "Make sure remediation is finished and submitted for completion approval before the implementation date."},
+		},
+	},
+	EventDueIn5Days: {
+		lead: "This risk's implementation date is 5 days away.",
+		actions: []roleInstruction{
+			{RoleActionOwner, "Complete the outstanding action plan steps."},
+			{RoleRiskAssigner, "Make sure remediation is finished and submitted for completion approval before the implementation date."},
+		},
+	},
+	EventDueToday: {
+		lead: "This risk's implementation date is today. If remediation is not submitted for completion approval, the risk will be escalated tomorrow.",
+		actions: []roleInstruction{
+			{RoleActionOwner, "Complete the outstanding action plan steps."},
+			{RoleRiskAssigner, "Submit the risk for completion approval today."},
+		},
+	},
 	EventClosed: {
 		lead:       "This risk has cleared compliance closure and is now closed. No further action is required.",
 		actorLabel: "Closed by",
@@ -435,6 +476,10 @@ var bodyTemplate = template.Must(template.New("riskEvent").Parse(`<html>
 <td width="170" valign="top" style="padding:6px 12px 6px 0; color:#57606a;">Risk Level</td>
 <td valign="top" style="padding:6px 0;">{{.Info.RiskLevel}}</td>
 </tr>
+{{if .Info.DueDate}}<tr>
+<td width="170" valign="top" style="padding:6px 12px 6px 0; color:#57606a;">Implementation date</td>
+<td valign="top" style="padding:6px 0;">{{.Info.DueDate}}</td>
+</tr>{{end}}
 {{if .Info.Actor}}<tr>
 <td width="170" valign="top" style="padding:6px 12px 6px 0; color:#57606a;">{{.ActorLabel}}</td>
 <td valign="top" style="padding:6px 0;">{{.Info.Actor}}</td>

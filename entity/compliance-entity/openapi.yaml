@@ -41,6 +41,7 @@ tags:
 - name: Risk Assessments
 - name: Risk Categories
 - name: Audit Notifications
+- name: Risk Reminders
 - name: Admin Activity Log
 paths:
   /health:
@@ -3455,6 +3456,53 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /risk/reminders/claim:
+    post:
+      tags:
+      - Risk Reminders
+      summary: Atomically claim a due-date reminder before sending it
+      description: The risk due-date reminder sweep's de-dup guard. Production runs several backend replicas, each firing its own daily sweep, so the insert behind this call is what decides which one sends the email. Losing the race returns claimed=false with a 200 — a normal outcome, not an error. Keyed per risk, tier and due date rather than per recipient, since one email covers everyone on the risk.
+      operationId: claimRiskReminder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClaimRiskReminderRequest'
+      responses:
+        '200':
+          description: Whether this caller now owns sending the reminder
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClaimRiskReminderResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /risk/reminders/{id}/claim:
+    delete:
+      tags:
+      - Risk Reminders
+      summary: Release a claim whose email failed
+      description: Puts the reminder back in play so a later run on the same day sends it. Only useful the same day — a tier fires on its exact day and is never sent late.
+      operationId: releaseRiskReminderClaim
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+      responses:
+        '204':
+          description: No content
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /admin-activity-log:
     post:
       tags:
@@ -5128,6 +5176,38 @@ components:
           type: integer
           format: int64
           description: Omitted when claimed is false.
+    ClaimRiskReminderRequest:
+      type: object
+      required:
+      - riskId
+      - reminderType
+      - dueDateSnapshot
+      properties:
+        riskId:
+          type: integer
+          description: Must be a positive integer.
+        reminderType:
+          $ref: '#/components/schemas/RiskReminderType'
+        dueDateSnapshot:
+          type: string
+          format: date
+          description: The risk's implementation_date this reminder is for (YYYY-MM-DD). Part of the de-dup key, so moving the deadline starts a fresh set of reminders.
+    ClaimRiskReminderResponse:
+      type: object
+      properties:
+        claimed:
+          type: boolean
+        id:
+          type: integer
+          format: int64
+          description: Omitted when claimed is false.
+    RiskReminderType:
+      type: string
+      description: Which due-date tier this reminder is. HIGH risks get all three, MEDIUM the last two, LOW only DUE_TODAY.
+      enum:
+      - DUE_IN_15_DAYS
+      - DUE_IN_5_DAYS
+      - DUE_TODAY
     AdminActivityAction:
       type: string
       enum:
