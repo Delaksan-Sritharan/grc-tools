@@ -102,9 +102,12 @@ func (d *Deps) sendDueReminder(ctx context.Context, riskID int, tier, dueDate st
 	recipients := d.reminderRecipients(ctx, detail, plans, tier)
 	emails := d.resolveRecipientEmails(ctx, ev, riskID, recipients)
 	if len(emails) == 0 {
-		// Nothing to do, and a retry would resolve the same empty set — so
-		// this is an error for visibility, not a reason to release the claim
-		// and try again tomorrow.
+		// An error, not a silent no-op: runOnce releases the claim on any
+		// error it gets back, exactly as it does for a failed send, so a
+		// later run this same day (or the next scheduled sweep) retries this
+		// risk. That matters because the cause is often transient — a
+		// directory lookup blip resolving one of these addresses — and a
+		// retry costs nothing worse than repeating this same warning.
 		slog.Warn("risk reminder: no deliverable recipients", "riskId", riskID, "tier", tier)
 		return fmt.Errorf("no deliverable recipients")
 	}
