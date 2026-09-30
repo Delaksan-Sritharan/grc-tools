@@ -48,6 +48,9 @@ var validRiskReminderTypes = map[string]bool{
 // which breaks de-dup silently — the whole point of the claim.
 var isoDate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 
+// ClaimRiskReminder validates the request before it reaches MySQL, then
+// makes the claim. claimed=false with a nil error means another caller
+// already holds it.
 func (s *riskReminderService) ClaimRiskReminder(ctx context.Context, req domain.ClaimRiskReminderRequest) (bool, int64, error) {
 	if req.RiskID <= 0 {
 		return false, 0, &apierror.ValidationError{Msg: "riskId must be a positive integer"}
@@ -58,13 +61,14 @@ func (s *riskReminderService) ClaimRiskReminder(ctx context.Context, req domain.
 	if !isoDate.MatchString(req.DueDateSnapshot) {
 		return false, 0, &apierror.ValidationError{Msg: "dueDateSnapshot must be a date in YYYY-MM-DD format"}
 	}
-	rem, claimed, err := s.repo.ClaimRiskReminder(ctx, req)
+	id, claimed, err := s.repo.ClaimRiskReminder(ctx, req)
 	if err != nil || !claimed {
 		return false, 0, err
 	}
-	return true, rem.ID, nil
+	return true, id, nil
 }
 
+// ReleaseRiskReminderClaim validates the id, then deletes that claim row.
 func (s *riskReminderService) ReleaseRiskReminderClaim(ctx context.Context, id int64) error {
 	if id <= 0 {
 		return &apierror.ValidationError{Msg: "id must be a positive integer"}

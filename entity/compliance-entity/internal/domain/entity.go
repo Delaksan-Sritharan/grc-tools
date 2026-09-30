@@ -1428,20 +1428,6 @@ type ListRiskAssessmentsResponse struct {
 // risk_schema.sql's risk_reminder comment.
 // =============================================================================
 
-// RiskReminder is one claimed (and therefore sent) due-date reminder.
-type RiskReminder struct {
-	ID     int64 `json:"id"`
-	RiskID int   `json:"riskId"`
-	// ReminderType is one of the three tiers — see ClaimRiskReminderRequest.
-	ReminderType string `json:"reminderType"`
-	// DueDateSnapshot is the implementation_date this reminder was sent for,
-	// YYYY-MM-DD. Part of the de-dup key, so moving the deadline starts a
-	// fresh set of reminders instead of being suppressed by the old ones.
-	DueDateSnapshot string    `json:"dueDateSnapshot"`
-	CreatedBy       *string   `json:"createdBy"`
-	CreatedOn       time.Time `json:"createdOn"`
-}
-
 // ClaimRiskReminderRequest is the payload for POST /risk/reminders/claim — the
 // reminder sweep's atomic de-dup claim. The insert it triggers either succeeds
 // (the caller now owns sending this reminder) or collides on uq_risk_reminder

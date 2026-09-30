@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/go-sql-driver/mysql"
@@ -29,6 +28,7 @@ import (
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/domain"
 )
 
+// newRiskReminderRepoMock returns a repo over a sqlmock DB, closed at test end.
 func newRiskReminderRepoMock(t *testing.T) (*riskReminderRepo, sqlmock.Sqlmock) {
 	t.Helper()
 	db, mock, err := sqlmock.New()
@@ -39,6 +39,7 @@ func newRiskReminderRepoMock(t *testing.T) (*riskReminderRepo, sqlmock.Sqlmock) 
 	return &riskReminderRepo{db: db}, mock
 }
 
+// claimReq is a valid claim request shared by the claim tests.
 func claimReq() domain.ClaimRiskReminderRequest {
 	return domain.ClaimRiskReminderRequest{
 		RiskID:          42,
@@ -48,29 +49,26 @@ func claimReq() domain.ClaimRiskReminderRequest {
 }
 
 // TestClaimRiskReminder_Wins covers the sweep that gets there first: the
-// insert succeeds and the row it wrote comes back, so this caller owns
-// sending the email.
+// insert succeeds and its id comes back, so this caller owns sending the
+// email. No read-back query is expected — sqlmock fails the test if one runs,
+// which is the point: a failing read-back after the committed insert would
+// strand the claim.
 func TestClaimRiskReminder_Wins(t *testing.T) {
 	repo, mock := newRiskReminderRepoMock(t)
 
 	mock.ExpectExec(re("INSERT INTO risk_reminder")).
 		WithArgs(42, "DUE_IN_5_DAYS", "2026-10-06").
 		WillReturnResult(sqlmock.NewResult(7, 1))
-	mock.ExpectQuery(re("SELECT id, risk_id, reminder_type")).
-		WithArgs(int64(7)).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "risk_id", "reminder_type", "due_date_snapshot", "created_by", "created_at",
-		}).AddRow(7, 42, "DUE_IN_5_DAYS", "2026-10-06", "system", time.Now()))
 
-	rem, claimed, err := repo.ClaimRiskReminder(context.Background(), claimReq())
+	id, claimed, err := repo.ClaimRiskReminder(context.Background(), claimReq())
 	if err != nil {
 		t.Fatalf("ClaimRiskReminder: %v", err)
 	}
 	if !claimed {
 		t.Fatal("claimed = false, want true")
 	}
-	if rem.ID != 7 || rem.DueDateSnapshot != "2026-10-06" {
-		t.Fatalf("got %+v, want id 7 on 2026-10-06", rem)
+	if id != 7 {
+		t.Fatalf("id = %d, want 7", id)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -89,15 +87,15 @@ func TestClaimRiskReminder_AlreadyClaimed(t *testing.T) {
 		WithArgs(42, "DUE_IN_5_DAYS", "2026-10-06").
 		WillReturnError(&mysql.MySQLError{Number: 1062, Message: "Duplicate entry"})
 
-	rem, claimed, err := repo.ClaimRiskReminder(context.Background(), claimReq())
+	id, claimed, err := repo.ClaimRiskReminder(context.Background(), claimReq())
 	if err != nil {
 		t.Fatalf("duplicate key must not be an error, got %v", err)
 	}
 	if claimed {
 		t.Fatal("claimed = true, want false")
 	}
-	if rem != nil {
-		t.Fatalf("reminder = %+v, want nil", rem)
+	if id != 0 {
+		t.Fatalf("id = %d, want 0", id)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

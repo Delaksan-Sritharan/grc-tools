@@ -30,16 +30,20 @@ import (
 // reaches MySQL malformed is the failure mode this validation exists to stop.
 type stubRiskReminderRepo struct{ called bool }
 
-func (s *stubRiskReminderRepo) ClaimRiskReminder(context.Context, domain.ClaimRiskReminderRequest) (*domain.RiskReminder, bool, error) {
+// ClaimRiskReminder records the call and always wins the claim, with id 1.
+func (s *stubRiskReminderRepo) ClaimRiskReminder(context.Context, domain.ClaimRiskReminderRequest) (int64, bool, error) {
 	s.called = true
-	return &domain.RiskReminder{ID: 1}, true, nil
+	return 1, true, nil
 }
 
+// ReleaseRiskReminderClaim records the call and always succeeds.
 func (s *stubRiskReminderRepo) ReleaseRiskReminderClaim(context.Context, int64) error {
 	s.called = true
 	return nil
 }
 
+// TestClaimRiskReminder_RejectsBadRequests checks that every malformed claim
+// is a ValidationError and never reaches the repository.
 func TestClaimRiskReminder_RejectsBadRequests(t *testing.T) {
 	valid := domain.ClaimRiskReminderRequest{RiskID: 42, ReminderType: "DUE_TODAY", DueDateSnapshot: "2026-10-06"}
 
@@ -75,6 +79,8 @@ func TestClaimRiskReminder_RejectsBadRequests(t *testing.T) {
 	}
 }
 
+// TestClaimRiskReminder_AcceptsEveryTier checks that all three tier names
+// pass validation and return the repository's claim id.
 func TestClaimRiskReminder_AcceptsEveryTier(t *testing.T) {
 	for _, tier := range []string{"DUE_IN_15_DAYS", "DUE_IN_5_DAYS", "DUE_TODAY"} {
 		t.Run(tier, func(t *testing.T) {
@@ -94,6 +100,8 @@ func TestClaimRiskReminder_AcceptsEveryTier(t *testing.T) {
 	}
 }
 
+// TestReleaseRiskReminderClaim_RejectsNonPositiveID checks that a zero id is
+// rejected before the repository is called.
 func TestReleaseRiskReminderClaim_RejectsNonPositiveID(t *testing.T) {
 	repo := &stubRiskReminderRepo{}
 	svc := NewRiskReminderService(repo)

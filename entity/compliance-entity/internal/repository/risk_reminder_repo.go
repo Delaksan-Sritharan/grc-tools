@@ -32,7 +32,7 @@ import (
 type RiskReminderRepository interface {
 	// ClaimRiskReminder is the reminder sweep's atomic de-dup claim — see
 	// risk_schema.sql's risk_reminder comment.
-	ClaimRiskReminder(ctx context.Context, req domain.ClaimRiskReminderRequest) (*domain.RiskReminder, bool, error)
+	ClaimRiskReminder(ctx context.Context, req domain.ClaimRiskReminderRequest) (id int64, claimed bool, err error)
 	// ReleaseRiskReminderClaim deletes a claim row so its reminder becomes
 	// sendable again — used only when the email failed after the claim
 	// succeeded.
@@ -52,7 +52,12 @@ func NewRiskReminderRepository(db *sql.DB) RiskReminderRepository {
 // reminder, which is what keeps the several backend replicas — each running
 // its own daily sweep — from all emailing the same risk. Losing the race is
 // reported as claimed=false, not an error.
-func (r *riskReminderRepo) ClaimRiskReminder(ctx context.Context, req domain.ClaimRiskReminderRequest) (*domain.RiskReminder, bool, error) {
+//
+// The claim id comes straight from the insert, with no read-back: the insert
+// has already committed, so any failure after it would leave a claim nobody
+// knows they hold, and the sweep fails closed on an error — the reminder
+// would never be sent.
+func (r *riskReminderRepo) ClaimRiskReminder(ctx context.Context, req domain.ClaimRiskReminderRequest) (int64, bool, error) {
 	res, err := r.db.ExecContext(ctx,
 		`INSERT INTO risk_reminder (risk_id, reminder_type, due_date_snapshot, created_by)
 		 VALUES (?, ?, ?, 'system')`,
@@ -60,30 +65,18 @@ func (r *riskReminderRepo) ClaimRiskReminder(ctx context.Context, req domain.Cla
 	)
 	if err != nil {
 		if isDuplicateKey(err) {
-			return nil, false, nil
+			return 0, false, nil
 		}
 		if isFKViolation(err) {
-			return nil, false, &apierror.NotFoundError{Msg: fmt.Sprintf("risk %d not found", req.RiskID)}
+			return 0, false, &apierror.NotFoundError{Msg: fmt.Sprintf("risk %d not found", req.RiskID)}
 		}
-		return nil, false, fmt.Errorf("risk_reminder.Claim: %w", err)
+		return 0, false, fmt.Errorf("risk_reminder.Claim: %w", err)
 	}
 	id, err := res.LastInsertId()
 	if err != nil {
-		return nil, false, fmt.Errorf("risk_reminder.Claim last insert id: %w", err)
+		return 0, false, fmt.Errorf("risk_reminder.Claim last insert id: %w", err)
 	}
-	rem, err := r.getRiskReminderByID(ctx, id)
-	if err != nil {
-		return nil, false, err
-	}
-	return rem, true, nil
-}
-
-func (r *riskReminderRepo) getRiskReminderByID(ctx context.Context, id int64) (*domain.RiskReminder, error) {
-	return scanRiskReminder(r.db.QueryRowContext(ctx,
-		// DATE_FORMAT so the DATE comes back as the YYYY-MM-DD string the API
-		// speaks, matching how every other date on a risk is read.
-		`SELECT id, risk_id, reminder_type, DATE_FORMAT(due_date_snapshot, '%Y-%m-%d'), created_by, created_at
-		 FROM risk_reminder WHERE id = ?`, id))
+	return id, true, nil
 }
 
 // ReleaseRiskReminderClaim deletes a claim row so the reminder is sendable
@@ -95,19 +88,4 @@ func (r *riskReminderRepo) ReleaseRiskReminderClaim(ctx context.Context, id int6
 		return fmt.Errorf("risk_reminder.ReleaseClaim: %w", err)
 	}
 	return nil
-}
-
-func scanRiskReminder(s scanner) (*domain.RiskReminder, error) {
-	var rem domain.RiskReminder
-	var createdBy sql.NullString
-	if err := s.Scan(
-		&rem.ID, &rem.RiskID, &rem.ReminderType, &rem.DueDateSnapshot,
-		&createdBy, &rem.CreatedOn,
-	); err != nil {
-		return nil, err
-	}
-	if createdBy.Valid {
-		rem.CreatedBy = &createdBy.String
-	}
-	return &rem, nil
 }
