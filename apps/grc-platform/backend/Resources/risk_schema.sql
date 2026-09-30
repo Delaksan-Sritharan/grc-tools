@@ -524,5 +524,43 @@ CREATE TABLE IF NOT EXISTS risk_assessment (
   CONSTRAINT fk_risk_assessment_score FOREIGN KEY (score_id) REFERENCES risk_score(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- -----------------------------------------------------------------------------
+-- risk_reminder
+--
+-- The due-date reminder job's de-dup log: one row per reminder actually sent
+-- for a risk, tier and due date. The insert IS the claim — production runs
+-- several backend replicas, each firing its own daily sweep, so the unique key
+-- below is what makes exactly one of them send the email. A sweep that loses
+-- the race sees a duplicate-key error and skips the item; one whose send then
+-- fails deletes its row again so a later run on the same day retries it.
+-- Same pattern as audit_notification's reminder claim (audit_schema.sql).
+--
+-- Keyed per RISK, not per recipient: one reminder email covers every recipient
+-- (Risk Assigner, Action Owners, the compliance roles, and the Risk Owner on
+-- the due date itself), so there is nothing per-person to record. No recipient
+-- columns at all — recipients are resolved fresh at send time.
+--
+-- due_date_snapshot is the implementation_date the reminder was sent for, so
+-- moving the deadline (an approved amendment) starts a fresh set of reminders
+-- rather than being suppressed by the old ones.
+--
+-- ON DELETE CASCADE, like risk_escalation: a reminder log row has no meaning
+-- without its risk, and the migration rollback (operations/
+-- risk-register-migration/rollback.sql) hard-deletes imported risks.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS risk_reminder (
+  id                BIGINT       NOT NULL AUTO_INCREMENT,
+  risk_id           INT          NOT NULL,
+  reminder_type     ENUM('DUE_IN_15_DAYS','DUE_IN_5_DAYS','DUE_TODAY') NOT NULL,
+  due_date_snapshot DATE         NOT NULL COMMENT 'The implementation_date this reminder was sent for',
+  created_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_by        VARCHAR(255) NULL COMMENT 'Actor that wrote the row; the daily sweep writes system',
+  PRIMARY KEY (id),
+  -- The de-dup gate. Leftmost column is risk_id, so this also serves every
+  -- lookup by risk and no separate index is needed.
+  UNIQUE KEY uq_risk_reminder (risk_id, reminder_type, due_date_snapshot),
+  CONSTRAINT fk_risk_reminder_risk FOREIGN KEY (risk_id) REFERENCES risk(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 
 SET FOREIGN_KEY_CHECKS = 1;
