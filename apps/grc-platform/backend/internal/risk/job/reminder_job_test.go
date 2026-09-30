@@ -42,6 +42,7 @@ type reminderRisks struct {
 	queries    int
 }
 
+// List pages over the fixed risks and records the filter it was given.
 func (f *reminderRisks) List(_ context.Context, filter model.ListRisksFilter) (*model.RiskListPage, error) {
 	f.queries++
 	f.lastFilter = filter
@@ -73,10 +74,13 @@ type fakeClaimer struct {
 	nextID    int64
 }
 
+// newFakeClaimer returns a claimer with no claims taken and no failures.
 func newFakeClaimer() *fakeClaimer {
 	return &fakeClaimer{taken: map[claimCall]bool{}, failClaim: map[int]bool{}}
 }
 
+// Claim wins the first claim per (risk, tier, date) and loses any repeat,
+// like the unique key. It fails for risk ids in failClaim.
 func (f *fakeClaimer) Claim(_ context.Context, riskID int, tier, dueDate string) (bool, int64, error) {
 	c := claimCall{riskID, tier, dueDate}
 	f.calls = append(f.calls, c)
@@ -91,6 +95,7 @@ func (f *fakeClaimer) Claim(_ context.Context, riskID int, tier, dueDate string)
 	return true, f.nextID, nil
 }
 
+// ReleaseClaim frees a taken claim, or fails when failRelea is set.
 func (f *fakeClaimer) ReleaseClaim(_ context.Context, id int64) error {
 	if f.failRelea {
 		return errors.New("still unreachable")
@@ -113,6 +118,8 @@ type sentReminder struct {
 	dueDate string
 }
 
+// newTestJob builds a ReminderJob whose notify appends to sent, and fails for
+// risk ids in failIDs.
 func newTestJob(risks riskLister, claim reminderClaimer, sent *[]sentReminder, failIDs map[int]bool) *ReminderJob {
 	return NewReminderJob(risks, claim, func(_ context.Context, riskID int, tier, dueDate string) error {
 		if failIDs[riskID] {

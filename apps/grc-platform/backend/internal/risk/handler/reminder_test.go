@@ -37,6 +37,7 @@ import (
 // of Deps is never reached once GetByID panics.
 type panickingRiskSvc struct{ riskservice.RiskService }
 
+// GetByID panics, standing in for any unexpected failure inside the send.
 func (panickingRiskSvc) GetByID(context.Context, int) (*model.RiskDetail, error) {
 	panic("simulated failure deep in a dependency")
 }
@@ -47,6 +48,7 @@ func (panickingRiskSvc) GetByID(context.Context, int) (*model.RiskDetail, error)
 // roles get listed, not how a person is rendered.
 type reminderUsers struct{ user.Repository }
 
+// GetByID returns an ACTIVE user with the requested id.
 func (reminderUsers) GetByID(_ context.Context, id int) (*user.User, error) {
 	return &user.User{ID: id, UUID: "uuid", Status: "ACTIVE"}, nil
 }
@@ -62,6 +64,8 @@ type stubGrants struct {
 	candidateCall int
 }
 
+// Candidates records the privilege and scope it was asked for, and returns
+// the fixed candidates.
 func (s *stubGrants) Candidates(_ context.Context, privilegeName string, teamIDs []int) ([]grant.Candidate, error) {
 	s.candidateCall++
 	s.gotPrivilege = privilegeName
@@ -69,6 +73,7 @@ func (s *stubGrants) Candidates(_ context.Context, privilegeName string, teamIDs
 	return s.candidates, s.err
 }
 
+// detailFor builds a risk with the given assigner, owner and source register.
 func detailFor(assignerID, ownerID, registerID int) *model.RiskDetail {
 	return &model.RiskDetail{
 		ID:               1,
@@ -80,6 +85,7 @@ func detailFor(assignerID, ownerID, registerID int) *model.RiskDetail {
 	}
 }
 
+// plan builds an action plan owned by ownerID in the given status.
 func plan(ownerID int, status string) *model.ActionPlan {
 	return &model.ActionPlan{ActionOwnerID: &ownerID, Status: status}
 }

@@ -53,6 +53,8 @@ func (r *reminderRepository) Claim(ctx context.Context, riskID int, reminderType
 	return resp.Claimed, resp.ID, nil
 }
 
+// ReleaseClaim asks the entity to delete a claim row whose email failed, so a
+// later run the same day retries that reminder.
 func (r *reminderRepository) ReleaseClaim(ctx context.Context, reminderID int64) error {
 	return r.c.Delete(ctx, fmt.Sprintf("/risk/reminders/%d/claim", reminderID))
 }

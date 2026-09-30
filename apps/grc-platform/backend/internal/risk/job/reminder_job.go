@@ -89,6 +89,10 @@ func (j *ReminderJob) RunOnce(ctx context.Context) error {
 	return j.runOnce(ctx)
 }
 
+// runOnce is one sweep: page through IN_REMEDIATION risks due within the
+// reminder horizon, and for each one whose tier falls today, claim it, send
+// it, and release the claim if the send failed. RunOnce owns the
+// single-flight guard; this owns the work.
 func (j *ReminderJob) runOnce(parent context.Context) (runErr error) {
 	// This can execute in a bare goroutine (the scheduler runs each sweep in
 	// its own), where an unrecovered panic would take the whole process down.
@@ -209,6 +213,8 @@ func (j *ReminderJob) release(ctx context.Context, reminderID int64, riskID int,
 
 const dateLayout = "2006-01-02"
 
+// dateOnly truncates t to midnight UTC, so the tier arithmetic works in
+// whole days.
 func dateOnly(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 }
