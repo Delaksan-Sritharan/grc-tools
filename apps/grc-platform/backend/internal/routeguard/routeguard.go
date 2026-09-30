@@ -169,6 +169,7 @@ var externalVisible = map[string]bool{
 	"POST /api/v1/risks/{id}/escalate":                              false,
 	"GET /api/v1/risks/{id}/escalations":                            false,
 	"POST /api/v1/risks/escalations/run":                            false,
+	"POST /api/v1/risks/reminders/run":                              false,
 	"GET /api/v1/risks/{id}/history":                                false,
 	"POST /api/v1/risks/{id}/escalations/{escalationId}/comment":    false,
 	"POST /api/v1/risks/{id}/evidence":                              false,
