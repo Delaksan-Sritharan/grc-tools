@@ -193,6 +193,18 @@ type RiskAssessmentService interface {
 	ListRiskAssessments(ctx context.Context, riskID int) (domain.ListRiskAssessmentsResponse, error)
 }
 
+// RiskReminderService defines operations on risk_reminder — only the
+// due-date reminder sweep's claim and release; nothing reads these rows.
+type RiskReminderService interface {
+	// ClaimRiskReminder is the sweep's atomic de-dup claim. claimed=false
+	// (id=0) means another replica's sweep already claimed this reminder;
+	// not an error.
+	ClaimRiskReminder(ctx context.Context, req domain.ClaimRiskReminderRequest) (claimed bool, id int64, err error)
+	// ReleaseRiskReminderClaim deletes a claim row so the reminder can be
+	// retried by a later run the same day.
+	ReleaseRiskReminderClaim(ctx context.Context, id int64) error
+}
+
 // AuditTrailService defines operations on audit_trail.
 type AuditTrailService interface {
 	CreateAuditTrail(ctx context.Context, auditID int, req domain.CreateAuditTrailRequest) (domain.AuditTrail, error)

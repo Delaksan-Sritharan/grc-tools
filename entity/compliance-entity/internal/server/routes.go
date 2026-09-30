@@ -62,6 +62,7 @@ func NewRouter(db *sql.DB, store *storage.Service) http.Handler {
 	riskChangeLogRepo := repository.NewRiskChangeLogRepository(db)
 	riskEvidenceRepo := repository.NewRiskEvidenceRepository(db)
 	riskAssessmentRepo := repository.NewRiskAssessmentRepository(db)
+	riskReminderRepo := repository.NewRiskReminderRepository(db)
 	privilegeRepo := repository.NewPrivilegeRepository(db)
 	grantRepo := repository.NewGrantRepository(db)
 	riskDashboardRepo := repository.NewRiskDashboardRepository(db)
@@ -101,6 +102,7 @@ func NewRouter(db *sql.DB, store *storage.Service) http.Handler {
 	)
 	riskEvidenceSvc := service.NewRiskEvidenceService(riskEvidenceRepo, riskActionPlanRepo)
 	riskAssessmentSvc := service.NewRiskAssessmentService(riskAssessmentRepo)
+	riskReminderSvc := service.NewRiskReminderService(riskReminderRepo)
 	privilegeSvc := service.NewPrivilegeService(privilegeRepo)
 	// Deliberately NOT wrapped in a cache, unlike userSvc above: grants are on
 	// the revocation path and must be fresh on every request.
@@ -136,6 +138,7 @@ func NewRouter(db *sql.DB, store *storage.Service) http.Handler {
 	riskChangeLogH := handler.NewRiskChangeLogHandler(riskChangeLogSvc)
 	riskEvidenceH := handler.NewRiskEvidenceHandler(riskEvidenceSvc)
 	riskAssessmentH := handler.NewRiskAssessmentHandler(riskAssessmentSvc)
+	riskReminderH := handler.NewRiskReminderHandler(riskReminderSvc)
 	privilegeH := handler.NewPrivilegeHandler(privilegeSvc)
 	grantH := handler.NewGrantHandler(grantSvc)
 	riskDashboardH := handler.NewRiskDashboardHandler(riskDashboardSvc)
@@ -367,6 +370,13 @@ func NewRouter(db *sql.DB, store *storage.Service) http.Handler {
 	// Risk assessments (nested under risks)
 	mux.HandleFunc("POST /risks/{riskId}/assessments", riskAssessmentH.CreateRiskAssessment)
 	mux.HandleFunc("GET /risks/{riskId}/assessments", riskAssessmentH.ListRiskAssessments)
+
+	// Risk due-date reminders — claim/release only, for the GRC backend's
+	// daily sweep. Not nested under /risks/{riskId}: the claim is the sweep's
+	// own de-dup bookkeeping across replicas, not a sub-resource anyone reads
+	// off a risk, and nothing lists these rows.
+	mux.HandleFunc("POST /risk/reminders/claim", riskReminderH.ClaimRiskReminder)
+	mux.HandleFunc("DELETE /risk/reminders/{id}/claim", riskReminderH.ReleaseRiskReminderClaim)
 
 	// Admin activity log
 	mux.HandleFunc("POST /admin-activity-log", adminActivityLogH.CreateAdminActivityLog)
