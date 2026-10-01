@@ -1190,7 +1190,13 @@ function OEEvidenceSection({
                 <AIValidationCard auditId={control.auditId} controlId={control.id} variant="submitter" phase="population" />
               )}
               {canReviewEvidence && (
-                <PopulationReviewCard auditId={control.auditId} controlId={control.id} mode="review" onDecided={onStatusChange} />
+                <>
+                  {/* A reviewer-only account (no SubmitEvidence) gets no
+                      submitter-variant card above, so it needs its own hint
+                      here — same pairing as the evidence tab's reviewer card. */}
+                  <AIValidationCard auditId={control.auditId} controlId={control.id} variant="reviewer" phase="population" />
+                  <PopulationReviewCard auditId={control.auditId} controlId={control.id} mode="review" onDecided={onStatusChange} />
+                </>
               )}
               {!canReviewEvidence && (
                 <SectionCard icon={<Clock size={16} />} iconBg="transparent" title="Population Under Internal Review">
@@ -1265,17 +1271,16 @@ function OEEvidenceSection({
         </>
       )}
 
-      {/* Population AI Validation — placeholder until the agent exists (see
-          AIValidationCard's phase="population"). Placed after every
-          population-submission surface above (the persistent card, and
-          whichever step-0 sub-state is active) rather than before them, and
-          scoped to the population phase only (the same set the Overview tab
-          uses to decide which requirement text to show) so it steps aside
-          once the job moves to evidence. POPULATION_INTERNAL_REVIEW and
-          POPULATION_UNDER_VALIDATION are excluded here — they each get their
-          own placement right before their review/validate decision instead
-          (see above), between submission and that decision specifically,
-          rather than after both. */}
+      {/* Population AI Validation (AIValidationCard's phase="population").
+          Placed after every population-submission surface above (the
+          persistent card, and whichever step-0 sub-state is active) rather
+          than before them, and scoped to the population phase only (the same
+          set the Overview tab uses to decide which requirement text to show)
+          so it steps aside once the job moves to evidence.
+          POPULATION_INTERNAL_REVIEW and POPULATION_UNDER_VALIDATION are
+          excluded here — they each get their own placement right before
+          their review/validate decision instead (see above), between
+          submission and that decision specifically, rather than after both. */}
       {canSubmitEvidence && OE_POPULATION_PHASE_STATUSES.has(control.status) && !POPULATION_REVIEW_STATUSES.has(control.status) && (
         <AIValidationCard auditId={control.auditId} controlId={control.id} variant="submitter" phase="population" />
       )}

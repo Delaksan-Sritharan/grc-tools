@@ -193,6 +193,7 @@ const AI_TITLE: Record<AIValidationLog["result"], string | null> = {
   FAIL: "AI validation flagged gaps",
   UNCERTAIN: "AI validation inconclusive",
   ERROR: "AI validation could not complete",
+  SKIPPED: "AI validation skipped by submitter",
   PENDING: null, // in-progress, not a historical event
 };
 
@@ -200,6 +201,7 @@ const AI_BADGE: Partial<Record<AIValidationLog["result"], { label: string; color
   PASS: { label: "Pass", color: "#10B981" },
   FAIL: { label: "Gaps", color: "#EF4444" },
   UNCERTAIN: { label: "Uncertain", color: "#F59E0B" },
+  SKIPPED: { label: "Skipped", color: "#6B7280" },
 };
 
 function aiToEvent(a: AIValidationLog): TimelineEvent | null {
