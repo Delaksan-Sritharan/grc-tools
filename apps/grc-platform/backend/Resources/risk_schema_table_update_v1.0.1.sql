@@ -9,7 +9,14 @@
 -- The insert IS the claim: production runs several backend replicas, each
 -- firing the same daily sweep, so the unique key below is what makes exactly
 -- one of them send a given reminder. FK CASCADE to risk, matching
--- risk_escalation's pattern. Rollback: DROP TABLE risk_reminder;
+-- risk_escalation's pattern.
+--
+-- Rollback: DROP TABLE risk_reminder; — safe only before this table has
+-- accumulated real claims, i.e. before the reminder feature has run in this
+-- environment. Once it has, dropping and recreating the table discards the
+-- record of which reminders already went out; any risk whose tier still
+-- matches today's date on the next sweep after that will be reminded again.
+-- There is no way to recover that history once dropped.
 
 USE grc_platform;
 
