@@ -1791,13 +1791,16 @@ type ListAuditCommentsResponse struct {
 // Audit AI Validation Log (audit_ai_validation_log) — append-only
 // =============================================================================
 
-// AuditAIValidationLog is one AI validation run against an evidence submission.
-// Written by the async validation agent; read by compliance as review hints.
+// AuditAIValidationLog is one AI validation run against an evidence or
+// population submission. Written in-process by the GRC backend; read by
+// compliance as review hints. Exactly one of EvidenceID / PopulationID is set
+// (chk_ai_owner), mirroring AuditEvidenceFile's evidence/population split.
 type AuditAIValidationLog struct {
 	ID              int64     `json:"id"`
-	EvidenceID      int       `json:"evidenceId"`
+	EvidenceID      *int      `json:"evidenceId"`
+	PopulationID    *int      `json:"populationId"`
 	ControlID       int       `json:"controlId"`
-	Result          string    `json:"result"`    // PASS | FAIL | UNCERTAIN | PENDING | ERROR
+	Result          string    `json:"result"`    // PASS | FAIL | UNCERTAIN | PENDING | ERROR | SKIPPED
 	GapsFound       *string   `json:"gapsFound"` // JSON array of gap objects
 	Feedback        *string   `json:"feedback"`  // JSON array of submitter-facing action strings
 	Summary         *string   `json:"summary"`
@@ -1806,10 +1809,13 @@ type AuditAIValidationLog struct {
 	CreatedOn       time.Time `json:"createdOn"`
 }
 
-// CreateAuditAIValidationLogRequest is the payload for POST /evidence/{evidenceId}/ai-validations.
+// CreateAuditAIValidationLogRequest is the payload for
+// POST /evidence/{evidenceId}/ai-validations and
+// POST /populations/{populationId}/ai-validations — the owning id comes from
+// the path, not the body, on either route.
 type CreateAuditAIValidationLogRequest struct {
 	ControlID       int      `json:"controlId"`
-	Result          string   `json:"result"` // PASS | FAIL | UNCERTAIN | PENDING | ERROR
+	Result          string   `json:"result"` // PASS | FAIL | UNCERTAIN | PENDING | ERROR | SKIPPED
 	GapsFound       *string  `json:"gapsFound"`
 	Feedback        *string  `json:"feedback"`
 	Summary         *string  `json:"summary"`
@@ -1817,7 +1823,9 @@ type CreateAuditAIValidationLogRequest struct {
 	CreatedBy       string   `json:"createdBy"`
 }
 
-// ListAuditAIValidationLogsResponse is returned by GET /evidence/{evidenceId}/ai-validations.
+// ListAuditAIValidationLogsResponse is returned by
+// GET /evidence/{evidenceId}/ai-validations and
+// GET /populations/{populationId}/ai-validations.
 type ListAuditAIValidationLogsResponse struct {
 	Validations []AuditAIValidationLog `json:"validations"`
 }
