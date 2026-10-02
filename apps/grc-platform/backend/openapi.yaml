@@ -4956,16 +4956,8 @@ components:
           type: string
           nullable: true
           description: JSON array of gap objects.
-        feedback:
-          type: string
-          nullable: true
-          description: JSON array of submitter-facing action strings.
         summary:
           type: string
-          nullable: true
-        confidenceScore:
-          type: number
-          format: double
           nullable: true
         createdBy:
           type: string

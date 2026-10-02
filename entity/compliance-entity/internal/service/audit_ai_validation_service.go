@@ -51,9 +51,6 @@ func (s *aiValidationService) validateRequest(req *domain.CreateAuditAIValidatio
 	if req.CreatedBy == "" {
 		return &apierror.ValidationError{Msg: "createdBy is required"}
 	}
-	if req.ConfidenceScore != nil && (*req.ConfidenceScore < 0 || *req.ConfidenceScore > 1) {
-		return &apierror.ValidationError{Msg: "confidenceScore must be between 0 and 1"}
-	}
 	return nil
 }
 

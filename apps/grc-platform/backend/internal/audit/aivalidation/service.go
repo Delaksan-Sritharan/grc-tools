@@ -16,7 +16,7 @@
 
 // Package aivalidation is the in-process AI Validation feature: it assembles
 // the context for one evidence or population submission, calls the LLM with
-// a single forced tool call, and writes the advisory result back through the
+// a single tool call, and writes the advisory result back through the
 // Compliance Entity.
 //
 // Nothing here ever blocks a submission or changes evidence/population/
@@ -42,11 +42,8 @@ import (
 // a concurrent delete) — reported distinctly from a fetch failure.
 var errSubmissionNotFound = errors.New("submission not found")
 
-// submissionRef identifies which submission a job or log row belongs to.
-// Exactly one of EvidenceID / PopulationID is set, mirroring the DB's
-// chk_ai_owner constraint — this type is the single place that invariant is
-// expressed in this package, instead of a bare int pair threaded through
-// every function.
+// submissionRef identifies the submission a job or log row belongs to; exactly
+// one of EvidenceID / PopulationID is set (chk_ai_owner).
 type submissionRef struct {
 	EvidenceID   int
 	PopulationID int
@@ -72,19 +69,11 @@ func (r submissionRef) logAttr() slog.Attr {
 	return slog.Int("evidenceId", r.EvidenceID)
 }
 
-// createdBySentinel is the fixed AIValidationLog.CreatedBy value for every
-// row this package writes — there is no real user behind an in-process
-// trigger.
+// createdBySentinel is CreatedBy for every row written here; no user triggers it.
 const createdBySentinel = "system:ai-validation"
 
-// JobTimeout bounds one validation job (context assembly, the LLM call, and
-// the write path together). maxConcurrent is the shared worker-pool size
-// across evidence and population jobs. Both are engineering tuning knobs, not
-// per-environment settings — unlike AI_VALIDATION_ENABLED/ANTHROPIC_API_KEY,
-// there's no real scenario where staging needs a different timeout than
-// prod, so they're constants here instead of more env vars to keep in step
-// across every deployed environment. Change the constant and redeploy if
-// they ever need to move.
+// JobTimeout bounds one job end to end; maxConcurrent sizes the shared worker
+// pool. Constants, not env vars: they never differ per environment.
 const (
 	JobTimeout    = 180 * time.Second
 	maxConcurrent = 4
@@ -104,8 +93,7 @@ type Service struct {
 	sem chan struct{}
 	// enabled is the master switch — AI_VALIDATION_ENABLED plus a non-empty
 	// ANTHROPIC_API_KEY (checked at construction; see cmd/server/audit_deps.go).
-	// false makes every Trigger* call a pure no-op, same as the old nil
-	// *aiagent.Client check.
+	// false makes every Trigger* call a no-op.
 	enabled bool
 }
 
@@ -134,11 +122,8 @@ func NewService(
 }
 
 // TriggerEvidence starts (or skips) an advisory AI validation job for one
-// evidence submission. Detached from the caller's request context (its own
-// context.Background() + timeout) and never blocks or returns an error —
-// exactly like the trigger it replaces (internal/shared/aiagent, removed).
-// A nil *Service (e.g. a test harness that never wires AIValidationRun) is a
-// no-op, same as the old nil *aiagent.Client check.
+// evidence submission. Runs detached from the request context and never
+// blocks or returns an error. A nil *Service is a no-op.
 func (s *Service) TriggerEvidence(auditID, controlID, evidenceID int, actor string, skip bool) {
 	if s == nil || !s.enabled {
 		return
@@ -245,7 +230,7 @@ func (s *Service) run(auditID int, ref submissionRef, actor string, skip bool, k
 }
 
 // call assembles the user-turn content (manifest + optional previous-rounds
-// context + file blocks) and the system prompt, then makes the one forced
+// context + file blocks) and the system prompt, then makes the one
 // tool call.
 func (s *Service) call(ctx context.Context, control *model.AuditControl, kind submissionKind, manifest, previousContext string, fileBlocks []llm.Block) (*validationResult, error) {
 	var intro strings.Builder
@@ -277,42 +262,34 @@ func (s *Service) call(ctx context.Context, control *model.AuditControl, kind su
 	return &vr, nil
 }
 
-func (s *Service) writePending(ctx context.Context, ref submissionRef) {
+// writeStatus appends a lifecycle row (PENDING, SKIPPED, ERROR) with no verdict.
+func (s *Service) writeStatus(ctx context.Context, ref submissionRef, result string, summary *string) {
 	s.writeRow(ctx, ref, model.CreateAIValidationLogRequest{
 		ControlID: ref.ControlID,
-		Result:    "PENDING",
+		Result:    result,
+		Summary:   summary,
 		CreatedBy: createdBySentinel,
 	})
+}
+
+func (s *Service) writePending(ctx context.Context, ref submissionRef) {
+	s.writeStatus(ctx, ref, "PENDING", nil)
 }
 
 func (s *Service) writeSkipped(ctx context.Context, ref submissionRef) {
-	s.writeRow(ctx, ref, model.CreateAIValidationLogRequest{
-		ControlID: ref.ControlID,
-		Result:    "SKIPPED",
-		CreatedBy: createdBySentinel,
-	})
+	s.writeStatus(ctx, ref, "SKIPPED", nil)
 }
 
 func (s *Service) writeError(ctx context.Context, ref submissionRef, summary string) {
-	s.writeRow(ctx, ref, model.CreateAIValidationLogRequest{
-		ControlID: ref.ControlID,
-		Result:    "ERROR",
-		Summary:   &summary,
-		CreatedBy: createdBySentinel,
-	})
+	s.writeStatus(ctx, ref, "ERROR", &summary)
 }
 
 func (s *Service) writeResult(ctx context.Context, ref submissionRef, vr *validationResult) {
 	gapsJSON, err := json.Marshal(vr.GapsFound)
-	if err != nil {
+	if err != nil || vr.GapsFound == nil {
 		gapsJSON = []byte("[]")
 	}
-	feedbackJSON, err := json.Marshal(vr.Feedback)
-	if err != nil {
-		feedbackJSON = []byte("[]")
-	}
-	gaps, feedback, summary := string(gapsJSON), string(feedbackJSON), vr.Summary
-	confidence := clampConfidence(vr.ConfidenceScore)
+	gaps, summary := string(gapsJSON), strings.TrimSpace(vr.Summary)
 
 	result := vr.Result
 	if result != "PASS" && result != "FAIL" && result != "UNCERTAIN" {
@@ -323,25 +300,12 @@ func (s *Service) writeResult(ctx context.Context, ref submissionRef, vr *valida
 	}
 
 	s.writeRow(ctx, ref, model.CreateAIValidationLogRequest{
-		ControlID:       ref.ControlID,
-		Result:          result,
-		GapsFound:       &gaps,
-		Feedback:        &feedback,
-		Summary:         &summary,
-		ConfidenceScore: &confidence,
-		CreatedBy:       createdBySentinel,
+		ControlID: ref.ControlID,
+		Result:    result,
+		GapsFound: &gaps,
+		Summary:   &summary,
+		CreatedBy: createdBySentinel,
 	})
-}
-
-func clampConfidence(v float64) float64 {
-	switch {
-	case v < 0:
-		return 0
-	case v > 1:
-		return 1
-	default:
-		return v
-	}
 }
 
 // writeRow appends one row, best-effort. A failure here is logged and

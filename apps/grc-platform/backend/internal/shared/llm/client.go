@@ -16,7 +16,7 @@
 
 // Package llm is a thin wrapper over the Anthropic SDK. It holds
 // ANTHROPIC_API_KEY and exposes exactly one operation: system prompt + user
-// content blocks + one forced tool -> the tool's raw input. Callers (the
+// content blocks + one tool -> the tool's raw input. Callers (the
 // aivalidation package) depend on the Caller interface, not *Client, so tests
 // can inject a fake instead of calling the real API.
 package llm
@@ -65,7 +65,7 @@ func NewPDFBlock(data []byte) Block {
 	})}
 }
 
-// Tool describes the single tool the model is forced to call. Properties is
+// Tool describes the single tool the model is asked to call. Properties is
 // the JSON Schema "properties" object for the tool's input.
 type Tool struct {
 	Name        string
@@ -96,17 +96,18 @@ type Usage struct {
 	CacheReadInputTokens int64
 }
 
-// Result is the forced tool call's input, still raw — the caller (whose tool
+// Result is the tool call's input, still raw — the caller (whose tool
 // schema this is) unmarshals it into its own typed struct.
 type Result struct {
 	ToolInput json.RawMessage
 	Usage     Usage
 }
 
-// ErrNoToolCall means the response held no matching tool_use block. A forced
-// tool_choice makes this rare, but a refusal or a max_tokens cutoff before
-// the tool call completes can still produce one.
-var ErrNoToolCall = errors.New("llm: model did not return the forced tool call")
+// ErrNoToolCall means the response held no matching tool_use block. The model
+// is only asked (not forced) to call the tool, so a text-only reply is
+// possible; a refusal or a max_tokens cutoff before the tool call completes
+// can also produce one.
+var ErrNoToolCall = errors.New("llm: model did not return the tool call")
 
 // Caller is the interface aivalidation depends on, so its tests can inject a
 // fake instead of calling the real Anthropic API.
@@ -124,20 +125,25 @@ type Client struct {
 var _ Caller = (*Client)(nil)
 
 // New constructs a Client. model falls back to DefaultModel when empty.
+// baseURL, when non-empty, replaces the Anthropic API root (an AI gateway).
 // timeout bounds every call (the caller passes aivalidation.JobTimeout).
-func New(apiKey, model string, timeout time.Duration) *Client {
+func New(apiKey, model, baseURL string, timeout time.Duration) *Client {
 	if model == "" {
 		model = DefaultModel
 	}
+	opts := []option.RequestOption{option.WithAPIKey(apiKey)}
+	if baseURL != "" {
+		opts = append(opts, option.WithBaseURL(baseURL))
+	}
 	return &Client{
-		api:     anthropic.NewClient(option.WithAPIKey(apiKey)),
+		api:     anthropic.NewClient(opts...),
 		model:   model,
 		timeout: timeout,
 	}
 }
 
 // Call issues one request: system prompt (cached static + uncached dynamic
-// portions), the user-turn content blocks, and a forced call to req.Tool.
+// portions), the user-turn content blocks, and a call to req.Tool.
 // Extended thinking runs at low effort — enough for the model to reason
 // about cross-checking screenshot values against file content without
 // spending heavily on every submission.
@@ -171,7 +177,9 @@ func (c *Client) Call(ctx context.Context, req Request) (Result, error) {
 				Required:   req.Tool.Required,
 			},
 		}}},
-		ToolChoice:   anthropic.ToolChoiceParamOfTool(req.Tool.Name),
+		// Thinking can't be combined with a forced tool_choice (only auto/none),
+		// so the tool is the sole one offered and a miss falls to ErrNoToolCall.
+		ToolChoice:   anthropic.ToolChoiceUnionParam{OfAuto: &anthropic.ToolChoiceAutoParam{}},
 		Thinking:     anthropic.ThinkingConfigParamUnion{OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{}},
 		OutputConfig: anthropic.OutputConfigParam{Effort: anthropic.OutputConfigEffortLow},
 	}

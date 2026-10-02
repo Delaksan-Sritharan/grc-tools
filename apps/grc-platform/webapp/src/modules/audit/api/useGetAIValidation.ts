@@ -30,14 +30,12 @@ export interface AIValidationLog {
   controlId: number;
   result: "PASS" | "FAIL" | "UNCERTAIN" | "PENDING" | "ERROR" | "SKIPPED";
   gapsFound: string | null; // JSON array of AIGap, stored as a string
-  feedback: string | null; // JSON array of strings, stored as a string
-  summary: string | null;
-  confidenceScore: number | null;
+  summary: string | null; // one-line headline; empty for a clean PASS
   createdBy: string | null;
   createdOn: string;
 }
 
-/** A single requirement gap the AI flagged. */
+/** A single problem the AI flagged. */
 export interface AIGap {
   requirementAspect: string;
   issue: string;
@@ -77,19 +75,6 @@ export function parseGaps(gapsFound: string | null): AIGap[] {
         typeof (e as Record<string, unknown>).issue === "string" &&
         typeof (e as Record<string, unknown>).severity === "string",
     );
-  } catch {
-    return [];
-  }
-}
-
-/** Parses the feedback JSON string; returns [] on absence or malformed data. */
-export function parseFeedback(feedback: string | null): string[] {
-  if (!feedback) return [];
-  try {
-    const parsed = JSON.parse(feedback);
-    return Array.isArray(parsed)
-      ? parsed.filter((e): e is string => typeof e === "string")
-      : [];
   } catch {
     return [];
   }

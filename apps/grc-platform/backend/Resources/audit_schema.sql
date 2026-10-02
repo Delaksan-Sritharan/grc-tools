@@ -362,9 +362,7 @@ CREATE TABLE IF NOT EXISTS audit_ai_validation_log (
   -- LLM call is made for that row.
   result           ENUM('PASS','FAIL','UNCERTAIN','PENDING','ERROR','SKIPPED') NOT NULL,
   gaps_found       TEXT         NULL,     -- JSON array of gap objects
-  feedback         TEXT         NULL,     -- JSON array of submitter-facing action strings
   summary          TEXT         NULL,
-  confidence_score DECIMAL(5,4) NULL,
   created_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   created_by       VARCHAR(255) NULL,
   PRIMARY KEY (id),

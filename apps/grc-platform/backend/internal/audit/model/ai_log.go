@@ -26,17 +26,15 @@ import "time"
 // PopulationID is set. Result is PASS | FAIL | UNCERTAIN | PENDING | ERROR |
 // SKIPPED.
 type AIValidationLog struct {
-	ID              int64     `json:"id"`
-	EvidenceID      *int      `json:"evidenceId"`
-	PopulationID    *int      `json:"populationId"`
-	ControlID       int       `json:"controlId"`
-	Result          string    `json:"result"`
-	GapsFound       *string   `json:"gapsFound"` // JSON array of gap objects
-	Feedback        *string   `json:"feedback"`  // JSON array of submitter-facing action strings
-	Summary         *string   `json:"summary"`
-	ConfidenceScore *float64  `json:"confidenceScore"`
-	CreatedBy       *string   `json:"createdBy"`
-	CreatedOn       time.Time `json:"createdOn"`
+	ID           int64     `json:"id"`
+	EvidenceID   *int      `json:"evidenceId"`
+	PopulationID *int      `json:"populationId"`
+	ControlID    int       `json:"controlId"`
+	Result       string    `json:"result"`
+	GapsFound    *string   `json:"gapsFound"` // JSON array of gap objects
+	Summary      *string   `json:"summary"`
+	CreatedBy    *string   `json:"createdBy"`
+	CreatedOn    time.Time `json:"createdOn"`
 }
 
 // AIValidationListResponse is the payload of
@@ -51,11 +49,9 @@ type AIValidationListResponse struct {
 // POST .../ai-validations routes (evidence and population share this shape;
 // the owning id is in the path, not here — see repository/entity/aivalidation.go).
 type CreateAIValidationLogRequest struct {
-	ControlID       int      `json:"controlId"`
-	Result          string   `json:"result"` // PASS | FAIL | UNCERTAIN | PENDING | ERROR | SKIPPED
-	GapsFound       *string  `json:"gapsFound"`
-	Feedback        *string  `json:"feedback"`
-	Summary         *string  `json:"summary"`
-	ConfidenceScore *float64 `json:"confidenceScore"`
-	CreatedBy       string   `json:"createdBy"`
+	ControlID int     `json:"controlId"`
+	Result    string  `json:"result"` // PASS | FAIL | UNCERTAIN | PENDING | ERROR | SKIPPED
+	GapsFound *string `json:"gapsFound"`
+	Summary   *string `json:"summary"`
+	CreatedBy string  `json:"createdBy"`
 }

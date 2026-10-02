@@ -10,7 +10,7 @@ when the underlying report was generated, not when the screenshot itself
 was taken. Look specifically for the operating system's own clock: the
 Windows taskbar clock (bottom-right) or the macOS menu-bar clock (top-right).
 
-A screenshot missing a visible OS clock is a gap — report it in
-`gaps_found` with `severity: "MEDIUM"` unless a more specific rule (such as
-the Population Completeness Proof rule) requires it at a higher severity for
-that particular screenshot's role.
+A screenshot missing a visible OS clock is a gap — report it in `gaps_found`
+with `severity: "MEDIUM"` unless a more specific rule (such as the
+Population Completeness Proof rule) requires it at a higher severity for that
+screenshot's role. Report nothing when the clock is present.

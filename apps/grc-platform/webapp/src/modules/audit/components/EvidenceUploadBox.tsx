@@ -103,11 +103,7 @@ export default function EvidenceUploadBox({
   const allowAttestation =
     evidenceMode === "new" &&
     (phase === "population" || (phase === "evidence" && can(AuditPrivilege.ManageControls)));
-  // AI Validation opt-out checkbox: internal submitter roles only — reuses
-  // ViewInternalComments as the internal-audience proxy, the
-  // same one CommentsSection uses for "Internal only". External auditors
-  // never submit evidence/population, but the gate stays explicit here
-  // rather than relying on that incidentally.
+  // Opt-out is for internal submitters; ViewInternalComments is the internal proxy.
   const canSkipAiValidation = can(AuditPrivilege.ViewInternalComments);
 
   function addFiles(list: FileList | null) {
@@ -279,7 +275,7 @@ export default function EvidenceUploadBox({
       )}
 
       {canSkipAiValidation && (
-        <Tooltip title="AI Validation runs automatically after you submit, flagging gaps before internal review. Checking this skips it for this submission only — nothing is remembered for next time.">
+        <Tooltip title="AI Validation runs automatically after you submit, flagging gaps before internal review. Checking this skips it for this submission only - nothing is remembered for next time.">
           <FormControlLabel
             sx={{ mb: 1.5, ml: 0 }}
             control={

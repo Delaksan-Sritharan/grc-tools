@@ -14,14 +14,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, CircularProgress, Collapse, LinearProgress, Typography } from "@wso2/oxygen-ui";
+import { Box, CircularProgress, Collapse, LinearProgress, Paper, Typography } from "@wso2/oxygen-ui";
 import { AlertTriangle, Bot, ChevronDown, ChevronRight, Sparkles } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
 import { useGetEvidence } from "@modules/audit/api/useGetEvidence";
 import { useGetPopulation } from "@modules/audit/api/useGetPopulation";
 import {
   isFreshPending,
-  parseFeedback,
   parseGaps,
   useGetAIValidation,
   useGetPopulationAIValidation,
@@ -34,23 +33,23 @@ import { AuditPrivilege } from "@modules/audit/privileges";
 const AI_PURPLE = "#7c3aed";
 const AI_PURPLE_BG = "#faf5ff";
 
-// Severity → dot colour for the gap list.
-const SEVERITY_COLOR: Record<AIGap["severity"], string> = {
-  HIGH: "#dc2626",
-  MEDIUM: "#b45309",
-  LOW: "#6b7280",
+const SEVERITY_ORDER: AIGap["severity"][] = ["HIGH", "MEDIUM", "LOW"];
+const SEVERITY_STYLE: Record<AIGap["severity"], { label: string; color: string }> = {
+  HIGH:   { label: "High",   color: "#dc2626" },
+  MEDIUM: { label: "Medium", color: "#b45309" },
+  LOW:    { label: "Low",    color: "#6b7280" },
 };
 
 // Terminal/skipped result → row label + colour.
 const RESULT_STYLE: Record<"PASS" | "FAIL" | "UNCERTAIN" | "SKIPPED", { label: string; color: string }> = {
   PASS:      { label: "AI: Looks Complete",                 color: "#16a34a" },
-  FAIL:      { label: "AI: Gaps Found",                      color: "#dc2626" },
+  FAIL:      { label: "AI: Issues Found",                    color: "#dc2626" },
   UNCERTAIN: { label: "AI: Needs Human Review",              color: "#b45309" },
   SKIPPED:   { label: "AI validation skipped by submitter",  color: "#6b7280" },
 };
 
-const ADVISORY_SUBMITTER = "AI-generated hint — does not affect review status.";
-const ADVISORY_REVIEWER = "Advisory only — your decision is authoritative.";
+const PASS_NOTE = "Meets the requirement.";
+const ADVISORY_REVIEWER = "Advisory only - your decision is authoritative.";
 
 // Single named kill switch.
 const AI_VALIDATION_ENABLED = true;
@@ -61,6 +60,8 @@ interface AIValidationCardProps {
   variant: "submitter" | "reviewer";
   /** Which submission this card validates. Defaults to "evidence". */
   phase?: "evidence" | "population";
+  /** Section heading; defaults to "AI Validation". */
+  title?: string;
 }
 
 /**
@@ -68,16 +69,16 @@ interface AIValidationCardProps {
  * evidence or population submission. Internal-only — an external caller
  * never sees this at all, regardless of caller.
  *
- * Deliberately NOT a card/box: the default rendering is always a single
- * line — icon, state, and (for a terminal verdict only) a chevron — never a
- * bordered panel, always collapsed by default. PENDING, SKIPPED,
- * and ERROR rows have nothing further to show, so they stay a fixed line
- * with no expand affordance. Only a terminal verdict (PASS/FAIL/UNCERTAIN)
- * is clickable, and only then does clicking it reveal a boxed detail panel
- * below the line (summary, confidence, gaps, feedback) — manual click only,
- * never auto-expanded.
+ * The content sits in an outlined "AI Validation" section box, like the
+ * drawer's other sections. Inside it, the state is a single line - icon,
+ * state, and (FAIL/UNCERTAIN, or PASS with LOW gaps) a chevron - collapsed by
+ * default. PENDING, SKIPPED and ERROR rows have nothing further to show.
+ * Clicking the chevron reveals a headline and the gaps grouped by severity -
+ * manual click only, never auto-expanded. A clean PASS is the label plus a
+ * generic "Meets the requirement." line. Submitter and reviewer see the same
+ * text.
  */
-export default function AIValidationCard({ auditId, controlId, variant, phase = "evidence" }: AIValidationCardProps): JSX.Element | null {
+export default function AIValidationCard({ auditId, controlId, variant, phase = "evidence", title }: AIValidationCardProps): JSX.Element | null {
   const { can, loading: privilegesLoading } = useAuditPrivileges();
   const isInternal = can(AuditPrivilege.ViewInternalComments);
 
@@ -112,13 +113,42 @@ export default function AIValidationCard({ auditId, controlId, variant, phase = 
 
   // No submission yet: nothing has run, nothing to expand.
   if (latestId === null || (!latest && !isLoading)) {
-    return <StaticLine icon={<Bot size={14} />} text="AI review runs automatically after you submit." />;
+    return (
+      <AIBox title={title}>
+        <StaticLine icon={<Bot size={14} />} text="AI review runs automatically after you submit." />
+      </AIBox>
+    );
   }
   if (!latest) {
-    return <StaticLine icon={<CircularProgress size={12} />} text="Loading AI review…" />;
+    return (
+      <AIBox title={title}>
+        <StaticLine icon={<CircularProgress size={12} />} text="Loading AI review…" />
+      </AIBox>
+    );
   }
 
-  return <AIValidationRow latest={latest} variant={variant} />;
+  return (
+    <AIBox title={title}>
+      <AIValidationRow latest={latest} showReviewerNote={can(AuditPrivilege.ReviewEvidence)} />
+    </AIBox>
+  );
+}
+
+/** Outlined section box matching the drawer's other sections (header + body). */
+function AIBox({ children, title = "AI Validation" }: { children: React.ReactNode; title?: string }): JSX.Element {
+  return (
+    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+      <Box sx={{ px: 2.5, py: 1.5, display: "flex", alignItems: "center", gap: 1.25, borderBottom: 1, borderColor: "divider", bgcolor: "action.hover" }}>
+        <Box sx={{ width: 30, height: 30, borderRadius: 1.5, color: AI_PURPLE, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <Sparkles size={16} />
+        </Box>
+        <Typography variant="subtitle2" fontWeight={700}>
+          {title}
+        </Typography>
+      </Box>
+      <Box sx={{ p: 2.5 }}>{children}</Box>
+    </Paper>
+  );
 }
 
 /** A single muted line — icon + text, no box, no border. */
@@ -133,7 +163,7 @@ function StaticLine({ icon, text }: { icon: JSX.Element; text: string }): JSX.El
   );
 }
 
-function AIValidationRow({ latest, variant }: { latest: AIValidationLog; variant: "submitter" | "reviewer" }): JSX.Element {
+function AIValidationRow({ latest, showReviewerNote }: { latest: AIValidationLog; showReviewerNote: boolean }): JSX.Element {
   const [expanded, setExpanded] = useState(false);
 
   if (isFreshPending(latest)) {
@@ -160,7 +190,7 @@ function AIValidationRow({ latest, variant }: { latest: AIValidationLog; variant
 
   // ERROR, or a PENDING row that never resolved (stale): unavailable.
   if (latest.result === "ERROR" || latest.result === "PENDING") {
-    return <StaticLine icon={<AlertTriangle size={14} color="#b45309" />} text="AI validation unavailable — proceed as usual" />;
+    return <StaticLine icon={<AlertTriangle size={14} color="#b45309" />} text="AI validation unavailable - proceed as usual" />;
   }
 
   if (latest.result === "SKIPPED") {
@@ -170,6 +200,23 @@ function AIValidationRow({ latest, variant }: { latest: AIValidationLog; variant
 
   const style = RESULT_STYLE[latest.result];
   const gaps = parseGaps(latest.gapsFound);
+
+  // A clean PASS is the label plus one generic line — never per-rule detail.
+  if (latest.result === "PASS" && gaps.length === 0) {
+    return (
+      <Box sx={{ display: "flex", flexDirection: "column", gap: 0.25 }}>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+          <Sparkles size={14} color={style.color} />
+          <Typography variant="body2" fontWeight={600} sx={{ color: style.color }}>
+            {style.label}
+          </Typography>
+        </Box>
+        <Typography variant="caption" color="text.secondary" sx={{ pl: 3 }}>
+          {PASS_NOTE}
+        </Typography>
+      </Box>
+    );
+  }
 
   return (
     <Box>
@@ -185,120 +232,68 @@ function AIValidationRow({ latest, variant }: { latest: AIValidationLog; variant
         <Typography variant="body2" fontWeight={600} sx={{ color: style.color }}>
           {style.label}
         </Typography>
-        {latest.result === "FAIL" && gaps.length > 0 && (
-          <Typography variant="caption" color="text.secondary">· {gaps.length} {gaps.length === 1 ? "gap" : "gaps"}</Typography>
+        {gaps.length > 0 && (
+          <Typography variant="caption" color="text.secondary">· {gaps.length} {gaps.length === 1 ? "issue" : "issues"}</Typography>
         )}
         <Box sx={{ flex: 1 }} />
         {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
       </Box>
       <Collapse in={expanded}>
-        <Box sx={{ mt: 1.25, p: 1.75, borderRadius: 2, bgcolor: "action.hover" }}>
-          {variant === "reviewer" ? <ReviewerVerdict latest={latest} /> : <SubmitterVerdict latest={latest} />}
+        <Box sx={{ mt: 1.25, p: 1.75, borderRadius: 2, bgcolor: "action.hover", display: "flex", flexDirection: "column", gap: 1 }}>
+          {latest.summary && (
+            <Typography variant="body2" fontWeight={600} sx={{ lineHeight: 1.6 }}>
+              {latest.summary}
+            </Typography>
+          )}
+          <GapGroups gaps={gaps} />
+          {showReviewerNote && (
+            <Typography variant="caption" color="text.secondary">
+              ⓘ {ADVISORY_REVIEWER}
+            </Typography>
+          )}
         </Box>
       </Collapse>
     </Box>
   );
 }
 
-function Confidence({ score }: { score: number | null }): JSX.Element | null {
-  if (score === null || score === undefined) return null;
-  return (
-    <Typography variant="caption" color="text.secondary">
-      Confidence: {Math.round(score * 100)}%
-    </Typography>
-  );
-}
-
-function GapList({ gaps }: { gaps: AIGap[] }): JSX.Element {
-  return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-      {gaps.map((g, i) => (
-        <Box key={i} sx={{ display: "flex", gap: 1 }}>
-          <Box sx={{ mt: 0.65, width: 8, height: 8, borderRadius: "50%", bgcolor: SEVERITY_COLOR[g.severity] ?? "#6b7280", flexShrink: 0 }} />
-          <Box>
-            <Typography variant="body2" sx={{ fontWeight: 600, lineHeight: 1.5 }}>
-              {g.severity} · {g.requirementAspect}
-              {g.fileName ? (
-                <Typography component="span" variant="caption" color="text.secondary">
-                  {" "}
-                  ({g.fileName})
-                </Typography>
-              ) : null}
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.55 }}>
-              {g.issue}
-            </Typography>
-          </Box>
-        </Box>
-      ))}
-    </Box>
-  );
-}
-
-function SubmitterVerdict({ latest }: { latest: AIValidationLog }): JSX.Element {
-  const gaps = parseGaps(latest.gapsFound);
-  const feedback = parseFeedback(latest.feedback);
-
+/** Gaps grouped under High / Medium / Low headings, most severe first. */
+function GapGroups({ gaps }: { gaps: AIGap[] }): JSX.Element | null {
+  if (gaps.length === 0) return null;
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
-      {latest.summary && (
-        <Typography variant="body2" sx={{ lineHeight: 1.7 }}>
-          {latest.summary}
-        </Typography>
-      )}
-      <Confidence score={latest.confidenceScore} />
-
-      {gaps.length > 0 && (
-        <Box>
-          <Typography variant="body2" fontWeight={600} sx={{ mb: 0.75 }}>
-            {gaps.length} {gaps.length === 1 ? "gap" : "gaps"} found
-          </Typography>
-          <GapList gaps={gaps} />
-        </Box>
-      )}
-
-      {feedback.length > 0 && (
-        <Box>
-          <Typography variant="body2" fontWeight={600} sx={{ mb: 0.75 }}>
-            Suggested fixes before review:
-          </Typography>
-          <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
-            {feedback.map((f, i) => (
-              <Box key={i} sx={{ display: "flex", gap: 1 }}>
-                <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.6 }}>
-                  ☐ {f}
-                </Typography>
-              </Box>
-            ))}
+      {SEVERITY_ORDER.map((sev) => {
+        const group = gaps.filter((g) => g.severity === sev);
+        if (group.length === 0) return null;
+        const style = SEVERITY_STYLE[sev];
+        return (
+          <Box key={sev}>
+            <Typography variant="caption" fontWeight={700} sx={{ color: style.color, textTransform: "uppercase", letterSpacing: 0.5 }}>
+              {style.label} · {group.length}
+            </Typography>
+            <Box sx={{ display: "flex", flexDirection: "column", gap: 1.25, mt: 0.5 }}>
+              {group.map((g, i) => (
+                <Box key={i} sx={{ display: "flex", gap: 1 }}>
+                  <Box sx={{ mt: 0.65, width: 8, height: 8, borderRadius: "50%", bgcolor: style.color, flexShrink: 0 }} />
+                  <Box>
+                    <Typography variant="body2" sx={{ fontWeight: 600, lineHeight: 1.5 }}>
+                      {g.requirementAspect}
+                      {g.fileName ? (
+                        <Typography component="span" variant="caption" color="text.secondary">
+                          {" "}({g.fileName})
+                        </Typography>
+                      ) : null}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.55 }}>
+                      {g.issue}
+                    </Typography>
+                  </Box>
+                </Box>
+              ))}
+            </Box>
           </Box>
-        </Box>
-      )}
-
-      <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
-        ⓘ {ADVISORY_SUBMITTER}
-      </Typography>
-    </Box>
-  );
-}
-
-function ReviewerVerdict({ latest }: { latest: AIValidationLog }): JSX.Element {
-  const gaps = parseGaps(latest.gapsFound);
-
-  return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-      {latest.confidenceScore !== null && <Confidence score={latest.confidenceScore} />}
-
-      {latest.summary && (
-        <Typography variant="body2" sx={{ lineHeight: 1.6 }}>
-          {latest.summary}
-        </Typography>
-      )}
-
-      {gaps.length > 0 && <GapList gaps={gaps} />}
-
-      <Typography variant="caption" color="text.secondary">
-        ⓘ {ADVISORY_REVIEWER}
-      </Typography>
+        );
+      })}
     </Box>
   );
 }

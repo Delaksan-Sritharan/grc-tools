@@ -954,14 +954,14 @@ type UpdateEvidenceRequest struct {
 
 // AuditEvidenceFile is one uploaded file attached to an evidence submission or population.
 type AuditEvidenceFile struct {
-	ID           int       `json:"id"`
-	EvidenceID   *int      `json:"evidenceId"`
-	PopulationID *int      `json:"populationId"`
-	FileKind     *string   `json:"fileKind"` // POPULATION | SAMPLE (only when populationId is set)
-	FileName     string    `json:"fileName"`
-	FilePath     string    `json:"filePath"`
-	FileType     *string   `json:"fileType"`
-	FileSize     *int64    `json:"fileSize"`
+	ID           int     `json:"id"`
+	EvidenceID   *int    `json:"evidenceId"`
+	PopulationID *int    `json:"populationId"`
+	FileKind     *string `json:"fileKind"` // POPULATION | SAMPLE (only when populationId is set)
+	FileName     string  `json:"fileName"`
+	FilePath     string  `json:"filePath"`
+	FileType     *string `json:"fileType"`
+	FileSize     *int64  `json:"fileSize"`
 	// CreatedBy is the raw uuid of whoever uploaded this file — the submitting
 	// team member for a POPULATION or evidence file, the auditor for a SAMPLE
 	// one. Populated by the file list reads (ListPopulationFiles /
@@ -1796,17 +1796,15 @@ type ListAuditCommentsResponse struct {
 // compliance as review hints. Exactly one of EvidenceID / PopulationID is set
 // (chk_ai_owner), mirroring AuditEvidenceFile's evidence/population split.
 type AuditAIValidationLog struct {
-	ID              int64     `json:"id"`
-	EvidenceID      *int      `json:"evidenceId"`
-	PopulationID    *int      `json:"populationId"`
-	ControlID       int       `json:"controlId"`
-	Result          string    `json:"result"`    // PASS | FAIL | UNCERTAIN | PENDING | ERROR | SKIPPED
-	GapsFound       *string   `json:"gapsFound"` // JSON array of gap objects
-	Feedback        *string   `json:"feedback"`  // JSON array of submitter-facing action strings
-	Summary         *string   `json:"summary"`
-	ConfidenceScore *float64  `json:"confidenceScore"`
-	CreatedBy       *string   `json:"createdBy"`
-	CreatedOn       time.Time `json:"createdOn"`
+	ID           int64     `json:"id"`
+	EvidenceID   *int      `json:"evidenceId"`
+	PopulationID *int      `json:"populationId"`
+	ControlID    int       `json:"controlId"`
+	Result       string    `json:"result"`    // PASS | FAIL | UNCERTAIN | PENDING | ERROR | SKIPPED
+	GapsFound    *string   `json:"gapsFound"` // JSON array of gap objects
+	Summary      *string   `json:"summary"`
+	CreatedBy    *string   `json:"createdBy"`
+	CreatedOn    time.Time `json:"createdOn"`
 }
 
 // CreateAuditAIValidationLogRequest is the payload for
@@ -1814,13 +1812,11 @@ type AuditAIValidationLog struct {
 // POST /populations/{populationId}/ai-validations — the owning id comes from
 // the path, not the body, on either route.
 type CreateAuditAIValidationLogRequest struct {
-	ControlID       int      `json:"controlId"`
-	Result          string   `json:"result"` // PASS | FAIL | UNCERTAIN | PENDING | ERROR | SKIPPED
-	GapsFound       *string  `json:"gapsFound"`
-	Feedback        *string  `json:"feedback"`
-	Summary         *string  `json:"summary"`
-	ConfidenceScore *float64 `json:"confidenceScore"`
-	CreatedBy       string   `json:"createdBy"`
+	ControlID int     `json:"controlId"`
+	Result    string  `json:"result"` // PASS | FAIL | UNCERTAIN | PENDING | ERROR | SKIPPED
+	GapsFound *string `json:"gapsFound"`
+	Summary   *string `json:"summary"`
+	CreatedBy string  `json:"createdBy"`
 }
 
 // ListAuditAIValidationLogsResponse is returned by

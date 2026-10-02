@@ -32,8 +32,7 @@ type ControlSource interface {
 
 // EvidenceSource is the subset of service.EvidenceService this package
 // needs: fetching file bytes plus listing rounds for the "up to 2 previous
-// submissions" context. service.EvidenceService already satisfies this — no
-// adapter required.
+// submissions" context. Satisfied by service.EvidenceService.
 type EvidenceSource interface {
 	FileDownloader
 	List(ctx context.Context, auditID, controlID int, includeRejected bool) ([]*model.AuditEvidence, error)

@@ -89,7 +89,7 @@ func buildAuditDeps(fileSvc *file.Service, ec *entityclient.Client, aiCfg config
 	}
 	var llmClient llm.Caller
 	if aiValidationEnabled {
-		llmClient = llm.New(aiCfg.APIKey, aiCfg.Model, aivalidation.JobTimeout)
+		llmClient = llm.New(aiCfg.APIKey, aiCfg.Model, aiCfg.BaseURL, aivalidation.JobTimeout)
 	}
 	aiValidation := aivalidation.NewService(
 		llmClient, aiValidationRepo, controlSvc, evidenceSvc, populationSvc, commentSvc, aiValidationEnabled,

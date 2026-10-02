@@ -51,16 +51,14 @@ func (r *aiValidationRepo) CreateValidationForPopulation(ctx context.Context, po
 func (r *aiValidationRepo) create(ctx context.Context, evidenceID, populationID *int, req domain.CreateAuditAIValidationLogRequest) (*domain.AuditAIValidationLog, error) {
 	res, err := r.db.ExecContext(ctx,
 		`INSERT INTO audit_ai_validation_log
-		 (evidence_id, population_id, control_id, result, gaps_found, feedback, summary, confidence_score, created_by)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 (evidence_id, population_id, control_id, result, gaps_found, summary, created_by)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		nullableInt(evidenceID),
 		nullableInt(populationID),
 		req.ControlID,
 		req.Result,
 		nullableString(req.GapsFound),
-		nullableString(req.Feedback),
 		nullableString(req.Summary),
-		nullableFloat(req.ConfidenceScore),
 		nullableString(&req.CreatedBy),
 	)
 	if err != nil {
@@ -72,8 +70,8 @@ func (r *aiValidationRepo) create(ctx context.Context, evidenceID, populationID 
 
 func (r *aiValidationRepo) getValidationByID(ctx context.Context, id int64) (*domain.AuditAIValidationLog, error) {
 	return scanAIValidation(r.db.QueryRowContext(ctx,
-		`SELECT id, evidence_id, population_id, control_id, result, gaps_found, feedback, summary,
-		        confidence_score, created_by, created_at
+		`SELECT id, evidence_id, population_id, control_id, result, gaps_found, summary,
+		        created_by, created_at
 		 FROM audit_ai_validation_log WHERE id = ?`, id))
 }
 
@@ -90,8 +88,8 @@ func (r *aiValidationRepo) ListValidationsByPopulation(ctx context.Context, popu
 // column name.
 func (r *aiValidationRepo) list(ctx context.Context, ownerColumn string, ownerID int) ([]domain.AuditAIValidationLog, error) {
 	rows, err := r.db.QueryContext(ctx,
-		fmt.Sprintf(`SELECT id, evidence_id, population_id, control_id, result, gaps_found, feedback, summary,
-		        confidence_score, created_by, created_at
+		fmt.Sprintf(`SELECT id, evidence_id, population_id, control_id, result, gaps_found, summary,
+		        created_by, created_at
 		 FROM audit_ai_validation_log WHERE %s = ? ORDER BY id DESC`, ownerColumn),
 		ownerID)
 	if err != nil {
@@ -113,11 +111,10 @@ func (r *aiValidationRepo) list(ctx context.Context, ownerColumn string, ownerID
 func scanAIValidation(s scanner) (*domain.AuditAIValidationLog, error) {
 	var l domain.AuditAIValidationLog
 	var evidenceID, populationID sql.NullInt64
-	var gaps, feedback, summary, createdBy sql.NullString
-	var confidence sql.NullFloat64
+	var gaps, summary, createdBy sql.NullString
 	err := s.Scan(
 		&l.ID, &evidenceID, &populationID, &l.ControlID, &l.Result,
-		&gaps, &feedback, &summary, &confidence, &createdBy, &l.CreatedOn,
+		&gaps, &summary, &createdBy, &l.CreatedOn,
 	)
 	if err != nil {
 		return nil, err
@@ -133,14 +130,8 @@ func scanAIValidation(s scanner) (*domain.AuditAIValidationLog, error) {
 	if gaps.Valid {
 		l.GapsFound = &gaps.String
 	}
-	if feedback.Valid {
-		l.Feedback = &feedback.String
-	}
 	if summary.Valid {
 		l.Summary = &summary.String
-	}
-	if confidence.Valid {
-		l.ConfidenceScore = &confidence.Float64
 	}
 	if createdBy.Valid {
 		l.CreatedBy = &createdBy.String
