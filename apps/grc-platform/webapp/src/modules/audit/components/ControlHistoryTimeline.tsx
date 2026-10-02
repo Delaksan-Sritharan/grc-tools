@@ -211,7 +211,8 @@ function aiToEvent(a: AIValidationLog): TimelineEvent | null {
     id: `a-${a.id}`,
     tone: "ai",
     at: a.createdOn,
-    actor: "AI reviewer",
+    // SKIPPED is the submitter's opt-out; createdBy is the system sentinel, not them.
+    actor: a.result === "SKIPPED" ? "Submitter" : "AI reviewer",
     title,
     body: a.summary ?? undefined,
     badge: AI_BADGE[a.result],
