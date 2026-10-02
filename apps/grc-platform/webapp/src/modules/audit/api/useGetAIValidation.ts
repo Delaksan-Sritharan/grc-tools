@@ -115,8 +115,20 @@ export function useGetAIValidation(auditId: number, controlId: number, evidenceI
   });
 }
 
-/** useGetAIValidation for a population submission. */
-export function useGetPopulationAIValidation(auditId: number, controlId: number, populationId: number | null) {
+// The backend writes the first (PENDING) row from a detached goroutine after
+// the submit returns, so a just-updated round can briefly have no rows yet.
+const FIRST_ROW_WINDOW_MS = 60_000;
+
+/**
+ * useGetAIValidation for a population submission. Also polls, bounded to
+ * FIRST_ROW_WINDOW_MS after `roundUpdatedAt`, while no row exists yet.
+ */
+export function useGetPopulationAIValidation(
+  auditId: number,
+  controlId: number,
+  populationId: number | null,
+  roundUpdatedAt: string | null = null,
+) {
   const authFetch = useAuthApiClient();
 
   return useQuery({
@@ -133,8 +145,13 @@ export function useGetPopulationAIValidation(auditId: number, controlId: number,
       return body.validations ?? [];
     },
     refetchInterval: (query) => {
-      const latest = query.state.data?.[0];
-      return isFreshPending(latest) ? 5000 : false;
+      const data = query.state.data;
+      if (data?.length === 0 && roundUpdatedAt) {
+        // abs() so client/server clock skew can't make the window unbounded.
+        const age = Date.now() - new Date(roundUpdatedAt).getTime();
+        if (Math.abs(age) < FIRST_ROW_WINDOW_MS) return 5000;
+      }
+      return isFreshPending(data?.[0]) ? 5000 : false;
     },
   });
 }

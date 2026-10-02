@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, CircularProgress, Collapse, LinearProgress, Paper, Typography } from "@wso2/oxygen-ui";
+import { Box, Button, CircularProgress, Collapse, LinearProgress, Paper, Typography } from "@wso2/oxygen-ui";
 import { AlertTriangle, Bot, ChevronDown, ChevronRight, Sparkles } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
 import { useGetEvidence } from "@modules/audit/api/useGetEvidence";
@@ -51,8 +51,9 @@ const RESULT_STYLE: Record<"PASS" | "FAIL" | "UNCERTAIN" | "SKIPPED", { label: s
 const PASS_NOTE = "Meets the requirement.";
 const ADVISORY_REVIEWER = "Advisory only - your decision is authoritative.";
 
-// Single named kill switch.
-const AI_VALIDATION_ENABLED = true;
+// Deploy-time switch mirroring the backend's AI_VALIDATION_ENABLED, so the card
+// never promises a review the backend won't run.
+const AI_VALIDATION_ENABLED = window.config?.GRC_PLATFORM_AI_VALIDATION_ENABLED === true;
 
 interface AIValidationCardProps {
   auditId: number;
@@ -98,13 +99,28 @@ export default function AIValidationCard({ auditId, controlId, variant, phase = 
     auditId,
     controlId,
     populationEnabled ? latestPopulationId : null,
+    populationEnabled ? (population?.round?.updatedAt ?? null) : null,
   );
-  const { data: validations, isLoading } = isPopulation ? populationValidations : evidenceValidations;
+  const { data: validations, isLoading, isError, refetch } = isPopulation ? populationValidations : evidenceValidations;
   const latestId = isPopulation ? latestPopulationId : latestEvidenceId;
 
   if (!AI_VALIDATION_ENABLED || privilegesLoading || !isInternal) return null;
 
   const latest = validations?.[0];
+
+  // A failed fetch is not "no result" — say so instead of the submit prompt / hiding.
+  if (latestId !== null && !latest && isError) {
+    return (
+      <AIBox title={title}>
+        <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
+          <StaticLine icon={<AlertTriangle size={14} color="#b45309" />} text="Couldn't load AI validation." />
+          <Button size="small" onClick={() => void refetch()}>
+            Retry
+          </Button>
+        </Box>
+      </AIBox>
+    );
+  }
 
   // Reviewer variant stays out of the way until there is something to show.
   if (variant === "reviewer" && (latestId === null || !latest)) {
@@ -130,7 +146,7 @@ export default function AIValidationCard({ auditId, controlId, variant, phase = 
   return (
     <AIBox title={title}>
       {/* Keyed so a new result remounts collapsed instead of inheriting the old row's expanded state. */}
-      <AIValidationRow key={`${phase}-${latest.id}`} latest={latest}showReviewerNote={can(AuditPrivilege.ReviewEvidence)} />
+      <AIValidationRow key={`${phase}-${latest.id}`} latest={latest} showReviewerNote={can(AuditPrivilege.ReviewEvidence)} />
     </AIBox>
   );
 }
