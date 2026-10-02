@@ -4736,6 +4736,22 @@ components:
         createdOn:
           type: string
           format: date-time
+        inputTokens:
+          type: integer
+          format: int64
+          nullable: true
+        outputTokens:
+          type: integer
+          format: int64
+          nullable: true
+        cacheReadInputTokens:
+          type: integer
+          format: int64
+          nullable: true
+        cacheCreationInputTokens:
+          type: integer
+          format: int64
+          nullable: true
     CreateAuditAIValidationLogRequest:
       type: object
       properties:
@@ -4763,6 +4779,22 @@ components:
           nullable: true
         createdBy:
           type: string
+        inputTokens:
+          type: integer
+          format: int64
+          nullable: true
+        outputTokens:
+          type: integer
+          format: int64
+          nullable: true
+        cacheReadInputTokens:
+          type: integer
+          format: int64
+          nullable: true
+        cacheCreationInputTokens:
+          type: integer
+          format: int64
+          nullable: true
     ListAuditAIValidationLogsResponse:
       type: object
       properties:

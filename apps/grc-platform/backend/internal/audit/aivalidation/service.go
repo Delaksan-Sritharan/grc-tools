@@ -220,19 +220,19 @@ func (s *Service) run(auditID int, ref submissionRef, actor string, skip bool, k
 		return
 	}
 
-	result, err := s.call(ctx, control, kind, manifest, previous, blocks)
+	result, usage, err := s.call(ctx, control, kind, manifest, previous, blocks)
 	if err != nil {
 		s.writeError(ctx, ref, "AI validation could not complete")
 		slog.Warn("ai validation: call failed", ref.logAttr(), "actor", actor, "err", err)
 		return
 	}
-	s.writeResult(ctx, ref, result)
+	s.writeResult(ctx, ref, result, usage)
 }
 
 // call assembles the user-turn content (manifest + optional previous-rounds
 // context + file blocks) and the system prompt, then makes the one
 // tool call.
-func (s *Service) call(ctx context.Context, control *model.AuditControl, kind submissionKind, manifest, previousContext string, fileBlocks []llm.Block) (*validationResult, error) {
+func (s *Service) call(ctx context.Context, control *model.AuditControl, kind submissionKind, manifest, previousContext string, fileBlocks []llm.Block) (*validationResult, llm.Usage, error) {
 	var intro strings.Builder
 	intro.WriteString("Review this submission.\n\n")
 	intro.WriteString(manifest)
@@ -252,14 +252,14 @@ func (s *Service) call(ctx context.Context, control *model.AuditControl, kind su
 		Tool:          submitValidationTool(),
 	})
 	if err != nil {
-		return nil, err
+		return nil, llm.Usage{}, err
 	}
 	var vr validationResult
 	if err := json.Unmarshal(res.ToolInput, &vr); err != nil {
-		return nil, err
+		return nil, llm.Usage{}, err
 	}
 	vr.Result = strings.ToUpper(strings.TrimSpace(vr.Result))
-	return &vr, nil
+	return &vr, res.Usage, nil
 }
 
 // writeStatus appends a lifecycle row (PENDING, SKIPPED, ERROR) with no verdict.
@@ -284,7 +284,7 @@ func (s *Service) writeError(ctx context.Context, ref submissionRef, summary str
 	s.writeStatus(ctx, ref, "ERROR", &summary)
 }
 
-func (s *Service) writeResult(ctx context.Context, ref submissionRef, vr *validationResult) {
+func (s *Service) writeResult(ctx context.Context, ref submissionRef, vr *validationResult, usage llm.Usage) {
 	gapsJSON, err := json.Marshal(vr.GapsFound)
 	if err != nil || vr.GapsFound == nil {
 		gapsJSON = []byte("[]")
@@ -300,11 +300,15 @@ func (s *Service) writeResult(ctx context.Context, ref submissionRef, vr *valida
 	}
 
 	s.writeRow(ctx, ref, model.CreateAIValidationLogRequest{
-		ControlID: ref.ControlID,
-		Result:    result,
-		GapsFound: &gaps,
-		Summary:   &summary,
-		CreatedBy: createdBySentinel,
+		ControlID:                ref.ControlID,
+		Result:                   result,
+		GapsFound:                &gaps,
+		Summary:                  &summary,
+		CreatedBy:                createdBySentinel,
+		InputTokens:              &usage.InputTokens,
+		OutputTokens:             &usage.OutputTokens,
+		CacheReadInputTokens:     &usage.CacheReadInputTokens,
+		CacheCreationInputTokens: &usage.CacheCreationInputTokens,
 	})
 }
 

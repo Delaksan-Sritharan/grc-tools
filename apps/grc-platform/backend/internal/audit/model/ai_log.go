@@ -35,6 +35,14 @@ type AIValidationLog struct {
 	Summary      *string   `json:"summary"`
 	CreatedBy    *string   `json:"createdBy"`
 	CreatedOn    time.Time `json:"createdOn"`
+	// Anthropic token accounting for this call (nil on lifecycle rows that
+	// never reached a completed LLM response). CacheReadInputTokens vs
+	// InputTokens shows how much of the static system prompt was served
+	// from Anthropic's prompt cache rather than billed at full price.
+	InputTokens              *int64 `json:"inputTokens,omitempty"`
+	OutputTokens             *int64 `json:"outputTokens,omitempty"`
+	CacheReadInputTokens     *int64 `json:"cacheReadInputTokens,omitempty"`
+	CacheCreationInputTokens *int64 `json:"cacheCreationInputTokens,omitempty"`
 }
 
 // AIValidationListResponse is the payload of
@@ -54,4 +62,10 @@ type CreateAIValidationLogRequest struct {
 	GapsFound *string `json:"gapsFound"`
 	Summary   *string `json:"summary"`
 	CreatedBy string  `json:"createdBy"`
+	// Anthropic token accounting for this call; left nil on lifecycle rows
+	// (PENDING/SKIPPED/ERROR) that never reached a completed LLM response.
+	InputTokens              *int64 `json:"inputTokens,omitempty"`
+	OutputTokens             *int64 `json:"outputTokens,omitempty"`
+	CacheReadInputTokens     *int64 `json:"cacheReadInputTokens,omitempty"`
+	CacheCreationInputTokens *int64 `json:"cacheCreationInputTokens,omitempty"`
 }

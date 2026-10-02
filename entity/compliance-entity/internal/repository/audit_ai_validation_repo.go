@@ -51,8 +51,9 @@ func (r *aiValidationRepo) CreateValidationForPopulation(ctx context.Context, po
 func (r *aiValidationRepo) create(ctx context.Context, evidenceID, populationID *int, req domain.CreateAuditAIValidationLogRequest) (*domain.AuditAIValidationLog, error) {
 	res, err := r.db.ExecContext(ctx,
 		`INSERT INTO audit_ai_validation_log
-		 (evidence_id, population_id, control_id, result, gaps_found, summary, created_by)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		 (evidence_id, population_id, control_id, result, gaps_found, summary, created_by,
+		  input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		nullableInt(evidenceID),
 		nullableInt(populationID),
 		req.ControlID,
@@ -60,6 +61,10 @@ func (r *aiValidationRepo) create(ctx context.Context, evidenceID, populationID 
 		nullableString(req.GapsFound),
 		nullableString(req.Summary),
 		nullableString(&req.CreatedBy),
+		nullableInt64(req.InputTokens),
+		nullableInt64(req.OutputTokens),
+		nullableInt64(req.CacheReadInputTokens),
+		nullableInt64(req.CacheCreationInputTokens),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("ai_validation.Create: %w", err)
@@ -71,7 +76,8 @@ func (r *aiValidationRepo) create(ctx context.Context, evidenceID, populationID 
 func (r *aiValidationRepo) getValidationByID(ctx context.Context, id int64) (*domain.AuditAIValidationLog, error) {
 	return scanAIValidation(r.db.QueryRowContext(ctx,
 		`SELECT id, evidence_id, population_id, control_id, result, gaps_found, summary,
-		        created_by, created_at
+		        created_by, created_at,
+		        input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens
 		 FROM audit_ai_validation_log WHERE id = ?`, id))
 }
 
@@ -89,7 +95,8 @@ func (r *aiValidationRepo) ListValidationsByPopulation(ctx context.Context, popu
 func (r *aiValidationRepo) list(ctx context.Context, ownerColumn string, ownerID int) ([]domain.AuditAIValidationLog, error) {
 	rows, err := r.db.QueryContext(ctx,
 		fmt.Sprintf(`SELECT id, evidence_id, population_id, control_id, result, gaps_found, summary,
-		        created_by, created_at
+		        created_by, created_at,
+		        input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens
 		 FROM audit_ai_validation_log WHERE %s = ? ORDER BY id DESC`, ownerColumn),
 		ownerID)
 	if err != nil {
@@ -112,9 +119,11 @@ func scanAIValidation(s scanner) (*domain.AuditAIValidationLog, error) {
 	var l domain.AuditAIValidationLog
 	var evidenceID, populationID sql.NullInt64
 	var gaps, summary, createdBy sql.NullString
+	var inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens sql.NullInt64
 	err := s.Scan(
 		&l.ID, &evidenceID, &populationID, &l.ControlID, &l.Result,
 		&gaps, &summary, &createdBy, &l.CreatedOn,
+		&inputTokens, &outputTokens, &cacheReadTokens, &cacheCreationTokens,
 	)
 	if err != nil {
 		return nil, err
@@ -136,6 +145,18 @@ func scanAIValidation(s scanner) (*domain.AuditAIValidationLog, error) {
 	if createdBy.Valid {
 		l.CreatedBy = &createdBy.String
 	}
+	if inputTokens.Valid {
+		l.InputTokens = &inputTokens.Int64
+	}
+	if outputTokens.Valid {
+		l.OutputTokens = &outputTokens.Int64
+	}
+	if cacheReadTokens.Valid {
+		l.CacheReadInputTokens = &cacheReadTokens.Int64
+	}
+	if cacheCreationTokens.Valid {
+		l.CacheCreationInputTokens = &cacheCreationTokens.Int64
+	}
 	return &l, nil
 }
 
@@ -145,4 +166,12 @@ func nullableFloat(v *float64) sql.NullFloat64 {
 		return sql.NullFloat64{}
 	}
 	return sql.NullFloat64{Float64: *v, Valid: true}
+}
+
+// nullableInt64 converts a *int64 to sql.NullInt64 for optional BIGINT columns.
+func nullableInt64(v *int64) sql.NullInt64 {
+	if v == nil {
+		return sql.NullInt64{}
+	}
+	return sql.NullInt64{Int64: *v, Valid: true}
 }

@@ -363,6 +363,13 @@ CREATE TABLE IF NOT EXISTS audit_ai_validation_log (
   result           ENUM('PASS','FAIL','UNCERTAIN','PENDING','ERROR','SKIPPED') NOT NULL,
   gaps_found       TEXT         NULL,     -- JSON array of gap objects
   summary          TEXT         NULL,
+  -- Anthropic token accounting for this call, for observing prompt-cache
+  -- effectiveness. NULL on lifecycle rows (PENDING/ERROR/SKIPPED) that never
+  -- reached a completed LLM response.
+  input_tokens                 BIGINT NULL,
+  output_tokens                BIGINT NULL,
+  cache_read_input_tokens      BIGINT NULL,
+  cache_creation_input_tokens  BIGINT NULL,
   created_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   created_by       VARCHAR(255) NULL,
   PRIMARY KEY (id),

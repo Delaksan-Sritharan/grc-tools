@@ -4965,6 +4965,22 @@ components:
         createdOn:
           type: string
           format: date-time
+        inputTokens:
+          type: integer
+          format: int64
+          nullable: true
+        outputTokens:
+          type: integer
+          format: int64
+          nullable: true
+        cacheReadInputTokens:
+          type: integer
+          format: int64
+          nullable: true
+        cacheCreationInputTokens:
+          type: integer
+          format: int64
+          nullable: true
     AIValidationListResponse:
       type: object
       properties:

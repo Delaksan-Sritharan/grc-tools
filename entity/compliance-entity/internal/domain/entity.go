@@ -1805,6 +1805,12 @@ type AuditAIValidationLog struct {
 	Summary      *string   `json:"summary"`
 	CreatedBy    *string   `json:"createdBy"`
 	CreatedOn    time.Time `json:"createdOn"`
+	// Anthropic token accounting for this call (nil on lifecycle rows that
+	// never reached a completed LLM response).
+	InputTokens              *int64 `json:"inputTokens,omitempty"`
+	OutputTokens             *int64 `json:"outputTokens,omitempty"`
+	CacheReadInputTokens     *int64 `json:"cacheReadInputTokens,omitempty"`
+	CacheCreationInputTokens *int64 `json:"cacheCreationInputTokens,omitempty"`
 }
 
 // CreateAuditAIValidationLogRequest is the payload for
@@ -1817,6 +1823,12 @@ type CreateAuditAIValidationLogRequest struct {
 	GapsFound *string `json:"gapsFound"`
 	Summary   *string `json:"summary"`
 	CreatedBy string  `json:"createdBy"`
+	// Anthropic token accounting for this call; left nil on lifecycle rows
+	// (PENDING/SKIPPED/ERROR) that never reached a completed LLM response.
+	InputTokens              *int64 `json:"inputTokens,omitempty"`
+	OutputTokens             *int64 `json:"outputTokens,omitempty"`
+	CacheReadInputTokens     *int64 `json:"cacheReadInputTokens,omitempty"`
+	CacheCreationInputTokens *int64 `json:"cacheCreationInputTokens,omitempty"`
 }
 
 // ListAuditAIValidationLogsResponse is returned by

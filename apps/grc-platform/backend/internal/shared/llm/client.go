@@ -88,12 +88,13 @@ type Request struct {
 	MaxTokens int64
 }
 
-// Usage carries token accounting for the caller's own logging — not
-// currently persisted anywhere.
+// Usage carries token accounting for the caller's own logging, including
+// prompt-cache hit/miss accounting for SystemStatic (see Request).
 type Usage struct {
-	InputTokens          int64
-	OutputTokens         int64
-	CacheReadInputTokens int64
+	InputTokens              int64
+	OutputTokens             int64
+	CacheReadInputTokens     int64
+	CacheCreationInputTokens int64
 }
 
 // Result is the tool call's input, still raw — the caller (whose tool
@@ -193,9 +194,10 @@ func (c *Client) Call(ctx context.Context, req Request) (Result, error) {
 	}
 
 	usage := Usage{
-		InputTokens:          resp.Usage.InputTokens,
-		OutputTokens:         resp.Usage.OutputTokens,
-		CacheReadInputTokens: resp.Usage.CacheReadInputTokens,
+		InputTokens:              resp.Usage.InputTokens,
+		OutputTokens:             resp.Usage.OutputTokens,
+		CacheReadInputTokens:     resp.Usage.CacheReadInputTokens,
+		CacheCreationInputTokens: resp.Usage.CacheCreationInputTokens,
 	}
 	for _, block := range resp.Content {
 		if tu, ok := block.AsAny().(anthropic.ToolUseBlock); ok && tu.Name == req.Tool.Name {
