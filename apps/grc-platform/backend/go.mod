@@ -8,6 +8,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/richardlehane/mscfb v1.0.9
 	github.com/xuri/excelize/v2 v2.11.0
+	golang.org/x/image v0.38.0
 )
 
 require (

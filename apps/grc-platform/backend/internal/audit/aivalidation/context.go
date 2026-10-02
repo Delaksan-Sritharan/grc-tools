@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/llm"
 )
 
 // ControlSource is the subset of service.ControlService this package needs —
@@ -39,10 +40,12 @@ type EvidenceSource interface {
 }
 
 // PopulationSource is the subset of service.PopulationService this package
-// needs: fetching file bytes plus the current round's files.
+// needs: fetching file bytes, the current round's files, and (for the Sample
+// Coverage rule) the control's latest population round.
 type PopulationSource interface {
 	FileDownloader
 	ListFiles(ctx context.Context, populationID int) ([]*model.PopulationFile, error)
+	LatestRound(ctx context.Context, auditID, controlID int) (*model.AuditPopulation, error)
 }
 
 // CommentSource is the subset of service.CommentService this package needs —
@@ -72,6 +75,61 @@ func populationFileRefs(files []*model.PopulationFile) []fileRef {
 		}
 	}
 	return out
+}
+
+// sampleFileRefs is populationFileRefs' complement — only SAMPLE-kind files,
+// the auditor's own selection, for the Sample Coverage rule.
+func sampleFileRefs(files []*model.PopulationFile) []fileRef {
+	out := make([]fileRef, 0, len(files))
+	for _, f := range files {
+		if strings.EqualFold(f.FileKind, "SAMPLE") {
+			out = append(out, fileRef{ID: f.ID, Name: f.FileName})
+		}
+	}
+	return out
+}
+
+// sampleContext returns the external auditor's sample for an OE control's
+// evidence validation — the free-text sample_reference note (held on the
+// control itself, not the population row) plus any SAMPLE-kind files on the
+// control's latest population round — as content blocks plus a labeled text
+// section, so the Sample Coverage rule can check the evidence submission
+// actually corresponds to what was sampled.
+//
+// Returns (nil, "") for a DESIGN control, a control with no population round
+// yet, or one with neither a note nor sample files — the rule's own text
+// says to skip entirely when this section is absent.
+func sampleContext(ctx context.Context, popSvc PopulationSource, auditID, controlID int, control *model.AuditControl, budget *jobBudget) ([]llm.Block, string) {
+	if !strings.EqualFold(control.RequirementType, "OE") {
+		return nil, ""
+	}
+	round, err := popSvc.LatestRound(ctx, auditID, controlID)
+	if err != nil || round == nil {
+		return nil, ""
+	}
+	files, err := popSvc.ListFiles(ctx, round.ID)
+	if err != nil {
+		files = nil
+	}
+	refs := sampleFileRefs(files)
+
+	note := ""
+	if control.SampleReference != nil {
+		note = strings.TrimSpace(*control.SampleReference)
+	}
+	if note == "" && len(refs) == 0 {
+		return nil, ""
+	}
+
+	blocks, manifest := buildFileContent(ctx, popSvc, refs, budget)
+
+	var b strings.Builder
+	b.WriteString("## Sample selected by the external auditor\n\n")
+	if note != "" {
+		fmt.Fprintf(&b, "Auditor's note: %s\n\n", note)
+	}
+	b.WriteString(manifest)
+	return blocks, b.String()
 }
 
 // previousEvidenceContext returns a text block describing up to 2 earlier

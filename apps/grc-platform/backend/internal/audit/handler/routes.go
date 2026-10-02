@@ -103,7 +103,7 @@ func RegisterRoutes(mux routeguard.Router, deps Deps) {
 	dh := &dashboardHandler{svc: deps.Dashboard}
 	eh := newEvidenceHandler(&deps)
 	cmh := &commentHandler{svc: deps.Comment, controlSvc: deps.Control, notify: &deps, directory: deps.Directory}
-	avh := &aiValidationHandler{svc: deps.AIValidation, evidenceSvc: deps.Evidence, controlSvc: deps.Control}
+	avh := &aiValidationHandler{svc: deps.AIValidation, evidenceSvc: deps.Evidence, controlSvc: deps.Control, popSvc: deps.Population}
 	rjh := &reminderJobHandler{trigger: deps.TriggerReminderJob}
 
 	// Current user (shared by both hubs — resolved privilege set unions RISK_*

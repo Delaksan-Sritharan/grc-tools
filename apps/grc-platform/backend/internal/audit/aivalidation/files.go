@@ -61,7 +61,7 @@ type FileDownloader interface {
 // a manifest text block listing every file's fate (reviewed or why not) —
 // the system prompt tells the model never to base a PASS on an unreviewed
 // file, so this manifest matters as much as the blocks themselves.
-func buildFileContent(ctx context.Context, dl FileDownloader, files []fileRef) ([]llm.Block, string) {
+func buildFileContent(ctx context.Context, dl FileDownloader, files []fileRef, budget *jobBudget) ([]llm.Block, string) {
 	var blocks []llm.Block
 	var manifest strings.Builder
 	manifest.WriteString("Files in this submission:\n")
@@ -94,7 +94,7 @@ func buildFileContent(ctx context.Context, dl FileDownloader, files []fileRef) (
 			continue
 		}
 
-		newBlocks, note := blocksForFile(ext, f.Name, data)
+		newBlocks, note := blocksForFile(ext, f.Name, data, budget)
 		fmt.Fprintf(&manifest, "- %s: %s\n", f.Name, note)
 		if len(newBlocks) > 0 {
 			blocks = append(blocks, newBlocks...)
@@ -106,30 +106,35 @@ func buildFileContent(ctx context.Context, dl FileDownloader, files []fileRef) (
 
 // blocksForFile converts one file's bytes into content blocks by extension,
 // plus a short manifest note.
-func blocksForFile(ext, name string, data []byte) (blocks []llm.Block, manifestNote string) {
+func blocksForFile(ext, name string, data []byte, budget *jobBudget) (blocks []llm.Block, manifestNote string) {
 	switch ext {
 	case "pdf":
 		// Embedded screenshots on a PDF page are already visible to the model
 		// as a native document block — no separate extraction needed.
+		pages := pdfPageCount(data)
+		if !budget.reservePDFPages(pages) {
+			return nil, fmt.Sprintf("not reviewed (%d pages; job's %d-page PDF cap reached)", pages, maxPDFPagesPerJob)
+		}
 		return []llm.Block{llm.NewPDFBlock(data)}, "reviewed"
 	case "png", "jpg", "jpeg", "gif", "webp":
-		mt := http.DetectContentType(data)
-		if !supportedImageMediaType(mt) {
+		if !supportedImageMediaType(http.DetectContentType(data)) {
 			return nil, "not reviewed (image format not supported)"
 		}
-		return []llm.Block{llm.NewImageBlock(mt, data)}, "reviewed"
+		return uploadedImageBlocks(data, budget)
 	case "xlsx":
 		text, err := XLSXToCSV(data)
 		if err != nil {
 			return nil, "not reviewed (could not parse spreadsheet)"
 		}
 		return []llm.Block{llm.NewTextBlock("--- " + name + " ---\n" + text)}, "reviewed"
-	case "csv", "txt":
+	case "csv":
+		return []llm.Block{llm.NewTextBlock("--- " + name + " ---\n" + csvHeadTail(data))}, "reviewed"
+	case "txt":
 		return []llm.Block{llm.NewTextBlock("--- " + name + " ---\n" + string(data))}, "reviewed"
 	case "docx", "pptx":
-		return imageBlocksAndNote(extractOOXMLImages(data))
+		return ooxmlDocumentBlocks(ext, name, data, budget)
 	case "doc", "ppt", "xls":
-		return imageBlocksAndNote(extractLegacyOLEImages(data))
+		return legacyDocumentBlocks(ext, name, data, budget)
 	default:
 		// zip/msg/eml, or anything else not in supportedExt — unreachable in
 		// practice since the caller gates on supportedExt first, kept as a
@@ -138,13 +143,107 @@ func blocksForFile(ext, name string, data []byte) (blocks []llm.Block, manifestN
 	}
 }
 
-func imageBlocksAndNote(imgs []extractedImage) ([]llm.Block, string) {
-	if len(imgs) == 0 {
-		return nil, "reviewed (no embedded images found)"
+// uploadedImageBlocks handles an image file uploaded as itself.
+func uploadedImageBlocks(data []byte, budget *jobBudget) ([]llm.Block, string) {
+	blocks, outcome := budget.addImage(data, false)
+	switch outcome {
+	case imageDuplicate:
+		return nil, "reviewed (identical to an image already included)"
+	case imageOverCap:
+		return nil, fmt.Sprintf("not reviewed (job's %d-image cap reached)", maxImagesPerJob)
+	case imageInvalid:
+		return nil, "not reviewed (image could not be decoded)"
 	}
-	blocks := make([]llm.Block, 0, len(imgs))
+	if len(blocks) > 1 {
+		return blocks, fmt.Sprintf("reviewed (long image, sent as %d overlapping segments)", len(blocks))
+	}
+	return blocks, "reviewed"
+}
+
+// ooxmlDocumentBlocks sends a docx/pptx as its text followed by its embedded
+// pictures, each labeled with the file they came from so an image is read in
+// the context of its document.
+func ooxmlDocumentBlocks(ext, name string, data []byte, budget *jobBudget) ([]llm.Block, string) {
+	var blocks []llm.Block
+	var textNote string
+	text, truncated, err := extractOOXMLText(data, ext)
+	switch {
+	case err != nil:
+		textNote = "document text NOT reviewed (could not be read)"
+	case text == "":
+		textNote = "document has no text"
+	default:
+		blocks = append(blocks, llm.NewTextBlock("--- "+name+" (document text) ---\n"+text))
+		textNote = "document text reviewed"
+		if truncated {
+			textNote = fmt.Sprintf("document text reviewed only up to the first %d characters; the rest NOT reviewed", maxDocTextChars)
+		}
+	}
+
+	imgBlocks, imgParts := embeddedImageBlocks(extractOOXMLImages(data), budget)
+	if len(imgBlocks) > 0 {
+		blocks = append(blocks, llm.NewTextBlock("--- images embedded in "+name+" ---"))
+		blocks = append(blocks, imgBlocks...)
+	}
+	return blocks, strings.Join(append([]string{textNote}, imgParts...), "; ")
+}
+
+// legacyDocumentBlocks handles a binary doc/ppt/xls, whose text this package
+// can't read — only its embedded pictures are sent, and the note says so, so
+// the model treats the document's content as unreviewed.
+func legacyDocumentBlocks(ext, name string, data []byte, budget *jobBudget) ([]llm.Block, string) {
+	textNote := fmt.Sprintf("document text NOT reviewed (legacy .%s format; only embedded images could be read)", ext)
+	imgBlocks, imgParts := embeddedImageBlocks(extractLegacyOLEImages(data), budget)
+	if len(imgBlocks) == 0 && len(imgParts) == 0 {
+		return nil, fmt.Sprintf("not reviewed (legacy .%s format: text cannot be read and no embedded screenshots found)", ext)
+	}
+	blocks := []llm.Block{}
+	if len(imgBlocks) > 0 {
+		blocks = append(blocks, llm.NewTextBlock("--- images embedded in "+name+" ---"))
+		blocks = append(blocks, imgBlocks...)
+	}
+	return blocks, strings.Join(append([]string{textNote}, imgParts...), "; ")
+}
+
+// embeddedImageBlocks handles the pictures extracted from a document and
+// returns manifest phrases accounting for every one of them — any left out
+// by the image cap is named as not reviewed, so a PASS can't rest on it.
+// Both return values are empty when the document holds no real pictures.
+func embeddedImageBlocks(imgs []extractedImage, budget *jobBudget) ([]llm.Block, []string) {
+	var blocks []llm.Block
+	var included, tiny, dup, overCap, invalid int
 	for _, img := range imgs {
-		blocks = append(blocks, llm.NewImageBlock(img.MediaType, img.Data))
+		b, outcome := budget.addImage(img.Data, true)
+		switch outcome {
+		case imageIncluded:
+			blocks = append(blocks, b...)
+			included++
+		case imageTiny:
+			tiny++
+		case imageDuplicate:
+			dup++
+		case imageOverCap:
+			overCap++
+		case imageInvalid:
+			invalid++
+		}
 	}
-	return blocks, fmt.Sprintf("reviewed (%d embedded image(s) extracted)", len(imgs))
+	if included == 0 && overCap == 0 && invalid == 0 {
+		return nil, nil
+	}
+
+	parts := []string{fmt.Sprintf("%d embedded image(s) reviewed", included)}
+	if tiny > 0 {
+		parts = append(parts, fmt.Sprintf("%d small icon/logo image(s) skipped", tiny))
+	}
+	if dup > 0 {
+		parts = append(parts, fmt.Sprintf("%d duplicate image(s) skipped", dup))
+	}
+	if invalid > 0 {
+		parts = append(parts, fmt.Sprintf("%d image(s) not reviewed (could not be decoded)", invalid))
+	}
+	if overCap > 0 {
+		parts = append(parts, fmt.Sprintf("%d image(s) not reviewed (job's %d-image cap reached)", overCap, maxImagesPerJob))
+	}
+	return blocks, parts
 }

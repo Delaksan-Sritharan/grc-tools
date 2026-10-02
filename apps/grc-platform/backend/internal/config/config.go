@@ -225,11 +225,11 @@ type AIValidationConfig struct {
 	// but the caller must still check APIKey) rather than failing startup,
 	// mirroring the old AI_AGENT_API_KEY guard.
 	APIKey string
-	// Model overrides the default model (ANTHROPIC_MODEL); "" means "use
-	// llm.DefaultModel".
-	Model string
 	// BaseURL overrides the Anthropic API root (ANTHROPIC_BASE_URL), e.g. an
-	// AI gateway; "" means the public Anthropic API.
+	// AI gateway; "" means the public Anthropic API. The gateway manages
+	// model selection itself — there is no model override here; llm.Client
+	// always sends llm.DefaultModel, a fixed value the Anthropic SDK's
+	// request shape requires but which the gateway is free to ignore.
 	BaseURL string
 	// Per-job timeout and worker-pool size are NOT here — they're engineering
 	// tuning knobs with no real per-environment variance, so they're Go
@@ -549,7 +549,6 @@ func Load() (Config, error) {
 		AIValidation: AIValidationConfig{
 			Enabled: os.Getenv("AI_VALIDATION_ENABLED") == "true",
 			APIKey:  os.Getenv("ANTHROPIC_API_KEY"),
-			Model:   os.Getenv("ANTHROPIC_MODEL"),
 			BaseURL: os.Getenv("ANTHROPIC_BASE_URL"),
 		},
 		Email: EmailConfig{

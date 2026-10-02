@@ -1,8 +1,26 @@
 # Screenshot Timestamp Rule
 
-Applies universally — any screenshot submitted as evidence, on any control
-type (DESIGN or OE), must show the laptop's OS clock (taskbar/menu-bar)
-at the moment of capture.
+Applies to screenshots only, on any control type (DESIGN or OE): every
+screenshot submitted as evidence must show the laptop's OS clock
+(taskbar/menu-bar) at the moment of capture.
+
+A screenshot is an image captured from a computer screen — an application
+window, console, admin page or terminal. It is still a screenshot when it
+was pasted into a PDF, Word or PowerPoint file rather than uploaded on its
+own.
+
+This rule does **not** apply to:
+
+- documents themselves: policies, procedures, contracts, meeting minutes,
+  signed or scanned forms;
+- reports exported or printed from a system (PDF, Excel or CSV exports,
+  "Save as PDF" printouts);
+- diagrams, charts, photos and logos.
+
+If you cannot tell whether an image is a screenshot, do not report a clock
+gap for it. If the control's evidence requirement explicitly says a
+timestamp is not needed, do not report it either — only an explicit
+statement counts.
 
 An app-displayed "Generated at" or "Report time" timestamp inside the
 screenshotted application does **not** satisfy this rule — it only proves

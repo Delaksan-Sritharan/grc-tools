@@ -72,11 +72,13 @@ func (r submissionRef) logAttr() slog.Attr {
 // createdBySentinel is CreatedBy for every row written here; no user triggers it.
 const createdBySentinel = "system:ai-validation"
 
-// JobTimeout bounds one job end to end; maxConcurrent sizes the shared worker
-// pool. Constants, not env vars: they never differ per environment.
+// JobTimeout bounds one job from the moment it holds a worker slot;
+// maxConcurrent sizes the shared worker pool; writeTimeout bounds each log-row
+// write. Constants, not env vars: they never differ per environment.
 const (
 	JobTimeout    = 180 * time.Second
 	maxConcurrent = 4
+	writeTimeout  = 15 * time.Second
 )
 
 // Service runs AI Validation jobs. It is safe for concurrent use — each
@@ -90,7 +92,8 @@ type Service struct {
 	population PopulationSource
 	comment    CommentSource
 
-	sem chan struct{}
+	sem   chan struct{}
+	dedup *dedupe
 	// enabled is the master switch — AI_VALIDATION_ENABLED plus a non-empty
 	// ANTHROPIC_API_KEY (checked at construction; see cmd/server/audit_deps.go).
 	// false makes every Trigger* call a no-op.
@@ -117,6 +120,7 @@ func NewService(
 		population: population,
 		comment:    comment,
 		sem:        make(chan struct{}, maxConcurrent),
+		dedup:      newDedupe(),
 		enabled:    enabled,
 	}
 }
@@ -141,13 +145,16 @@ func (s *Service) TriggerPopulation(auditID, controlID, populationID int, actor 
 
 // submissionFetch loads whatever is specific to one submission kind: its
 // file blocks, the manifest text describing them, and any "previous rounds"
-// context (evidence only — population has none). Returning
-// errSubmissionNotFound distinguishes "the round vanished" from an ordinary
-// fetch failure so run can report each with its original message.
-type submissionFetch func(ctx context.Context) (blocks []llm.Block, manifest, previous string, err error)
+// context (evidence: prior rounds + comments; also, for an OE control,
+// the Sample Coverage context — population has neither). control is the
+// same one run already fetched, passed through so fetch doesn't need its
+// own lookup. Returning errSubmissionNotFound distinguishes "the round
+// vanished" from an ordinary fetch failure so run can report each with its
+// original message.
+type submissionFetch func(ctx context.Context, control *model.AuditControl) (blocks []llm.Block, manifest, previous string, err error)
 
 func (s *Service) runEvidence(auditID, controlID, evidenceID int, actor string, skip bool) {
-	s.run(auditID, evidenceRef(evidenceID, controlID), actor, skip, submissionEvidence, func(ctx context.Context) ([]llm.Block, string, string, error) {
+	s.run(auditID, evidenceRef(evidenceID, controlID), actor, skip, submissionEvidence, func(ctx context.Context, control *model.AuditControl) ([]llm.Block, string, string, error) {
 		rounds, err := s.evidence.List(ctx, auditID, controlID, true)
 		if err != nil {
 			return nil, "", "", err
@@ -162,19 +169,26 @@ func (s *Service) runEvidence(auditID, controlID, evidenceID int, actor string, 
 		if current == nil {
 			return nil, "", "", errSubmissionNotFound
 		}
-		blocks, manifest := buildFileContent(ctx, s.evidence, evidenceFileRefs(current.Files))
+		budget := newJobBudget()
+		blocks, manifest := buildFileContent(ctx, s.evidence, evidenceFileRefs(current.Files), budget)
 		previous := previousEvidenceContext(ctx, s.evidence, s.comment, auditID, controlID, evidenceID)
+
+		sampleBlocks, sampleText := sampleContext(ctx, s.population, auditID, controlID, control, budget)
+		blocks = append(blocks, sampleBlocks...)
+		if sampleText != "" {
+			previous += "\n" + sampleText
+		}
 		return blocks, manifest, previous, nil
 	})
 }
 
 func (s *Service) runPopulation(auditID, controlID, populationID int, actor string, skip bool) {
-	s.run(auditID, populationRef(populationID, controlID), actor, skip, submissionPopulation, func(ctx context.Context) ([]llm.Block, string, string, error) {
+	s.run(auditID, populationRef(populationID, controlID), actor, skip, submissionPopulation, func(ctx context.Context, _ *model.AuditControl) ([]llm.Block, string, string, error) {
 		files, err := s.population.ListFiles(ctx, populationID)
 		if err != nil {
 			return nil, "", "", err
 		}
-		blocks, manifest := buildFileContent(ctx, s.population, populationFileRefs(files))
+		blocks, manifest := buildFileContent(ctx, s.population, populationFileRefs(files), newJobBudget())
 		// Population multi-round context assembly is an open item, not yet
 		// settled, so no "previous rounds" text here.
 		return blocks, manifest, "", nil
@@ -182,21 +196,40 @@ func (s *Service) runPopulation(auditID, controlID, populationID int, actor stri
 }
 
 // run is the shared job lifecycle for both an evidence and a population
-// submission: opt-out check, PENDING row, worker-pool slot, control lookup,
-// the submission-kind-specific fetch, the LLM call, and the terminal row.
-// fetch supplies the one piece of behaviour that actually differs between
-// the two submission kinds.
+// submission: opt-out check, then one job per submission at a time — a
+// trigger while a job is queued is absorbed by it, one while it is running
+// makes it run once more afterwards, so the newest row always reflects the
+// latest file set. fetch supplies the one piece of behaviour that actually
+// differs between the two submission kinds.
 func (s *Service) run(auditID int, ref submissionRef, actor string, skip bool, kind submissionKind, fetch submissionFetch) {
 	if skip {
 		s.writeSkipped(context.Background(), ref)
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), JobTimeout)
-	defer cancel()
+	if !s.dedup.claim(ref) {
+		return
+	}
+	for {
+		s.runOnce(auditID, ref, actor, kind, fetch)
+		if !s.dedup.release(ref) {
+			return
+		}
+	}
+}
 
-	s.writePending(ctx, ref)
+// runOnce is one pass of a job: PENDING row, worker-pool slot, control
+// lookup, fetch, the LLM call (unless an identical input was already
+// validated), and the terminal row.
+func (s *Service) runOnce(auditID int, ref submissionRef, actor string, kind submissionKind, fetch submissionFetch) {
+	s.writePending(context.Background(), ref)
 	s.sem <- struct{}{}
 	defer func() { <-s.sem }()
+	s.dedup.markStarted(ref)
+
+	// Started only once a worker slot is held, so time spent queued behind
+	// other jobs doesn't eat into this job's own budget.
+	ctx, cancel := context.WithTimeout(context.Background(), JobTimeout)
+	defer cancel()
 
 	control, err := s.control.GetByID(ctx, auditID, ref.ControlID)
 	if err != nil || control == nil {
@@ -205,7 +238,7 @@ func (s *Service) run(auditID int, ref submissionRef, actor string, skip bool, k
 		return
 	}
 
-	blocks, manifest, previous, err := fetch(ctx)
+	blocks, manifest, previous, err := fetch(ctx, control)
 	if err != nil {
 		if errors.Is(err, errSubmissionNotFound) {
 			s.writeError(ctx, ref, "submission not found")
@@ -220,19 +253,29 @@ func (s *Service) run(auditID int, ref submissionRef, actor string, skip bool, k
 		return
 	}
 
-	result, usage, err := s.call(ctx, control, kind, manifest, previous, blocks)
+	dynamicPrompt := buildDynamicPrompt(control, kind)
+	intro := buildIntro(manifest, previous)
+	key := inputKey(dynamicPrompt, intro, blocks)
+	if cached, ok := s.dedup.lookup(key); ok {
+		// Same input as an earlier job — reuse its verdict; zero tokens
+		// recorded since nothing was sent to the model.
+		s.writeResult(ctx, ref, &cached, llm.Usage{})
+		return
+	}
+
+	result, usage, err := s.call(ctx, dynamicPrompt, intro, blocks)
 	if err != nil {
 		s.writeError(ctx, ref, "AI validation could not complete")
 		slog.Warn("ai validation: call failed", ref.logAttr(), "actor", actor, "err", err)
 		return
 	}
+	s.dedup.store(key, *result)
 	s.writeResult(ctx, ref, result, usage)
 }
 
-// call assembles the user-turn content (manifest + optional previous-rounds
-// context + file blocks) and the system prompt, then makes the one
-// tool call.
-func (s *Service) call(ctx context.Context, control *model.AuditControl, kind submissionKind, manifest, previousContext string, fileBlocks []llm.Block) (*validationResult, llm.Usage, error) {
+// buildIntro is the user turn's leading text: the manifest plus optional
+// previous-rounds context.
+func buildIntro(manifest, previousContext string) string {
 	var intro strings.Builder
 	intro.WriteString("Review this submission.\n\n")
 	intro.WriteString(manifest)
@@ -240,14 +283,19 @@ func (s *Service) call(ctx context.Context, control *model.AuditControl, kind su
 		intro.WriteString("\n")
 		intro.WriteString(previousContext)
 	}
+	return intro.String()
+}
 
+// call makes the one tool call: static + dynamic system prompt, then the
+// intro text followed by the file blocks.
+func (s *Service) call(ctx context.Context, dynamicPrompt, intro string, fileBlocks []llm.Block) (*validationResult, llm.Usage, error) {
 	content := make([]llm.Block, 0, len(fileBlocks)+1)
-	content = append(content, llm.NewTextBlock(intro.String()))
+	content = append(content, llm.NewTextBlock(intro))
 	content = append(content, fileBlocks...)
 
 	res, err := s.llm.Call(ctx, llm.Request{
 		SystemStatic:  staticSystemPrompt,
-		SystemDynamic: buildDynamicPrompt(control, kind),
+		SystemDynamic: dynamicPrompt,
 		Content:       content,
 		Tool:          submitValidationTool(),
 	})
@@ -316,6 +364,11 @@ func (s *Service) writeResult(ctx context.Context, ref submissionRef, vr *valida
 // swallowed — there is no retry, and no way to surface it to anyone but the
 // logs, since this always runs detached from a request.
 func (s *Service) writeRow(ctx context.Context, ref submissionRef, req model.CreateAIValidationLogRequest) {
+	// Detached from the job's deadline: the ERROR row for a timed-out job
+	// must still land, or the submission is left showing PENDING.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
+	defer cancel()
+
 	var err error
 	if ref.isPopulation() {
 		err = s.repo.CreateForPopulation(ctx, ref.PopulationID, req)

@@ -19,6 +19,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	"slices"
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/service"
@@ -31,6 +32,7 @@ type aiValidationHandler struct {
 	svc         service.AIValidationService
 	evidenceSvc service.EvidenceService
 	controlSvc  service.ControlService
+	popSvc      service.PopulationService
 }
 
 // listValidations handles
@@ -107,6 +109,18 @@ func (h *aiValidationHandler) listPopulationValidations(w http.ResponseWriter, r
 	}
 	if !internalEvidenceViewer(r, control) {
 		response.WriteError(w, http.StatusForbidden, response.ErrMsgForbidden)
+		return
+	}
+	// The privilege check above is against this control's team, so the
+	// population must belong to this control — otherwise any populationId
+	// would be readable through a control the caller can see.
+	rounds, err := h.popSvc.ListRounds(ctx, auditID, controlID)
+	if err != nil {
+		response.MapServiceError(ctx, w, err, response.ErrMsgInternal)
+		return
+	}
+	if !slices.ContainsFunc(rounds, func(p *model.AuditPopulation) bool { return p.ID == populationID }) {
+		response.WriteError(w, http.StatusNotFound, response.ErrMsgNotFound)
 		return
 	}
 	validations, err := h.svc.ListByPopulation(ctx, populationID)

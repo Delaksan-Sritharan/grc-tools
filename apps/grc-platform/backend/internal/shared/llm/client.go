@@ -23,6 +23,7 @@ package llm
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -33,7 +34,10 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/option"
 )
 
-// DefaultModel is used when no model override is configured (ANTHROPIC_MODEL).
+// DefaultModel is the value every request sends as Model. There is no
+// override: an AI gateway (ANTHROPIC_BASE_URL) manages model selection
+// itself, and the public Anthropic API otherwise — this is just a fixed
+// value the Anthropic SDK's request shape requires one of.
 const DefaultModel = "claude-sonnet-5"
 
 // defaultMaxTokens is used when a Request leaves MaxTokens unset.
@@ -43,26 +47,47 @@ const defaultMaxTokens = 2000
 // document. The concrete Anthropic SDK type stays unexported so this
 // package's SDK dependency doesn't leak into aivalidation.
 type Block struct {
-	block anthropic.ContentBlockParamUnion
+	block  anthropic.ContentBlockParamUnion
+	digest [sha256.Size]byte
+}
+
+// Digest identifies the block's content (kind, media type and raw bytes), so
+// callers can tell whether two requests would send the model the same input.
+func (b Block) Digest() [sha256.Size]byte { return b.digest }
+
+func digestOf(kind, mediaType string, data []byte) [sha256.Size]byte {
+	h := sha256.New()
+	h.Write([]byte(kind))
+	h.Write([]byte{0})
+	h.Write([]byte(mediaType))
+	h.Write([]byte{0})
+	h.Write(data)
+	return [sha256.Size]byte(h.Sum(nil))
 }
 
 // NewTextBlock wraps plain text (a CSV/TXT file's content, or an instruction).
 func NewTextBlock(text string) Block {
-	return Block{block: anthropic.NewTextBlock(text)}
+	return Block{block: anthropic.NewTextBlock(text), digest: digestOf("text", "", []byte(text))}
 }
 
 // NewImageBlock wraps an image. mediaType is a full MIME type such as
 // "image/png" — the caller is responsible for sniffing/validating it.
 func NewImageBlock(mediaType string, data []byte) Block {
-	return Block{block: anthropic.NewImageBlockBase64(mediaType, base64.StdEncoding.EncodeToString(data))}
+	return Block{
+		block:  anthropic.NewImageBlockBase64(mediaType, base64.StdEncoding.EncodeToString(data)),
+		digest: digestOf("image", mediaType, data),
+	}
 }
 
 // NewPDFBlock wraps a PDF as a native document block — embedded screenshots
 // on a page are visible to the model this way, no separate extraction step.
 func NewPDFBlock(data []byte) Block {
-	return Block{block: anthropic.NewDocumentBlock(anthropic.Base64PDFSourceParam{
-		Data: base64.StdEncoding.EncodeToString(data),
-	})}
+	return Block{
+		block: anthropic.NewDocumentBlock(anthropic.Base64PDFSourceParam{
+			Data: base64.StdEncoding.EncodeToString(data),
+		}),
+		digest: digestOf("pdf", "application/pdf", data),
+	}
 }
 
 // Tool describes the single tool the model is asked to call. Properties is
@@ -119,26 +144,22 @@ type Caller interface {
 // Client is the real Caller, backed by the Anthropic API.
 type Client struct {
 	api     anthropic.Client
-	model   string
 	timeout time.Duration
 }
 
 var _ Caller = (*Client)(nil)
 
-// New constructs a Client. model falls back to DefaultModel when empty.
-// baseURL, when non-empty, replaces the Anthropic API root (an AI gateway).
-// timeout bounds every call (the caller passes aivalidation.JobTimeout).
-func New(apiKey, model, baseURL string, timeout time.Duration) *Client {
-	if model == "" {
-		model = DefaultModel
-	}
+// New constructs a Client, which always sends DefaultModel as Model (see its
+// doc comment). baseURL, when non-empty, replaces the Anthropic API root (an
+// AI gateway). timeout bounds every call (the caller passes
+// aivalidation.JobTimeout).
+func New(apiKey, baseURL string, timeout time.Duration) *Client {
 	opts := []option.RequestOption{option.WithAPIKey(apiKey)}
 	if baseURL != "" {
 		opts = append(opts, option.WithBaseURL(baseURL))
 	}
 	return &Client{
 		api:     anthropic.NewClient(opts...),
-		model:   model,
 		timeout: timeout,
 	}
 }
@@ -163,7 +184,7 @@ func (c *Client) Call(ctx context.Context, req Request) (Result, error) {
 	}
 
 	params := anthropic.MessageNewParams{
-		Model:     anthropic.Model(c.model),
+		Model:     anthropic.Model(DefaultModel),
 		MaxTokens: maxTokens,
 		System: []anthropic.TextBlockParam{
 			{Text: req.SystemStatic, CacheControl: anthropic.NewCacheControlEphemeralParam()},
