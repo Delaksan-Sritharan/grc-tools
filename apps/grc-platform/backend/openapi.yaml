@@ -1977,6 +1977,11 @@ paths:
           enum:
           - SOURCE_REGISTER
           - ASSIGNMENT
+      - name: for_register
+        in: query
+        description: Source register ID. Keeps only teams that may be the assignment team for a risk in that register — Managed Services teams for a Managed Services register, every other team otherwise.
+        schema:
+          type: integer
       - name: mine
         in: query
         description: '"true" restricts the list to the caller''s own risk teams. Only narrows anything for a team-scoped-only caller (Risk Assigner/Owner); Compliance/Management/Admin always see every team regardless.'
@@ -2454,6 +2459,11 @@ paths:
           - Q2
           - Q3
           - Q4
+      - name: customer_id
+        in: query
+        description: Required for a Managed Services register, whose risk codes count per customer; rejected for any other.
+        schema:
+          type: integer
       responses:
         '200':
           description: Next sequence number
@@ -2505,6 +2515,21 @@ paths:
       - name: owner_id
         in: query
         description: Comma-separated owner user IDs.
+        schema:
+          type: string
+      - name: customer_id
+        in: query
+        description: Comma-separated customer IDs (Managed Services risks).
+        schema:
+          type: string
+      - name: environment
+        in: query
+        description: Comma-separated environments — PRODUCTION, NON_PRODUCTION, DR (Managed Services risks).
+        schema:
+          type: string
+      - name: platform_id
+        in: query
+        description: Comma-separated platform IDs (Aggregated risks).
         schema:
           type: string
       - name: submitted_from
@@ -2878,7 +2903,7 @@ paths:
       tags:
       - Risk Workflow
       summary: Cancel a risk
-      description: Soft-deletes a risk by moving it to CANCELLED. Only valid from PENDING_RISK_OWNER_APPROVAL.
+      description: Soft-deletes a risk by moving it to CANCELLED. Only valid while no Risk Owner has ever approved it — from PENDING_RISK_OWNER_APPROVAL, or from PENDING_REVISION when owner_first_approved_at is unset.
       operationId: cancelRisk
       parameters:
       - $ref: '#/components/parameters/RiskId'
@@ -5092,6 +5117,22 @@ components:
         limit:
           type: integer
     # --- Risk Hub: lookups ------------------------------------------------------
+    LookupRef:
+      type: object
+      description: A register-template lookup value (platform, customer, product or deployment type) on one risk.
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        code:
+          type: string
+          description: Customers only.
+        status:
+          type: string
+          enum:
+          - ACTIVE
+          - INACTIVE
     Team:
       type: object
       properties:
@@ -5107,6 +5148,13 @@ components:
           nullable: true
         team_type:
           type: string
+        register_template:
+          description: On a register, which fields its risks carry; on an assignment team, which registers' pickers offer it.
+          type: string
+          enum:
+          - STANDARD
+          - AGGREGATED
+          - MANAGED_SERVICES
         status:
           type: string
     RiskScore:
@@ -5278,6 +5326,31 @@ components:
           type: string
         remarks:
           type: string
+        platform_ids:
+          type: array
+          items:
+            type: integer
+          description: Aggregated registers only; at least one ACTIVE platform.
+        customer_id:
+          type: integer
+          description: Managed Services registers only (required there); an ACTIVE customer, whose code goes into the risk code.
+        deployment_type_id:
+          type: integer
+          description: Managed Services registers only (required there).
+        product_ids:
+          type: array
+          items:
+            type: integer
+          description: Managed Services registers only; at least one ACTIVE product.
+        environments:
+          type: array
+          items:
+            type: string
+            enum:
+            - PRODUCTION
+            - NON_PRODUCTION
+            - DR
+          description: Managed Services registers only; at least one. A Managed Services register also rejects compliance_reference_ids.
     CreateRiskResponse:
       type: object
       properties:
@@ -5325,6 +5398,27 @@ components:
         created_at:
           type: string
           format: date-time
+        register_template:
+          type: string
+          enum:
+          - STANDARD
+          - AGGREGATED
+          - MANAGED_SERVICES
+        customer_name:
+          type: string
+          nullable: true
+        environments:
+          type: array
+          items:
+            type: string
+            enum:
+            - PRODUCTION
+            - NON_PRODUCTION
+            - DR
+        platform_names:
+          type: array
+          items:
+            type: string
     RiskListPage:
       type: object
       properties:
@@ -5545,6 +5639,36 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/RiskAssessment'
+        register_template:
+          type: string
+          enum:
+          - STANDARD
+          - AGGREGATED
+          - MANAGED_SERVICES
+        customer:
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/LookupRef'
+        deployment_type:
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/LookupRef'
+        products:
+          type: array
+          items:
+            $ref: '#/components/schemas/LookupRef'
+        platforms:
+          type: array
+          items:
+            $ref: '#/components/schemas/LookupRef'
+        environments:
+          type: array
+          items:
+            type: string
+            enum:
+            - PRODUCTION
+            - NON_PRODUCTION
+            - DR
     UpdateActionStepRequest:
       type: object
       properties:
@@ -5650,6 +5774,28 @@ components:
           type: integer
           nullable: true
           description: Full-edit only (editable before risk owner approval).
+        platform_ids:
+          type: array
+          items:
+            type: integer
+          description: Full-edit only (ignored once a Risk Owner has approved). Omit to leave unchanged; otherwise the complete set. There is no customer_id — a risk's customer never changes.
+        deployment_type_id:
+          type: integer
+          description: Full-edit only.
+        product_ids:
+          type: array
+          items:
+            type: integer
+          description: Full-edit only; the complete set.
+        environments:
+          type: array
+          items:
+            type: string
+            enum:
+            - PRODUCTION
+            - NON_PRODUCTION
+            - DR
+          description: Full-edit only; the complete set.
     RejectRiskRequest:
       type: object
       required:
@@ -6397,6 +6543,13 @@ components:
           type: string
         team_type:
           type: string
+        register_template:
+          description: Defaults to STANDARD.
+          type: string
+          enum:
+          - STANDARD
+          - AGGREGATED
+          - MANAGED_SERVICES
     UpdateRiskTeamRequest:
       type: object
       required:
@@ -6415,6 +6568,13 @@ components:
           type: string
         status:
           type: string
+        register_template:
+          description: Omit to leave unchanged. Changing it once the register has risks is a 409.
+          type: string
+          enum:
+          - STANDARD
+          - AGGREGATED
+          - MANAGED_SERVICES
     # --- Risk Compliance References -----------------------------------------
     CreateComplianceReferenceRequest:
       type: object

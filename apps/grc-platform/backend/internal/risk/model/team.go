@@ -23,8 +23,20 @@ type Team struct {
 	Code        *string `json:"code"`
 	Description *string `json:"description"`
 	TeamType    string  `json:"team_type"`
-	Status      string  `json:"status"`
+	// RegisterTemplate is STANDARD, AGGREGATED or MANAGED_SERVICES. On a
+	// register it decides which fields its risks carry (Add Risk reads it to
+	// show the right form); on an assignment team, which registers' pickers
+	// offer it. See RISK_MODULE_DESIGN.md §14.
+	RegisterTemplate string `json:"register_template"`
+	Status           string `json:"status"`
 }
+
+// Register templates, as stored in risk_team.register_template.
+const (
+	TemplateStandard        = "STANDARD"
+	TemplateAggregated      = "AGGREGATED"
+	TemplateManagedServices = "MANAGED_SERVICES"
+)
 
 // ListTeamsFilter controls which teams are returned by GET /api/v1/risks/teams.
 // Type uses semantic values: "SOURCE_REGISTER" returns teams where team_type
@@ -39,6 +51,11 @@ type ListTeamsFilter struct {
 	// management table — which needs to show and let someone reactivate an
 	// inactive team, not just hide it — sets it true.
 	IncludeInactive bool
+	// ForRegisterID, when set, keeps only teams that may be picked as the
+	// assignment team for a risk in that source register: Managed Services
+	// registers take only Managed Services teams (the SRE teams), every other
+	// register takes every team but those.
+	ForRegisterID int
 }
 
 // CreateTeamRequest is the payload for POST /api/v1/risks/teams.
@@ -47,6 +64,8 @@ type CreateTeamRequest struct {
 	Code        *string `json:"code"`
 	Description string  `json:"description"`
 	TeamType    string  `json:"team_type"`
+	// RegisterTemplate defaults to STANDARD when empty.
+	RegisterTemplate string `json:"register_template,omitempty"`
 }
 
 // UpdateTeamRequest is the payload for PUT /api/v1/risks/teams/{id}.
@@ -56,4 +75,7 @@ type UpdateTeamRequest struct {
 	Description string  `json:"description"`
 	TeamType    string  `json:"team_type"`
 	Status      string  `json:"status"`
+	// RegisterTemplate empty leaves it unchanged. Changing it once the register
+	// has risks is refused by the entity with a 409.
+	RegisterTemplate string `json:"register_template,omitempty"`
 }

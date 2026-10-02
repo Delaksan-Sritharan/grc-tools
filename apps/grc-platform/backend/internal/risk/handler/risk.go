@@ -32,7 +32,8 @@ import (
 )
 
 // handleNextSequenceID serves GET /api/v1/risks/next-sequence-id.
-// Required query params: source_register_id, year, quarter.
+// Required query params: source_register_id, year, quarter; customer_id too
+// for a Managed Services register.
 // Returns a preview of the next available sequence number for the risk code.
 // This does not reserve the number — the actual code is assigned atomically on POST.
 func (d *Deps) handleNextSequenceID(w http.ResponseWriter, r *http.Request) {
@@ -67,7 +68,20 @@ func (d *Deps) handleNextSequenceID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	nextID, err := d.Risk.NextSequenceID(r.Context(), sourceRegisterID)
+	// customer_id is required for a Managed Services register, whose risk
+	// codes count per customer, and rejected for any other — by the entity,
+	// whose 400 passes through. Here it only has to be a positive integer.
+	var customerID *int
+	if raw := q.Get("customer_id"); raw != "" {
+		c, err := strconv.Atoi(raw)
+		if err != nil || c <= 0 {
+			response.WriteError(w, http.StatusBadRequest, "customer_id must be a positive integer")
+			return
+		}
+		customerID = &c
+	}
+
+	nextID, err := d.Risk.NextSequenceID(r.Context(), sourceRegisterID, customerID)
 	if err != nil {
 		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
 		return

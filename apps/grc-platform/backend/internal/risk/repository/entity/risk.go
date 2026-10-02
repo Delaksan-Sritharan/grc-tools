@@ -78,6 +78,46 @@ type entRisk struct {
 	UpdatedBy              string    `json:"updatedBy"`
 	EffectiveRiskLevel     *string   `json:"effectiveRiskLevel"`
 	EffectiveColorCode     *string   `json:"effectiveColorCode"`
+	RegisterTemplate       string    `json:"registerTemplate"`
+	CustomerName           *string   `json:"customerName"`
+	Environments           []string  `json:"environments"`
+	PlatformNames          []string  `json:"platformNames"`
+}
+
+// entLookupRef is a register-template lookup value on one risk.
+type entLookupRef struct {
+	ID     int     `json:"id"`
+	Name   string  `json:"name"`
+	Code   *string `json:"code"`
+	Status string  `json:"status"`
+}
+
+func (e entLookupRef) toModel() model.LookupRef {
+	return model.LookupRef{ID: e.ID, Name: e.Name, Code: e.Code, Status: e.Status}
+}
+
+func lookupRefPtr(e *entLookupRef) *model.LookupRef {
+	if e == nil {
+		return nil
+	}
+	m := e.toModel()
+	return &m
+}
+
+func lookupRefs(es []entLookupRef) []model.LookupRef {
+	out := make([]model.LookupRef, 0, len(es))
+	for _, e := range es {
+		out = append(out, e.toModel())
+	}
+	return out
+}
+
+// nonNilStrings keeps a list field [] rather than null in responses.
+func nonNilStrings(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }
 
 type entScore struct {
@@ -124,6 +164,9 @@ func (r *riskRepository) List(ctx context.Context, filter model.ListRisksFilter)
 		"riskTypeKeys":           filter.RiskTypes,
 		"treatmentStrategyKeys":  filter.TreatmentStrategies,
 		"ownerIds":               filter.OwnerIDs,
+		"customerIds":            filter.CustomerIDs,
+		"environmentKeys":        filter.Environments,
+		"platformIds":            filter.PlatformIDs,
 		"submittedFrom":          filter.SubmittedFrom,
 		"submittedTo":            filter.SubmittedTo,
 		"dueFrom":                filter.DueFrom,
@@ -174,6 +217,10 @@ func (r *riskRepository) List(ctx context.Context, filter model.ListRisksFilter)
 			RejectionComment:   e.RejectionComment,
 			RejectionStage:     e.RejectionStage,
 			CreatedAt:          e.CreatedOn.UTC().Format(time.RFC3339Nano),
+			RegisterTemplate:   e.RegisterTemplate,
+			CustomerName:       e.CustomerName,
+			Environments:       nonNilStrings(e.Environments),
+			PlatformNames:      nonNilStrings(e.PlatformNames),
 		})
 	}
 	return page, nil
@@ -223,7 +270,11 @@ func (r *riskRepository) GetByID(ctx context.Context, id int) (*model.RiskDetail
 				CompletedDate *string `json:"completedDate"`
 			} `json:"steps"`
 		} `json:"actionPlan"`
-		Assessments []entAssessment `json:"assessments"`
+		Assessments    []entAssessment `json:"assessments"`
+		Customer       *entLookupRef   `json:"customer"`
+		DeploymentType *entLookupRef   `json:"deploymentType"`
+		Products       []entLookupRef  `json:"products"`
+		Platforms      []entLookupRef  `json:"platforms"`
 	}
 	if err := r.c.Get(ctx, fmt.Sprintf("/risks/%d/detail", id), &e); err != nil {
 		return nil, fmt.Errorf("get risk %d: %w", id, err)
@@ -289,6 +340,13 @@ func (r *riskRepository) GetByID(ctx context.Context, id int) (*model.RiskDetail
 			ID: cat.ID, Name: cat.Name, Description: cat.Description,
 		})
 	}
+
+	d.RegisterTemplate = e.RegisterTemplate
+	d.Customer = lookupRefPtr(e.Customer)
+	d.DeploymentType = lookupRefPtr(e.DeploymentType)
+	d.Products = lookupRefs(e.Products)
+	d.Platforms = lookupRefs(e.Platforms)
+	d.Environments = nonNilStrings(e.Environments)
 
 	if e.ActionPlan != nil {
 		ap := model.ActionPlanDetail{
@@ -387,6 +445,11 @@ func (r *riskRepository) Create(ctx context.Context, req model.CreateRiskRequest
 		"actionSteps":            steps,
 		"complianceReferenceIds": req.ComplianceReferenceIDs,
 		"riskCategoryIds":        req.RiskCategoryIDs,
+		"platformIds":            req.PlatformIDs,
+		"customerId":             req.CustomerID,
+		"deploymentTypeId":       req.DeploymentTypeID,
+		"productIds":             req.ProductIDs,
+		"environments":           req.Environments,
 		"createdBy":              createdBy,
 	}
 
@@ -456,12 +519,17 @@ func (r *riskRepository) SetOwnerFirstApprovedAt(ctx context.Context, id int, up
 }
 
 // NextSequenceID previews the next risk code's sequence number without
-// consuming it.
-func (r *riskRepository) NextSequenceID(ctx context.Context, sourceRegisterID int) (int, error) {
+// consuming it. customerID is required for a Managed Services register, which
+// counts per customer, and must be nil for any other; the entity enforces both.
+func (r *riskRepository) NextSequenceID(ctx context.Context, sourceRegisterID int, customerID *int) (int, error) {
 	var resp struct {
 		NextSequenceNumber int `json:"nextSequenceNumber"`
 	}
-	if err := r.c.Get(ctx, fmt.Sprintf("/risks/next-sequence-number?sourceRegisterId=%d", sourceRegisterID), &resp); err != nil {
+	path := fmt.Sprintf("/risks/next-sequence-number?sourceRegisterId=%d", sourceRegisterID)
+	if customerID != nil {
+		path += fmt.Sprintf("&customerId=%d", *customerID)
+	}
+	if err := r.c.Get(ctx, path, &resp); err != nil {
 		return 0, fmt.Errorf("next sequence id: %w", err)
 	}
 	return resp.NextSequenceNumber, nil

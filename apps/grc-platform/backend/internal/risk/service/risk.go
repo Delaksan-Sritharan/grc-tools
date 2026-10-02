@@ -35,7 +35,7 @@ type RiskService interface {
 	List(ctx context.Context, filter model.ListRisksFilter) (*model.RiskListPage, error)
 	GetByID(ctx context.Context, id int) (*model.RiskDetail, error)
 	Create(ctx context.Context, req model.CreateRiskRequest, createdBy string) (*model.CreateRiskResponse, error)
-	NextSequenceID(ctx context.Context, sourceRegisterID int) (int, error)
+	NextSequenceID(ctx context.Context, sourceRegisterID int, customerID *int) (int, error)
 	Update(ctx context.Context, id int, req model.UpdateRiskRequest, updatedBy string) error
 	UpdateAssignees(ctx context.Context, id int, req model.UpdateAssigneesRequest, updatedBy string) error
 
@@ -78,8 +78,8 @@ func (s *riskService) Create(ctx context.Context, req model.CreateRiskRequest, c
 	return s.repo.Create(ctx, req, createdBy)
 }
 
-func (s *riskService) NextSequenceID(ctx context.Context, sourceRegisterID int) (int, error) {
-	return s.repo.NextSequenceID(ctx, sourceRegisterID)
+func (s *riskService) NextSequenceID(ctx context.Context, sourceRegisterID int, customerID *int) (int, error) {
+	return s.repo.NextSequenceID(ctx, sourceRegisterID, customerID)
 }
 
 // Update saves risk field changes. If a restricted field changed while the risk is
@@ -293,16 +293,35 @@ func (s *riskService) Close(ctx context.Context, id int, byUserEmail string) err
 	return s.repo.TransitionStatus(ctx, id, model.StatusPendingComplianceClosure, model.StatusClosed, byUserEmail)
 }
 
-// Cancel soft-deletes a risk by setting it to CANCELLED. Only valid from PENDING_RISK_OWNER_APPROVAL.
+// Cancel soft-deletes a risk by setting it to CANCELLED, which is allowed only
+// while no Risk Owner has ever approved it: from PENDING_RISK_OWNER_APPROVAL,
+// or from PENDING_REVISION when owner_first_approved_at is still unset. The
+// second case lets a risk raised under the wrong customer — which is locked,
+// being part of the risk code — be cancelled and re-raised after the owner
+// rejects it (RISK_MODULE_DESIGN.md §14).
 func (s *riskService) Cancel(ctx context.Context, id int, byUserEmail string) error {
-	status, err := s.repo.GetWorkflowStatus(ctx, id)
+	risk, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return err
 	}
-	if status != model.StatusPendingOwnerApproval {
-		return &apierror.Error{StatusCode: http.StatusConflict, Body: fmt.Sprintf("cannot be cancelled from status: %s", status)}
+	if !cancellable(risk.WorkflowStatus, risk.OwnerFirstApprovedAt) {
+		return &apierror.Error{StatusCode: http.StatusConflict, Body: fmt.Sprintf("cannot be cancelled from status: %s", risk.WorkflowStatus)}
 	}
-	return s.repo.TransitionStatus(ctx, id, model.StatusPendingOwnerApproval, model.StatusCancelled, byUserEmail)
+	// Guarded on the status just read, so a concurrent transition makes this
+	// a 409 rather than cancelling a risk that has since moved on.
+	return s.repo.TransitionStatus(ctx, id, risk.WorkflowStatus, model.StatusCancelled, byUserEmail)
+}
+
+// cancellable reports whether a risk in status, first owner-approved at
+// ownerFirstApprovedAt (nil or "" if never), may be cancelled.
+func cancellable(status string, ownerFirstApprovedAt *string) bool {
+	switch status {
+	case model.StatusPendingOwnerApproval:
+		return true
+	case model.StatusPendingRevision:
+		return ownerFirstApprovedAt == nil || *ownerFirstApprovedAt == ""
+	}
+	return false
 }
 
 func stringVal(p *string) string {

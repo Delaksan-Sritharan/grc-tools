@@ -38,6 +38,7 @@ type fakeRiskEntity struct {
 	createdBy string
 	createdOn time.Time
 	noPlan    bool           // serve the risk without a STANDARD action plan
+	approved  bool           // serve the risk as already owner-approved
 	patch     map[string]any // nil until a PATCH arrives
 }
 
@@ -59,6 +60,9 @@ func (f *fakeRiskEntity) serve(t *testing.T) *riskRepository {
 				"assignmentTeamId":     3,
 				"sourceRegisterId":     2,
 				"emailSubject":         "Subject",
+			}
+			if f.approved {
+				detail["ownerFirstApprovedAt"] = "2026-09-01"
 			}
 			if !f.noPlan {
 				detail["actionPlan"] = map[string]any{"id": 5, "actionOwnerId": 13, "status": "COMPLETED", "planType": "STANDARD"}
@@ -254,5 +258,51 @@ func TestUpdateAssigneesWithoutPlanStillAppliesOtherFields(t *testing.T) {
 	}
 	if got := strings.Join(changedFields(t, f.patch), ","); got != "owner_id" {
 		t.Errorf("changeLog fields = %s, want owner_id", got)
+	}
+}
+
+// templateEdit sets every editable register-template field.
+func templateEdit() model.UpdateRiskRequest {
+	return model.UpdateRiskRequest{
+		RiskTitle:        "Title",
+		RiskDescription:  "Description",
+		EmailSubject:     "Subject",
+		PlatformIDs:      []int{1, 2},
+		DeploymentTypeID: intPtr(4),
+		ProductIDs:       []int{5},
+		Environments:     []string{"DR"},
+	}
+}
+
+// Before the owner's first approval the register-template fields are a full
+// edit and go to the entity, which checks them against the template.
+func TestUpdate_TemplateFieldsSentBeforeOwnerApproval(t *testing.T) {
+	f := &fakeRiskEntity{status: model.StatusPendingOwnerApproval}
+	repo := f.serve(t)
+	if err := repo.Update(context.Background(), 7, templateEdit(), "u1"); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	for _, key := range []string{"platformIds", "deploymentTypeId", "productIds", "environments"} {
+		if _, ok := f.patch[key]; !ok {
+			t.Errorf("patch body missing %s: %v", key, f.patch)
+		}
+	}
+}
+
+// Once an owner has approved, they are fixed: dropped, not rejected, so the
+// rest of the edit still lands — the same rule as gross score.
+func TestUpdate_TemplateFieldsDroppedAfterOwnerApproval(t *testing.T) {
+	f := &fakeRiskEntity{status: model.StatusInRemediation, approved: true}
+	repo := f.serve(t)
+	if err := repo.Update(context.Background(), 7, templateEdit(), "u1"); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if f.patch == nil {
+		t.Fatal("no PATCH sent; the rest of the edit should still land")
+	}
+	for _, key := range []string{"platformIds", "deploymentTypeId", "productIds", "environments"} {
+		if _, ok := f.patch[key]; ok {
+			t.Errorf("patch body carries %s after owner approval: %v", key, f.patch[key])
+		}
 	}
 }

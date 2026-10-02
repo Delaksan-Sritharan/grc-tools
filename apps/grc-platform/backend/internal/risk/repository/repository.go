@@ -52,7 +52,7 @@ type RiskRepository interface {
 	ResubmitTransition(ctx context.Context, id int, fromStatus, toStatus, updatedBy string) error
 	SetRiskType(ctx context.Context, id int, riskType, updatedBy string) error
 	SetOwnerFirstApprovedAt(ctx context.Context, id int, updatedBy string) error
-	NextSequenceID(ctx context.Context, sourceRegisterID int) (int, error)
+	NextSequenceID(ctx context.Context, sourceRegisterID int, customerID *int) (int, error)
 }
 
 // RiskAssessmentRepository is the data-access contract for residual risk assessments.

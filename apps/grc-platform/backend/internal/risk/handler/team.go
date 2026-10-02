@@ -64,6 +64,16 @@ func (d *Deps) handleListTeams(w http.ResponseWriter, r *http.Request) {
 		Type:            r.URL.Query().Get("type"),
 		IncludeInactive: r.URL.Query().Get("includeInactive") == "true",
 	}
+	// for_register narrows an assignment picker to the teams that fit that
+	// register's template (RISK_MODULE_DESIGN.md §14).
+	if raw := r.URL.Query().Get("for_register"); raw != "" {
+		id, err := strconv.Atoi(raw)
+		if err != nil || id <= 0 {
+			response.WriteError(w, http.StatusBadRequest, "for_register must be a positive integer")
+			return
+		}
+		filter.ForRegisterID = id
+	}
 	if filter.IncludeInactive && !auth.RequirePrivilege(r.Context(), w, privilege.ManageRiskHub) {
 		return
 	}
@@ -143,6 +153,10 @@ func (d *Deps) handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 		response.WriteError(w, http.StatusBadRequest, "team_type is required")
 		return
 	}
+	if !validRegisterTemplate(req.RegisterTemplate) {
+		response.WriteError(w, http.StatusBadRequest, invalidRegisterTemplateMsg)
+		return
+	}
 
 	createdBy := ""
 	if user := auth.FromContext(r.Context()); user != nil {
@@ -155,7 +169,7 @@ func (d *Deps) handleCreateTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.ActivityLog.Log(r.Context(), createdBy, adminactivity.ActionCreated, adminactivity.EntityRiskTeam, t.ID,
-		map[string]any{"name": t.Name, "teamType": t.TeamType})
+		map[string]any{"name": t.Name, "teamType": t.TeamType, "registerTemplate": t.RegisterTemplate})
 	response.WriteJSONValue(w, http.StatusCreated, t)
 }
 
@@ -184,6 +198,10 @@ func (d *Deps) handleUpdateTeam(w http.ResponseWriter, r *http.Request) {
 		response.WriteError(w, http.StatusBadRequest, "name is required")
 		return
 	}
+	if !validRegisterTemplate(req.RegisterTemplate) {
+		response.WriteError(w, http.StatusBadRequest, invalidRegisterTemplateMsg)
+		return
+	}
 
 	updatedBy := ""
 	if user := auth.FromContext(r.Context()); user != nil {
@@ -195,6 +213,18 @@ func (d *Deps) handleUpdateTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.ActivityLog.Log(r.Context(), updatedBy, adminactivity.ActionUpdated, adminactivity.EntityRiskTeam, id,
-		map[string]any{"name": req.Name})
+		map[string]any{"name": req.Name, "registerTemplate": req.RegisterTemplate})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+const invalidRegisterTemplateMsg = "register_template must be STANDARD, AGGREGATED, or MANAGED_SERVICES"
+
+// validRegisterTemplate accepts a known template, or "" for "default" on
+// create and "unchanged" on update.
+func validRegisterTemplate(t string) bool {
+	switch t {
+	case "", model.TemplateStandard, model.TemplateAggregated, model.TemplateManagedServices:
+		return true
+	}
+	return false
 }

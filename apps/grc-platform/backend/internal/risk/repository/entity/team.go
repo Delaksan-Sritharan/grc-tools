@@ -41,7 +41,21 @@ type entTeam struct {
 	Code        *string `json:"code"`
 	Description *string `json:"description"`
 	TeamType    string  `json:"teamType"`
-	Status      string  `json:"status"`
+	// RegisterTemplate: STANDARD | AGGREGATED | MANAGED_SERVICES.
+	RegisterTemplate string `json:"registerTemplate"`
+	Status           string `json:"status"`
+}
+
+func (t entTeam) toModel() *model.Team {
+	return &model.Team{
+		ID:               t.ID,
+		Name:             t.Name,
+		Code:             t.Code,
+		Description:      t.Description,
+		TeamType:         t.TeamType,
+		RegisterTemplate: t.RegisterTemplate,
+		Status:           t.Status,
+	}
 }
 
 type searchTeamsResponse struct {
@@ -71,26 +85,34 @@ func (r *teamRepository) List(ctx context.Context, filter model.ListTeamsFilter)
 		statusKey = ""
 	}
 
+	// Narrow to the teams that fit the register's template.
+	var templateKeys []string
+	if filter.ForRegisterID > 0 {
+		var reg entTeam
+		if err := r.c.Get(ctx, fmt.Sprintf("/risk/teams/%d", filter.ForRegisterID), &reg); err != nil {
+			return nil, fmt.Errorf("list teams for register %d: %w", filter.ForRegisterID, err)
+		}
+		if reg.RegisterTemplate == model.TemplateManagedServices {
+			templateKeys = []string{model.TemplateManagedServices}
+		} else {
+			templateKeys = []string{model.TemplateStandard, model.TemplateAggregated}
+		}
+	}
+
 	var teams []*model.Team
 	for offset := 0; ; offset += pageLimit {
 		body := map[string]any{
-			"teamTypeKeys": teamTypeKeys,
-			"statusKey":    statusKey,
-			"pagination":   map[string]int{"limit": pageLimit, "offset": offset},
+			"teamTypeKeys":         teamTypeKeys,
+			"registerTemplateKeys": templateKeys,
+			"statusKey":            statusKey,
+			"pagination":           map[string]int{"limit": pageLimit, "offset": offset},
 		}
 		var resp searchTeamsResponse
 		if err := r.c.Post(ctx, "/risk/teams/search", body, &resp); err != nil {
 			return nil, fmt.Errorf("list teams: %w", err)
 		}
 		for _, t := range resp.Teams {
-			teams = append(teams, &model.Team{
-				ID:          t.ID,
-				Name:        t.Name,
-				Code:        t.Code,
-				Description: t.Description,
-				TeamType:    t.TeamType,
-				Status:      t.Status,
-			})
+			teams = append(teams, t.toModel())
 		}
 		if len(resp.Teams) < pageLimit {
 			return teams, nil
@@ -110,11 +132,14 @@ func (r *teamRepository) Create(ctx context.Context, req model.CreateTeamRequest
 		"status":      "ACTIVE",
 		"createdBy":   createdBy,
 	}
+	if req.RegisterTemplate != "" {
+		body["registerTemplate"] = req.RegisterTemplate
+	}
 	var t entTeam
 	if err := r.c.Post(ctx, "/risk/teams", body, &t); err != nil {
 		return nil, fmt.Errorf("create team: %w", err)
 	}
-	return &model.Team{ID: t.ID, Name: t.Name, Code: t.Code, Description: t.Description, TeamType: t.TeamType, Status: t.Status}, nil
+	return t.toModel(), nil
 }
 
 // Update edits a risk team via the entity's PATCH /risk/teams/{id}.
@@ -126,6 +151,9 @@ func (r *teamRepository) Update(ctx context.Context, id int, req model.UpdateTea
 		"teamType":    req.TeamType,
 		"status":      req.Status,
 		"updatedBy":   updatedBy,
+	}
+	if req.RegisterTemplate != "" {
+		body["registerTemplate"] = req.RegisterTemplate
 	}
 	if err := r.c.Patch(ctx, fmt.Sprintf("/risk/teams/%d", id), body, &entTeam{}); err != nil {
 		return fmt.Errorf("update team %d: %w", id, err)
