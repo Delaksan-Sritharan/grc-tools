@@ -284,11 +284,64 @@ func (s *riskService) CreateRisk(ctx context.Context, req domain.CreateRiskReque
 			return domain.Risk{}, &apierror.ValidationError{Msg: fmt.Sprintf("action step %d description is required", i+1)}
 		}
 	}
+	if err := normalizeTemplateFields(&req); err != nil {
+		return domain.Risk{}, err
+	}
 	r, err := s.repo.CreateRisk(ctx, req)
 	if err != nil {
 		return domain.Risk{}, err
 	}
 	return *r, nil
+}
+
+var validEnvironments = map[string]bool{"PRODUCTION": true, "NON_PRODUCTION": true, "DR": true}
+
+// normalizeTemplateFields checks the shape of the register-template fields
+// (positive ids, no duplicates, known environments) and upper-cases the
+// environments. Which fields the register's template allows and requires is
+// checked by the repository, which reads the template inside the create
+// transaction. A duplicate id would otherwise reach a junction table's
+// primary key and surface as a 500.
+func normalizeTemplateFields(req *domain.CreateRiskRequest) error {
+	if err := checkIDList("platformIds", req.PlatformIDs); err != nil {
+		return err
+	}
+	if err := checkIDList("productIds", req.ProductIDs); err != nil {
+		return err
+	}
+	if req.CustomerID != nil && *req.CustomerID <= 0 {
+		return &apierror.ValidationError{Msg: "customerId must be a positive integer"}
+	}
+	if req.DeploymentTypeID != nil && *req.DeploymentTypeID <= 0 {
+		return &apierror.ValidationError{Msg: "deploymentTypeId must be a positive integer"}
+	}
+	seen := map[string]bool{}
+	for i, env := range req.Environments {
+		up := strings.ToUpper(env)
+		if !validEnvironments[up] {
+			return &apierror.ValidationError{Msg: "environments must be PRODUCTION, NON_PRODUCTION, or DR"}
+		}
+		if seen[up] {
+			return &apierror.ValidationError{Msg: "environments contains " + up + " more than once"}
+		}
+		seen[up] = true
+		req.Environments[i] = up
+	}
+	return nil
+}
+
+func checkIDList(field string, ids []int) error {
+	seen := map[int]bool{}
+	for _, id := range ids {
+		if id <= 0 {
+			return &apierror.ValidationError{Msg: field + " must contain positive integers"}
+		}
+		if seen[id] {
+			return &apierror.ValidationError{Msg: fmt.Sprintf("%s contains %d more than once", field, id)}
+		}
+		seen[id] = true
+	}
+	return nil
 }
 
 func (s *riskService) UpdateRisk(ctx context.Context, id int, req domain.UpdateRiskRequest) (domain.Risk, error) {
@@ -340,13 +393,16 @@ func (s *riskService) UpdateRisk(ctx context.Context, id int, req domain.UpdateR
 }
 
 // NextSequenceNumber previews the sequence number the next risk created for
-// this source register would get. It consumes nothing — CreateRisk owns the
-// increment.
-func (s *riskService) NextSequenceNumber(ctx context.Context, sourceRegisterID int) (domain.NextSequenceResponse, error) {
+// this source register (and, for a Managed Services register, this customer)
+// would get. It consumes nothing — CreateRisk owns the increment.
+func (s *riskService) NextSequenceNumber(ctx context.Context, sourceRegisterID int, customerID *int) (domain.NextSequenceResponse, error) {
 	if sourceRegisterID <= 0 {
 		return domain.NextSequenceResponse{}, &apierror.ValidationError{Msg: "sourceRegisterId must be a positive integer"}
 	}
-	n, err := s.repo.NextSequenceNumber(ctx, sourceRegisterID)
+	if customerID != nil && *customerID <= 0 {
+		return domain.NextSequenceResponse{}, &apierror.ValidationError{Msg: "customerId must be a positive integer"}
+	}
+	n, err := s.repo.NextSequenceNumber(ctx, sourceRegisterID, customerID)
 	if err != nil {
 		return domain.NextSequenceResponse{}, err
 	}

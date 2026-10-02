@@ -1239,6 +1239,21 @@ type CreateRiskRequest struct {
 	// GRC frontend only ever sends one today via a single-select dropdown.
 	RiskCategoryIDs []int `json:"riskCategoryIds"`
 
+	// Register-template fields (RISK_MODULE_DESIGN.md §14). Which of these a
+	// risk may and must carry depends on its source register's template, which
+	// the repository reads inside the create transaction:
+	//   STANDARD         → none of them
+	//   AGGREGATED       → PlatformIDs (at least one)
+	//   MANAGED_SERVICES → CustomerID, DeploymentTypeID, ProductIDs (at least
+	//                      one), Environments (at least one); and no
+	//                      ComplianceReferenceIDs
+	// Every referenced value must exist and be ACTIVE.
+	PlatformIDs      []int    `json:"platformIds"`
+	CustomerID       *int     `json:"customerId"`
+	DeploymentTypeID *int     `json:"deploymentTypeId"`
+	ProductIDs       []int    `json:"productIds"`
+	Environments     []string `json:"environments"` // PRODUCTION | NON_PRODUCTION | DR
+
 	CreatedBy string `json:"createdBy"`
 }
 

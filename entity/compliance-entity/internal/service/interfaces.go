@@ -172,7 +172,7 @@ type RiskService interface {
 	GetRiskByID(ctx context.Context, id int) (domain.Risk, error)
 	CreateRisk(ctx context.Context, req domain.CreateRiskRequest) (domain.Risk, error)
 	UpdateRisk(ctx context.Context, id int, req domain.UpdateRiskRequest) (domain.Risk, error)
-	NextSequenceNumber(ctx context.Context, sourceRegisterID int) (domain.NextSequenceResponse, error)
+	NextSequenceNumber(ctx context.Context, sourceRegisterID int, customerID *int) (domain.NextSequenceResponse, error)
 	GetRiskDetail(ctx context.Context, id int) (domain.RiskDetail, error)
 }
 

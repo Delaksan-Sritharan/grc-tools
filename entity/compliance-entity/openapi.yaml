@@ -2590,6 +2590,7 @@ paths:
       tags:
       - Risks
       summary: Preview the next risk sequence number for a source register
+      description: A MANAGED_SERVICES register counts per customer, so customerId is required for it and rejected for any other register.
       operationId: nextSequenceNumber
       parameters:
       - name: sourceRegisterId
@@ -2597,6 +2598,11 @@ paths:
         schema:
           type: integer
         required: true
+      - name: customerId
+        in: query
+        schema:
+          type: integer
+        required: false
       responses:
         '200':
           description: Next sequence number
@@ -6241,8 +6247,41 @@ components:
         progress:
           type: string
           nullable: true
+        platformIds:
+          type: array
+          items:
+            type: integer
+          description: AGGREGATED registers only; at least one, each an ACTIVE platform.
+        customerId:
+          type: integer
+          nullable: true
+          description: MANAGED_SERVICES registers only (required there); an ACTIVE customer. Its code goes into the risk code.
+        deploymentTypeId:
+          type: integer
+          nullable: true
+          description: MANAGED_SERVICES registers only (required there); an ACTIVE deployment type.
+        productIds:
+          type: array
+          items:
+            type: integer
+          description: MANAGED_SERVICES registers only; at least one, each an ACTIVE product.
+        environments:
+          type: array
+          items:
+            type: string
+            enum:
+            - PRODUCTION
+            - NON_PRODUCTION
+            - DR
+          description: MANAGED_SERVICES registers only; at least one, no repeats.
         createdBy:
           type: string
+      description: >-
+        Which register-template fields are allowed and required depends on the
+        source register's registerTemplate (RISK_MODULE_DESIGN.md §14); anything
+        else is a 400. A MANAGED_SERVICES register also rejects
+        complianceReferenceIds and only accepts MANAGED_SERVICES assignment
+        teams, while other registers reject those teams.
     UpdateRiskRequest:
       type: object
       properties:
