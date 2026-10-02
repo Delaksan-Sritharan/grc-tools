@@ -129,7 +129,8 @@ export default function AIValidationCard({ auditId, controlId, variant, phase = 
 
   return (
     <AIBox title={title}>
-      <AIValidationRow latest={latest} showReviewerNote={can(AuditPrivilege.ReviewEvidence)} />
+      {/* Keyed so a new result remounts collapsed instead of inheriting the old row's expanded state. */}
+      <AIValidationRow key={`${phase}-${latest.id}`} latest={latest}showReviewerNote={can(AuditPrivilege.ReviewEvidence)} />
     </AIBox>
   );
 }
