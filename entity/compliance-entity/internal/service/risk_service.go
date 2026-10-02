@@ -69,7 +69,8 @@ var validRiskQuarters = map[string]bool{"Q1": true, "Q2": true, "Q3": true, "Q4"
 //   - Resubmit:         PENDING_REVISION → PENDING_RISK_OWNER_APPROVAL, or →
 //     PENDING_OWNER_COMPLETION_APPROVAL when the rejection stage was COMPLETION_OWNER
 //   - Close:            PENDING_COMPLIANCE_CLOSURE → CLOSED
-//   - Cancel:           PENDING_RISK_OWNER_APPROVAL → CANCELLED
+//   - Cancel:           PENDING_RISK_OWNER_APPROVAL → CANCELLED, or PENDING_REVISION →
+//     CANCELLED while the risk has never been owner-approved
 //
 // An earlier version of this map encoded a different workflow, written before
 // the risk module existed, and would have rejected the backend's most common
@@ -186,6 +187,13 @@ func (s *riskService) SearchRisks(ctx context.Context, req domain.SearchRisksReq
 		}
 		req.RiskTypeKeys[i] = up
 	}
+	for i, ek := range req.EnvironmentKeys {
+		up := strings.ToUpper(ek)
+		if !validEnvironments[up] {
+			return domain.SearchRisksResponse{}, &apierror.ValidationError{Msg: "invalid environmentKey: " + ek + " (must be PRODUCTION, NON_PRODUCTION, or DR)"}
+		}
+		req.EnvironmentKeys[i] = up
+	}
 	for _, d := range []struct{ name, value string }{
 		{"submittedFrom", req.SubmittedFrom}, {"submittedTo", req.SubmittedTo},
 		{"dueFrom", req.DueFrom}, {"dueTo", req.DueTo},
@@ -284,7 +292,7 @@ func (s *riskService) CreateRisk(ctx context.Context, req domain.CreateRiskReque
 			return domain.Risk{}, &apierror.ValidationError{Msg: fmt.Sprintf("action step %d description is required", i+1)}
 		}
 	}
-	if err := normalizeTemplateFields(&req); err != nil {
+	if err := normalizeTemplateInput(req.PlatformIDs, req.ProductIDs, req.CustomerID, req.DeploymentTypeID, req.Environments); err != nil {
 		return domain.Risk{}, err
 	}
 	r, err := s.repo.CreateRisk(ctx, req)
@@ -296,27 +304,27 @@ func (s *riskService) CreateRisk(ctx context.Context, req domain.CreateRiskReque
 
 var validEnvironments = map[string]bool{"PRODUCTION": true, "NON_PRODUCTION": true, "DR": true}
 
-// normalizeTemplateFields checks the shape of the register-template fields
-// (positive ids, no duplicates, known environments) and upper-cases the
-// environments. Which fields the register's template allows and requires is
-// checked by the repository, which reads the template inside the create
-// transaction. A duplicate id would otherwise reach a junction table's
-// primary key and surface as a 500.
-func normalizeTemplateFields(req *domain.CreateRiskRequest) error {
-	if err := checkIDList("platformIds", req.PlatformIDs); err != nil {
+// normalizeTemplateInput checks the shape of the register-template fields of
+// a create or update (positive ids, no duplicates, known environments) and
+// upper-cases the environments in place. Which fields the register's
+// template allows and requires is checked by the repository, which reads the
+// template inside the write transaction. A duplicate id would otherwise
+// reach a junction table's primary key and surface as a 500.
+func normalizeTemplateInput(platformIDs, productIDs []int, customerID, deploymentTypeID *int, environments []string) error {
+	if err := checkIDList("platformIds", platformIDs); err != nil {
 		return err
 	}
-	if err := checkIDList("productIds", req.ProductIDs); err != nil {
+	if err := checkIDList("productIds", productIDs); err != nil {
 		return err
 	}
-	if req.CustomerID != nil && *req.CustomerID <= 0 {
+	if customerID != nil && *customerID <= 0 {
 		return &apierror.ValidationError{Msg: "customerId must be a positive integer"}
 	}
-	if req.DeploymentTypeID != nil && *req.DeploymentTypeID <= 0 {
+	if deploymentTypeID != nil && *deploymentTypeID <= 0 {
 		return &apierror.ValidationError{Msg: "deploymentTypeId must be a positive integer"}
 	}
 	seen := map[string]bool{}
-	for i, env := range req.Environments {
+	for i, env := range environments {
 		up := strings.ToUpper(env)
 		if !validEnvironments[up] {
 			return &apierror.ValidationError{Msg: "environments must be PRODUCTION, NON_PRODUCTION, or DR"}
@@ -325,7 +333,7 @@ func normalizeTemplateFields(req *domain.CreateRiskRequest) error {
 			return &apierror.ValidationError{Msg: "environments contains " + up + " more than once"}
 		}
 		seen[up] = true
-		req.Environments[i] = up
+		environments[i] = up
 	}
 	return nil
 }
@@ -384,6 +392,9 @@ func (s *riskService) UpdateRisk(ctx context.Context, id int, req domain.UpdateR
 	if req.TreatmentStrategy != nil {
 		up := strings.ToUpper(*req.TreatmentStrategy)
 		req.TreatmentStrategy = &up
+	}
+	if err := normalizeTemplateInput(req.PlatformIDs, req.ProductIDs, nil, req.DeploymentTypeID, req.Environments); err != nil {
+		return domain.Risk{}, err
 	}
 	r, err := s.repo.UpdateRisk(ctx, id, req)
 	if err != nil {

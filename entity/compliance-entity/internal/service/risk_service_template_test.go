@@ -30,7 +30,7 @@ func TestNormalizeTemplateFields(t *testing.T) {
 		ProductIDs:   []int{3},
 		Environments: []string{"production", "Dr"},
 	}
-	if err := normalizeTemplateFields(&ok); err != nil {
+	if err := normalizeTemplateInput(ok.PlatformIDs, ok.ProductIDs, ok.CustomerID, ok.DeploymentTypeID, ok.Environments); err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
 	if ok.Environments[0] != "PRODUCTION" || ok.Environments[1] != "DR" {
@@ -48,7 +48,7 @@ func TestNormalizeTemplateFields(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			var ve *apierror.ValidationError
-			if err := normalizeTemplateFields(&req); !errors.As(err, &ve) {
+			if err := normalizeTemplateInput(req.PlatformIDs, req.ProductIDs, req.CustomerID, req.DeploymentTypeID, req.Environments); !errors.As(err, &ve) {
 				t.Errorf("err = %v, want ValidationError", err)
 			}
 		})

@@ -232,3 +232,228 @@ func writeTemplateData(ctx context.Context, tx *sql.Tx, riskID int, req domain.C
 	}
 	return nil
 }
+
+// detailTemplateValues fills d's register-template values. Each read is
+// keyed on the risk, so a template that lacks a field simply finds no rows.
+func (r *riskRepo) detailTemplateValues(ctx context.Context, id int, d *domain.RiskDetail) error {
+	var custID, deployID sql.NullInt64
+	var custName, custCode, custStatus, deployName, deployStatus sql.NullString
+	err := r.db.QueryRowContext(ctx, `
+		SELECT c.id, c.name, c.code, c.status, dt.id, dt.name, dt.status
+		FROM risk_managed_service_detail m
+		JOIN risk_customer c         ON c.id  = m.customer_id
+		JOIN risk_deployment_type dt ON dt.id = m.deployment_type_id
+		WHERE m.risk_id = ?`, id).
+		Scan(&custID, &custName, &custCode, &custStatus, &deployID, &deployName, &deployStatus)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("risk.GetDetail managed service detail: %w", err)
+	}
+	if err == nil {
+		code := custCode.String
+		d.Customer = &domain.RiskLookupRef{ID: int(custID.Int64), Name: custName.String, Code: &code, Status: custStatus.String}
+		d.DeploymentType = &domain.RiskLookupRef{ID: int(deployID.Int64), Name: deployName.String, Status: deployStatus.String}
+	}
+
+	if d.Products, err = r.detailLookupList(ctx, `
+		SELECT p.id, p.name, p.status FROM risk_product_reference x
+		JOIN risk_product p ON p.id = x.product_id
+		WHERE x.risk_id = ? ORDER BY p.name`, id); err != nil {
+		return fmt.Errorf("risk.GetDetail products: %w", err)
+	}
+	if d.Platforms, err = r.detailLookupList(ctx, `
+		SELECT p.id, p.name, p.status FROM risk_platform_reference x
+		JOIN risk_platform p ON p.id = x.platform_id
+		WHERE x.risk_id = ? ORDER BY p.name`, id); err != nil {
+		return fmt.Errorf("risk.GetDetail platforms: %w", err)
+	}
+	return nil
+}
+
+// detailLookupList runs query (selecting id, name, status for one risk) and
+// returns the rows as refs; empty, not nil, when there are none.
+func (r *riskRepo) detailLookupList(ctx context.Context, query string, id int) ([]domain.RiskLookupRef, error) {
+	rows, err := r.db.QueryContext(ctx, query, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	refs := []domain.RiskLookupRef{}
+	for rows.Next() {
+		var ref domain.RiskLookupRef
+		if err := rows.Scan(&ref.ID, &ref.Name, &ref.Status); err != nil {
+			return nil, err
+		}
+		refs = append(refs, ref)
+	}
+	return refs, rows.Err()
+}
+
+// touchesTemplate reports whether an update needs the risk's template: it
+// sets a template field, adds compliance references, or moves the risk to
+// another assignment team.
+func touchesTemplate(req domain.UpdateRiskRequest) bool {
+	return req.PlatformIDs != nil || req.DeploymentTypeID != nil || req.ProductIDs != nil ||
+		req.Environments != nil || len(req.ComplianceReferenceIDs) > 0 || req.AssignmentTeamID != nil
+}
+
+// checkTemplateUpdate applies the register-template rules to an update,
+// inside its transaction:
+//   - a template field may only be set on a risk whose template has it, and a
+//     multi-valued one may not be emptied;
+//   - a Managed Services risk takes no compliance references;
+//   - a new assignment team must fit the template (an unchanged one is not
+//     re-checked, so an edit form that re-posts every field still works on
+//     older data);
+//   - newly added lookup values must be ACTIVE, while values the risk
+//     already has may stay even if since deactivated.
+//
+// The risk and its register are read FOR SHARE, so the register's template
+// cannot change underneath this edit.
+func checkTemplateUpdate(ctx context.Context, tx *sql.Tx, riskID int, req domain.UpdateRiskRequest) error {
+	if !touchesTemplate(req) {
+		return nil
+	}
+	var template string
+	var currentTeam int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT t.register_template, r.assignment_team_id
+		FROM risk r JOIN risk_team t ON t.id = r.source_register_id
+		WHERE r.id = ? FOR SHARE`, riskID).Scan(&template, &currentTeam); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return &apierror.NotFoundError{Msg: fmt.Sprintf("risk %d not found", riskID)}
+		}
+		return fmt.Errorf("risk.Update read template: %w", err)
+	}
+
+	for _, f := range []struct {
+		set      bool
+		empty    bool
+		field    string
+		template string
+	}{
+		{req.PlatformIDs != nil, len(req.PlatformIDs) == 0, "platformIds", TemplateAggregated},
+		{req.DeploymentTypeID != nil, false, "deploymentTypeId", TemplateManagedServices},
+		{req.ProductIDs != nil, len(req.ProductIDs) == 0, "productIds", TemplateManagedServices},
+		{req.Environments != nil, len(req.Environments) == 0, "environments", TemplateManagedServices},
+	} {
+		if !f.set {
+			continue
+		}
+		if template != f.template {
+			return &apierror.ValidationError{
+				Msg: fmt.Sprintf("%s not allowed for a register on the %s template", f.field, template)}
+		}
+		if f.empty {
+			return &apierror.ValidationError{Msg: f.field + " cannot be emptied; at least one is required"}
+		}
+	}
+	if len(req.ComplianceReferenceIDs) > 0 && template == TemplateManagedServices {
+		return &apierror.ValidationError{
+			Msg: fmt.Sprintf("complianceReferenceIds not allowed for a register on the %s template", template)}
+	}
+	if req.AssignmentTeamID != nil && *req.AssignmentTeamID != currentTeam {
+		if err := checkAssignmentTeam(ctx, tx, template, *req.AssignmentTeamID); err != nil {
+			return err
+		}
+	}
+
+	added, err := addedIDs(ctx, tx, "SELECT platform_id FROM risk_platform_reference WHERE risk_id = ?", riskID, req.PlatformIDs)
+	if err != nil {
+		return err
+	}
+	if err := requireActive(ctx, tx, LookupPlatform, added); err != nil {
+		return err
+	}
+	if added, err = addedIDs(ctx, tx, "SELECT product_id FROM risk_product_reference WHERE risk_id = ?", riskID, req.ProductIDs); err != nil {
+		return err
+	}
+	if err := requireActive(ctx, tx, LookupProduct, added); err != nil {
+		return err
+	}
+	if req.DeploymentTypeID != nil {
+		if added, err = addedIDs(ctx, tx, "SELECT deployment_type_id FROM risk_managed_service_detail WHERE risk_id = ?",
+			riskID, []int{*req.DeploymentTypeID}); err != nil {
+			return err
+		}
+		if err := requireActive(ctx, tx, LookupDeploymentType, added); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// addedIDs returns the ids in want that the risk does not already have, per
+// currentQuery (one id column, keyed on the risk).
+func addedIDs(ctx context.Context, tx *sql.Tx, currentQuery string, riskID int, want []int) ([]int, error) {
+	if len(want) == 0 {
+		return nil, nil
+	}
+	rows, err := tx.QueryContext(ctx, currentQuery, riskID)
+	if err != nil {
+		return nil, fmt.Errorf("risk.Update current values: %w", err)
+	}
+	defer rows.Close()
+	have := map[int]bool{}
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("risk.Update current values scan: %w", err)
+		}
+		have[id] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("risk.Update current values: %w", err)
+	}
+	var added []int
+	for _, id := range want {
+		if !have[id] {
+			added = append(added, id)
+		}
+	}
+	return added, nil
+}
+
+// writeTemplateUpdate rewrites the template fields the update sets, each as a
+// whole set. checkTemplateUpdate has already confirmed they belong to the
+// risk's template.
+func writeTemplateUpdate(ctx context.Context, tx *sql.Tx, riskID int, req domain.UpdateRiskRequest) error {
+	if req.DeploymentTypeID != nil {
+		if _, err := tx.ExecContext(ctx,
+			"UPDATE risk_managed_service_detail SET deployment_type_id = ?, updated_by = ? WHERE risk_id = ?",
+			*req.DeploymentTypeID, req.UpdatedBy, riskID); err != nil {
+			return fmt.Errorf("risk.Update deployment type: %w", err)
+		}
+	}
+	for _, j := range []struct {
+		set    bool
+		table  string
+		column string
+		values []any
+	}{
+		{req.PlatformIDs != nil, "risk_platform_reference", "platform_id", toAny(req.PlatformIDs)},
+		{req.ProductIDs != nil, "risk_product_reference", "product_id", toAny(req.ProductIDs)},
+		{req.Environments != nil, "risk_environment_reference", "environment", toAny(req.Environments)},
+	} {
+		if !j.set {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, "DELETE FROM "+j.table+" WHERE risk_id = ?", riskID); err != nil { // #nosec G202 -- fixed table
+			return fmt.Errorf("risk.Update clear %s: %w", j.table, err)
+		}
+		for _, v := range j.values {
+			if _, err := tx.ExecContext(ctx,
+				"INSERT INTO "+j.table+" (risk_id, "+j.column+") VALUES (?, ?)", riskID, v); err != nil { // #nosec G202
+				return fmt.Errorf("risk.Update %s: %w", j.table, err)
+			}
+		}
+	}
+	return nil
+}
+
+func toAny[T any](vs []T) []any {
+	out := make([]any, len(vs))
+	for i, v := range vs {
+		out[i] = v
+	}
+	return out
+}

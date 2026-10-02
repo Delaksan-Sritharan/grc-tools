@@ -2144,6 +2144,7 @@ paths:
       tags:
       - Risk Compliance References
       summary: Link a compliance reference to a risk
+      description: A risk in a MANAGED_SERVICES register has no compliance references; linking one is a 400.
       operationId: addRiskComplianceRef
       parameters:
       - name: riskId
@@ -2166,6 +2167,8 @@ paths:
                 $ref: '#/components/schemas/RiskComplianceRefLink'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
     get:
@@ -5461,6 +5464,22 @@ components:
         inUse:
           type: boolean
           description: True once any risk references the value. Such a value can be deactivated but not deleted, and a customer's code is then frozen.
+    RiskLookupRef:
+      type: object
+      description: A register-template lookup value as it appears on one risk.
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        code:
+          type: string
+          description: Customers only.
+        status:
+          type: string
+          enum:
+          - ACTIVE
+          - INACTIVE
     ListRiskLookupsResponse:
       type: object
       properties:
@@ -6107,6 +6126,27 @@ components:
         effectiveColorCode: &id044
           type: string
           nullable: true
+        registerTemplate:
+          type: string
+          description: The source register's template. Empty if the register row is missing.
+        customerName:
+          type: string
+          nullable: true
+          description: MANAGED_SERVICES risks only.
+        environments:
+          type: array
+          items:
+            type: string
+            enum:
+            - PRODUCTION
+            - NON_PRODUCTION
+            - DR
+          description: MANAGED_SERVICES risks only, in PRODUCTION, NON_PRODUCTION, DR order; empty otherwise.
+        platformNames:
+          type: array
+          items:
+            type: string
+          description: AGGREGATED risks only, ordered by name; empty otherwise.
     SearchRisksRequest:
       type: object
       properties:
@@ -6149,6 +6189,22 @@ components:
             type: string
         pagination:
           $ref: '#/components/schemas/Pagination'
+        customerIds:
+          type: array
+          items:
+            type: integer
+        environmentKeys:
+          type: array
+          items:
+            type: string
+            enum:
+            - PRODUCTION
+            - NON_PRODUCTION
+            - DR
+        platformIds:
+          type: array
+          items:
+            type: integer
     SearchRisksResponse:
       type: object
       properties:
@@ -6407,6 +6463,32 @@ components:
           type: string
         expectedStatus:
           type: string
+        platformIds:
+          type: array
+          nullable: true
+          items:
+            type: integer
+          description: AGGREGATED risks only. Null leaves platforms untouched; otherwise the complete set, at least one. Newly added platforms must be ACTIVE.
+        deploymentTypeId:
+          type: integer
+          nullable: true
+          description: MANAGED_SERVICES risks only; a new value must be ACTIVE. There is no customerId — a risk's customer never changes.
+        productIds:
+          type: array
+          nullable: true
+          items:
+            type: integer
+          description: MANAGED_SERVICES risks only. Same rules as platformIds.
+        environments:
+          type: array
+          nullable: true
+          items:
+            type: string
+            enum:
+            - PRODUCTION
+            - NON_PRODUCTION
+            - DR
+          description: MANAGED_SERVICES risks only. Null leaves them untouched; otherwise the complete set, at least one.
     RiskActionPlan:
       type: object
       properties:
@@ -7390,6 +7472,22 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/RiskAssessment'
+        customer:
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/RiskLookupRef'
+        deploymentType:
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/RiskLookupRef'
+        products:
+          type: array
+          items:
+            $ref: '#/components/schemas/RiskLookupRef'
+        platforms:
+          type: array
+          items:
+            $ref: '#/components/schemas/RiskLookupRef'
     RiskNotification:
       type: object
       properties:

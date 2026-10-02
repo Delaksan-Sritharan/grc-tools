@@ -653,6 +653,15 @@ type Risk struct {
 	// the moment a reassessment lands.
 	EffectiveRiskLevel *string `json:"effectiveRiskLevel"`
 	EffectiveColorCode *string `json:"effectiveColorCode"`
+
+	// Register-template summary (RISK_MODULE_DESIGN.md §14), enough for a
+	// register table row. RegisterTemplate is the source register's template;
+	// the rest are nil/empty when that template lacks the field. RiskDetail
+	// carries the full values with ids and statuses.
+	RegisterTemplate string   `json:"registerTemplate"`
+	CustomerName     *string  `json:"customerName"`
+	Environments     []string `json:"environments"`  // PRODUCTION | NON_PRODUCTION | DR
+	PlatformNames    []string `json:"platformNames"` // ordered by name
 }
 
 // SearchRisksRequest is the payload for POST /risks/search.
@@ -708,6 +717,12 @@ type SearchRisksRequest struct {
 	// DueOverdueOnly restricts to risks already past their implementation date,
 	// independent of any Due range above.
 	DueOverdueOnly bool `json:"dueOverdueOnly"`
+
+	// Register-template filters. Each matches risks carrying any of the given
+	// values; risks whose template lacks the field never match.
+	CustomerIDs     []int    `json:"customerIds"`
+	EnvironmentKeys []string `json:"environmentKeys"` // PRODUCTION | NON_PRODUCTION | DR
+	PlatformIDs     []int    `json:"platformIds"`
 
 	// OpenEscalationOnly restricts to risks carrying an unresolved escalation.
 	// This is what the Overdue Risks tab filters on, deliberately *not* the
@@ -1317,11 +1332,23 @@ type UpdateRiskRequest struct {
 	// write is legal and makes it atomic. That split matters: which edits
 	// require re-approval, and what belongs in the change log, are workflow
 	// rules owned by the GRC backend, not persistence rules owned here.
-	ComplianceReferenceIDs []int              `json:"complianceReferenceIds"`
-	RiskCategoryIDs        []int              `json:"riskCategoryIds"`
-	ActionPlan             *ActionPlanUpdate  `json:"actionPlan"`
-	ActionSteps            []ActionStepUpdate `json:"actionSteps"`
-	ChangeLog              []ChangeLogEntry   `json:"changeLog"`
+	ComplianceReferenceIDs []int `json:"complianceReferenceIds"`
+	RiskCategoryIDs        []int `json:"riskCategoryIds"`
+
+	// Register-template fields follow the same nil-means-untouched,
+	// non-nil-is-the-whole-set rule. They must belong to the risk's template,
+	// and a multi-valued one may not be emptied (each needs at least one).
+	// Newly added values must be ACTIVE; values the risk already has may stay
+	// even if since deactivated. There is deliberately no customer field: a
+	// risk's customer is part of its risk code and never changes.
+	PlatformIDs      []int    `json:"platformIds"`
+	DeploymentTypeID *int     `json:"deploymentTypeId"`
+	ProductIDs       []int    `json:"productIds"`
+	Environments     []string `json:"environments"`
+
+	ActionPlan  *ActionPlanUpdate  `json:"actionPlan"`
+	ActionSteps []ActionStepUpdate `json:"actionSteps"`
+	ChangeLog   []ChangeLogEntry   `json:"changeLog"`
 
 	// ExpectedStatus makes the update a compare-and-set. When the caller
 	// supplies it, the UPDATE is guarded by that status and a mismatch is a
@@ -1925,6 +1952,23 @@ type RiskDetail struct {
 	RiskCategories       []RiskCategory            `json:"riskCategories"`
 	ActionPlan           *RiskActionPlanDetail     `json:"actionPlan"`
 	Assessments          []RiskAssessment          `json:"assessments"`
+
+	// Register-template values with ids and statuses, so an edit form can
+	// preselect them and label an INACTIVE one "(inactive)". Customer and
+	// DeploymentType are nil, and the lists empty, when the risk's template
+	// lacks them. Environments are on the embedded Risk.
+	Customer       *RiskLookupRef  `json:"customer"`
+	DeploymentType *RiskLookupRef  `json:"deploymentType"`
+	Products       []RiskLookupRef `json:"products"`
+	Platforms      []RiskLookupRef `json:"platforms"`
+}
+
+// RiskLookupRef is a lookup value as it appears on one risk.
+type RiskLookupRef struct {
+	ID     int     `json:"id"`
+	Name   string  `json:"name"`
+	Code   *string `json:"code,omitempty"` // customers only
+	Status string  `json:"status"`         // ACTIVE | INACTIVE
 }
 
 // RiskActionPlanDetail is the risk's STANDARD action plan with its steps

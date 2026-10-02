@@ -17,8 +17,12 @@
 package repository
 
 import (
+	"context"
+	"database/sql"
 	"errors"
 	"testing"
+
+	sqlmock "github.com/DATA-DOG/go-sqlmock"
 
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/apierror"
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/domain"
@@ -140,5 +144,86 @@ func TestAssignmentTeamFits(t *testing.T) {
 		if got := assignmentTeamFits(tc.register, tc.team); got != tc.want {
 			t.Errorf("assignmentTeamFits(%s, %s) = %v, want %v", tc.register, tc.team, got, tc.want)
 		}
+	}
+}
+
+// templateTx opens a sqlmock transaction whose first query reports the risk's
+// template and current assignment team.
+func templateTx(t *testing.T, template string, team int) (*sql.Tx, sqlmock.Sqlmock) {
+	t.Helper()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	mock.ExpectBegin()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	mock.ExpectQuery(re("SELECT t.register_template, r.assignment_team_id")).WithArgs(9).
+		WillReturnRows(sqlmock.NewRows([]string{"t", "team"}).AddRow(template, team))
+	return tx, mock
+}
+
+func TestCheckTemplateUpdate_Rejections(t *testing.T) {
+	cases := []struct {
+		name     string
+		template string
+		req      domain.UpdateRiskRequest
+	}{
+		{"MS risk gets compliance refs", TemplateManagedServices, domain.UpdateRiskRequest{ComplianceReferenceIDs: []int{1}}},
+		{"aggregated platforms emptied", TemplateAggregated, domain.UpdateRiskRequest{PlatformIDs: []int{}}},
+		{"MS environments emptied", TemplateManagedServices, domain.UpdateRiskRequest{Environments: []string{}}},
+		{"standard risk gets products", TemplateStandard, domain.UpdateRiskRequest{ProductIDs: []int{1}}},
+		{"MS risk gets platforms", TemplateManagedServices, domain.UpdateRiskRequest{PlatformIDs: []int{1}}},
+		{"aggregated risk gets deployment type", TemplateAggregated, domain.UpdateRiskRequest{DeploymentTypeID: intPtr(1)}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tx, mock := templateTx(t, tc.template, 5)
+			err := checkTemplateUpdate(context.Background(), tx, 9, tc.req)
+			var ve *apierror.ValidationError
+			if !errors.As(err, &ve) {
+				t.Fatalf("err = %v, want ValidationError", err)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+}
+
+// An edit form that re-posts the risk's current assignment team must not be
+// refused, even if that team would no longer be offered for this register:
+// only a change of team is checked. sqlmock fails the test if the team
+// lookup runs.
+func TestCheckTemplateUpdate_UnchangedTeamNotRechecked(t *testing.T) {
+	tx, mock := templateTx(t, TemplateManagedServices, 5)
+	if err := checkTemplateUpdate(context.Background(), tx, 9,
+		domain.UpdateRiskRequest{AssignmentTeamID: intPtr(5)}); err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Error(err)
+	}
+}
+
+// An update that touches nothing template-related reads nothing.
+func TestCheckTemplateUpdate_UntouchedSkipsRead(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	tx, _ := db.Begin()
+	title := "renamed"
+	if err := checkTemplateUpdate(context.Background(), tx, 9,
+		domain.UpdateRiskRequest{RiskTitle: &title, ComplianceReferenceIDs: []int{}}); err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Error(err)
 	}
 }
