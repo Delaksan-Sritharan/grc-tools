@@ -437,22 +437,28 @@ type BulkCreateControlsResponse struct {
 // RiskTeam represents a team from the `risk_team` table.
 // team_type determines which UI pickers show this team.
 type RiskTeam struct {
-	ID          int       `json:"id"`
-	Name        string    `json:"name"`
-	Code        *string   `json:"code"`
-	Description *string   `json:"description"`
-	TeamType    string    `json:"teamType"` // SOURCE_REGISTER | ASSIGNMENT | BOTH
-	Status      string    `json:"status"`
-	CreatedOn   time.Time `json:"createdOn"`
-	UpdatedOn   time.Time `json:"updatedOn"`
+	ID          int     `json:"id"`
+	Name        string  `json:"name"`
+	Code        *string `json:"code"`
+	Description *string `json:"description"`
+	TeamType    string  `json:"teamType"` // SOURCE_REGISTER | ASSIGNMENT | BOTH
+	// RegisterTemplate is STANDARD | AGGREGATED | MANAGED_SERVICES. On a
+	// register it decides which fields its risks carry; on an assignment team,
+	// which registers' pickers offer it (RISK_MODULE_DESIGN.md §14).
+	RegisterTemplate string    `json:"registerTemplate"`
+	Status           string    `json:"status"`
+	CreatedOn        time.Time `json:"createdOn"`
+	UpdatedOn        time.Time `json:"updatedOn"`
 }
 
 // SearchRiskTeamsRequest is the payload for POST /risk/teams/search.
 type SearchRiskTeamsRequest struct {
-	SearchQuery  string     `json:"searchQuery"`
-	TeamTypeKeys []string   `json:"teamTypeKeys"` // SOURCE_REGISTER | ASSIGNMENT | BOTH
-	StatusKey    string     `json:"statusKey"`    // ACTIVE | INACTIVE | REMOVED | "" (all)
-	Pagination   Pagination `json:"pagination"`
+	SearchQuery  string   `json:"searchQuery"`
+	TeamTypeKeys []string `json:"teamTypeKeys"` // SOURCE_REGISTER | ASSIGNMENT | BOTH
+	// RegisterTemplateKeys narrows to teams on these templates; empty means all.
+	RegisterTemplateKeys []string   `json:"registerTemplateKeys"`
+	StatusKey            string     `json:"statusKey"` // ACTIVE | INACTIVE | REMOVED | "" (all)
+	Pagination           Pagination `json:"pagination"`
 }
 
 // SearchRiskTeamsResponse is returned by POST /risk/teams/search.
@@ -480,6 +486,46 @@ type RiskScore struct {
 // ListRiskScoresResponse is returned by GET /risk/scores.
 type ListRiskScoresResponse struct {
 	Scores []RiskScore `json:"scores"`
+}
+
+// =============================================================================
+// Register-template lookups — Platform, Customer, Product, Deployment Type
+// =============================================================================
+
+// RiskLookup is one admin-managed dropdown value from risk_platform,
+// risk_customer, risk_product or risk_deployment_type. The four tables share
+// one shape; only risk_customer has a Code.
+type RiskLookup struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+	// Code is set for customers only: the A-Z/0-9 code embedded in Managed
+	// Services risk codes. Omitted for the other three lookups.
+	Code   *string `json:"code,omitempty"`
+	Status string  `json:"status"` // ACTIVE | INACTIVE
+	// InUse reports whether any risk references this value. A value in use
+	// can be deactivated but not deleted, and a customer in use cannot have
+	// its code changed.
+	InUse bool `json:"inUse"`
+}
+
+// ListRiskLookupsResponse is returned by GET /risk/{platforms|customers|products|deployment-types}.
+type ListRiskLookupsResponse struct {
+	Values []RiskLookup `json:"values"`
+}
+
+// CreateRiskLookupRequest is the payload for POST /risk/{platforms|customers|products|deployment-types}.
+type CreateRiskLookupRequest struct {
+	Name      string  `json:"name"`
+	Code      *string `json:"code"` // required for customers, rejected for the rest
+	CreatedBy string  `json:"createdBy"`
+}
+
+// UpdateRiskLookupRequest is the payload for PATCH /risk/{platforms|customers|products|deployment-types}/{id}.
+type UpdateRiskLookupRequest struct {
+	Name      *string `json:"name"`
+	Code      *string `json:"code"`   // customers only; refused once the customer is in use
+	Status    *string `json:"status"` // ACTIVE | INACTIVE
+	UpdatedBy string  `json:"updatedBy"`
 }
 
 // ListRiskCategoriesResponse is returned by GET /risk/categories.
@@ -954,14 +1000,14 @@ type UpdateEvidenceRequest struct {
 
 // AuditEvidenceFile is one uploaded file attached to an evidence submission or population.
 type AuditEvidenceFile struct {
-	ID           int       `json:"id"`
-	EvidenceID   *int      `json:"evidenceId"`
-	PopulationID *int      `json:"populationId"`
-	FileKind     *string   `json:"fileKind"` // POPULATION | SAMPLE (only when populationId is set)
-	FileName     string    `json:"fileName"`
-	FilePath     string    `json:"filePath"`
-	FileType     *string   `json:"fileType"`
-	FileSize     *int64    `json:"fileSize"`
+	ID           int     `json:"id"`
+	EvidenceID   *int    `json:"evidenceId"`
+	PopulationID *int    `json:"populationId"`
+	FileKind     *string `json:"fileKind"` // POPULATION | SAMPLE (only when populationId is set)
+	FileName     string  `json:"fileName"`
+	FilePath     string  `json:"filePath"`
+	FileType     *string `json:"fileType"`
+	FileSize     *int64  `json:"fileSize"`
 	// CreatedBy is the raw uuid of whoever uploaded this file — the submitting
 	// team member for a POPULATION or evidence file, the auditor for a SAMPLE
 	// one. Populated by the file list reads (ListPopulationFiles /
@@ -1105,8 +1151,10 @@ type CreateRiskTeamRequest struct {
 	Code        *string `json:"code"`
 	Description *string `json:"description"`
 	TeamType    string  `json:"teamType"` // SOURCE_REGISTER | ASSIGNMENT | BOTH
-	Status      string  `json:"status"`
-	CreatedBy   string  `json:"createdBy"`
+	// RegisterTemplate defaults to STANDARD when empty.
+	RegisterTemplate string `json:"registerTemplate"`
+	Status           string `json:"status"`
+	CreatedBy        string `json:"createdBy"`
 }
 
 // UpdateRiskTeamRequest is the payload for PATCH /risk/teams/{id}.
@@ -1115,8 +1163,11 @@ type UpdateRiskTeamRequest struct {
 	Code        *string `json:"code"`
 	Description *string `json:"description"`
 	TeamType    *string `json:"teamType"`
-	Status      *string `json:"status"`
-	UpdatedBy   string  `json:"updatedBy"`
+	// RegisterTemplate may change only while no risk has this team as its
+	// source register; after that the update is refused with a 409.
+	RegisterTemplate *string `json:"registerTemplate"`
+	Status           *string `json:"status"`
+	UpdatedBy        string  `json:"updatedBy"`
 }
 
 // =============================================================================

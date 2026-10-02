@@ -148,6 +148,15 @@ type RiskCategoryService interface {
 	DeleteRiskCategory(ctx context.Context, id int) error
 }
 
+// RiskLookupService defines operations on one register-template lookup table
+// (platforms, customers, products or deployment types).
+type RiskLookupService interface {
+	ListRiskLookups(ctx context.Context, statusKey string) (domain.ListRiskLookupsResponse, error)
+	CreateRiskLookup(ctx context.Context, req domain.CreateRiskLookupRequest) (domain.RiskLookup, error)
+	UpdateRiskLookup(ctx context.Context, id int, req domain.UpdateRiskLookupRequest) (domain.RiskLookup, error)
+	DeleteRiskLookup(ctx context.Context, id int) error
+}
+
 // RiskReferenceService defines operations on risk_security_compliance_reference.
 type RiskReferenceService interface {
 	SearchRiskReferences(ctx context.Context, req domain.SearchRiskReferencesRequest) (domain.SearchRiskReferencesResponse, error)

@@ -40,6 +40,7 @@ tags:
 - name: Risk Evidence
 - name: Risk Assessments
 - name: Risk Categories
+- name: Risk Register Template Lookups
 - name: Audit Notifications
 - name: Risk Reminders
 - name: Admin Activity Log
@@ -3387,6 +3388,406 @@ paths:
           $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /risk/platforms:
+    get:
+      tags:
+      - Risk Register Template Lookups
+      summary: List platforms
+      description: Admin-managed dropdown values for register templates (RISK_MODULE_DESIGN.md §14). Without status, inactive values are included.
+      operationId: listRiskPlatforms
+      parameters:
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - ACTIVE
+          - INACTIVE
+      responses:
+        '200':
+          description: The platforms, ordered by name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListRiskLookupsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      tags:
+      - Risk Register Template Lookups
+      summary: Create a platform
+      operationId: createRiskPlatform
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRiskLookupRequest'
+      responses:
+        '201':
+          description: The created platform
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RiskLookup'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /risk/platforms/{id}:
+    patch:
+      tags:
+      - Risk Register Template Lookups
+      summary: Update a platform
+      description: Rename, (de)activate.
+      operationId: updateRiskPlatform
+      parameters:
+      - $ref: '#/components/parameters/IntId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateRiskLookupRequest'
+      responses:
+        '200':
+          description: The updated platform
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RiskLookup'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      tags:
+      - Risk Register Template Lookups
+      summary: Delete a platform
+      description: Only a platform no risk has ever referenced; one in use conflicts and should be deactivated instead.
+      operationId: deleteRiskPlatform
+      parameters:
+      - $ref: '#/components/parameters/IntId'
+      responses:
+        '204':
+          description: No content
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /risk/customers:
+    get:
+      tags:
+      - Risk Register Template Lookups
+      summary: List customers
+      description: Admin-managed dropdown values for register templates (RISK_MODULE_DESIGN.md §14). Without status, inactive values are included. A customer also carries a code (A-Z/0-9, 1-12 chars) used in Managed Services risk codes; it is required on create and cannot change once the customer is in use.
+      operationId: listRiskCustomers
+      parameters:
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - ACTIVE
+          - INACTIVE
+      responses:
+        '200':
+          description: The customers, ordered by name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListRiskLookupsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      tags:
+      - Risk Register Template Lookups
+      summary: Create a customer
+      operationId: createRiskCustomer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRiskLookupRequest'
+      responses:
+        '201':
+          description: The created customer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RiskLookup'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /risk/customers/{id}:
+    patch:
+      tags:
+      - Risk Register Template Lookups
+      summary: Update a customer
+      description: Rename, (de)activate, or change the code while no risk uses it.
+      operationId: updateRiskCustomer
+      parameters:
+      - $ref: '#/components/parameters/IntId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateRiskLookupRequest'
+      responses:
+        '200':
+          description: The updated customer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RiskLookup'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      tags:
+      - Risk Register Template Lookups
+      summary: Delete a customer
+      description: Only a customer no risk has ever referenced; one in use conflicts and should be deactivated instead.
+      operationId: deleteRiskCustomer
+      parameters:
+      - $ref: '#/components/parameters/IntId'
+      responses:
+        '204':
+          description: No content
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /risk/products:
+    get:
+      tags:
+      - Risk Register Template Lookups
+      summary: List products
+      description: Admin-managed dropdown values for register templates (RISK_MODULE_DESIGN.md §14). Without status, inactive values are included.
+      operationId: listRiskProducts
+      parameters:
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - ACTIVE
+          - INACTIVE
+      responses:
+        '200':
+          description: The products, ordered by name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListRiskLookupsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      tags:
+      - Risk Register Template Lookups
+      summary: Create a product
+      operationId: createRiskProduct
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRiskLookupRequest'
+      responses:
+        '201':
+          description: The created product
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RiskLookup'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /risk/products/{id}:
+    patch:
+      tags:
+      - Risk Register Template Lookups
+      summary: Update a product
+      description: Rename, (de)activate.
+      operationId: updateRiskProduct
+      parameters:
+      - $ref: '#/components/parameters/IntId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateRiskLookupRequest'
+      responses:
+        '200':
+          description: The updated product
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RiskLookup'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      tags:
+      - Risk Register Template Lookups
+      summary: Delete a product
+      description: Only a product no risk has ever referenced; one in use conflicts and should be deactivated instead.
+      operationId: deleteRiskProduct
+      parameters:
+      - $ref: '#/components/parameters/IntId'
+      responses:
+        '204':
+          description: No content
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /risk/deployment-types:
+    get:
+      tags:
+      - Risk Register Template Lookups
+      summary: List deployment types
+      description: Admin-managed dropdown values for register templates (RISK_MODULE_DESIGN.md §14). Without status, inactive values are included.
+      operationId: listRiskDeploymentTypes
+      parameters:
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - ACTIVE
+          - INACTIVE
+      responses:
+        '200':
+          description: The deployment types, ordered by name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListRiskLookupsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      tags:
+      - Risk Register Template Lookups
+      summary: Create a deployment type
+      operationId: createRiskDeploymentType
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRiskLookupRequest'
+      responses:
+        '201':
+          description: The created deployment type
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RiskLookup'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /risk/deployment-types/{id}:
+    patch:
+      tags:
+      - Risk Register Template Lookups
+      summary: Update a deployment type
+      description: Rename, (de)activate.
+      operationId: updateRiskDeploymentType
+      parameters:
+      - $ref: '#/components/parameters/IntId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateRiskLookupRequest'
+      responses:
+        '200':
+          description: The updated deployment type
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RiskLookup'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      tags:
+      - Risk Register Template Lookups
+      summary: Delete a deployment type
+      description: Only a deployment type no risk has ever referenced; one in use conflicts and should be deactivated instead.
+      operationId: deleteRiskDeploymentType
+      parameters:
+      - $ref: '#/components/parameters/IntId'
+      responses:
+        '204':
+          description: No content
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /audit/notifications:
     post:
       tags:
@@ -5036,6 +5437,67 @@ components:
           nullable: true
         updatedBy:
           type: string
+    RiskLookup:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        code:
+          type: string
+          description: Customers only; omitted for the other lookups.
+        status:
+          type: string
+          enum:
+          - ACTIVE
+          - INACTIVE
+        inUse:
+          type: boolean
+          description: True once any risk references the value. Such a value can be deactivated but not deleted, and a customer's code is then frozen.
+    ListRiskLookupsResponse:
+      type: object
+      properties:
+        values:
+          type: array
+          items:
+            $ref: '#/components/schemas/RiskLookup'
+    CreateRiskLookupRequest:
+      type: object
+      required:
+      - name
+      - createdBy
+      properties:
+        name:
+          type: string
+        code:
+          type: string
+          nullable: true
+          pattern: '^[A-Z0-9]{1,12}$'
+          description: Required for customers; rejected for the other lookups.
+        createdBy:
+          type: string
+    UpdateRiskLookupRequest:
+      type: object
+      required:
+      - updatedBy
+      properties:
+        name:
+          type: string
+          nullable: true
+        code:
+          type: string
+          nullable: true
+          pattern: '^[A-Z0-9]{1,12}$'
+          description: Customers only. Re-sending the current code is allowed; a different code conflicts once the customer is in use.
+        status:
+          type: string
+          nullable: true
+          enum:
+          - ACTIVE
+          - INACTIVE
+        updatedBy:
+          type: string
     CommentEscalationRequest:
       type: object
       required:
@@ -5310,6 +5772,13 @@ components:
           - SOURCE_REGISTER
           - ASSIGNMENT
           - BOTH
+        registerTemplate:
+          type: string
+          description: On a register, which fields its risks carry; on an assignment team, which registers' pickers offer it.
+          enum:
+          - STANDARD
+          - AGGREGATED
+          - MANAGED_SERVICES
         status:
           type: string
         createdOn:
@@ -5327,6 +5796,14 @@ components:
           type: array
           items:
             type: string
+        registerTemplateKeys:
+          type: array
+          items:
+            type: string
+            enum:
+            - STANDARD
+            - AGGREGATED
+            - MANAGED_SERVICES
         statusKey:
           type: string
         pagination:
@@ -5361,6 +5838,13 @@ components:
           - SOURCE_REGISTER
           - ASSIGNMENT
           - BOTH
+        registerTemplate:
+          type: string
+          description: Defaults to STANDARD.
+          enum:
+          - STANDARD
+          - AGGREGATED
+          - MANAGED_SERVICES
         status:
           type: string
         createdBy:
@@ -5380,6 +5864,14 @@ components:
         teamType:
           type: string
           nullable: true
+        registerTemplate:
+          type: string
+          nullable: true
+          description: Conflicts (409) once any risk has this team as its source register.
+          enum:
+          - STANDARD
+          - AGGREGATED
+          - MANAGED_SERVICES
         status:
           type: string
           nullable: true

@@ -57,6 +57,14 @@ func (r *riskTeamRepo) SearchRiskTeams(ctx context.Context, req domain.SearchRis
 			args = append(args, t)
 		}
 	}
+	if len(req.RegisterTemplateKeys) > 0 {
+		ph := strings.Repeat("?,", len(req.RegisterTemplateKeys))
+		ph = ph[:len(ph)-1]
+		where += " AND register_template IN (" + ph + ")"
+		for _, t := range req.RegisterTemplateKeys {
+			args = append(args, t)
+		}
+	}
 	if req.StatusKey != "" {
 		where += " AND status = ?"
 		args = append(args, req.StatusKey)
@@ -69,7 +77,7 @@ func (r *riskTeamRepo) SearchRiskTeams(ctx context.Context, req domain.SearchRis
 
 	dataArgs := append(append([]any{}, args...), req.Pagination.Limit, req.Pagination.Offset)
 	rows, err := r.db.QueryContext(ctx,
-		"SELECT id, name, code, description, team_type, status, created_at, updated_at "+
+		"SELECT id, name, code, description, team_type, register_template, status, created_at, updated_at "+
 			"FROM risk_team "+where+" ORDER BY name LIMIT ? OFFSET ?",
 		dataArgs...)
 	if err != nil {
@@ -93,7 +101,7 @@ func (r *riskTeamRepo) SearchRiskTeams(ctx context.Context, req domain.SearchRis
 
 func (r *riskTeamRepo) GetRiskTeamByID(ctx context.Context, id int) (*domain.RiskTeam, error) {
 	row := r.db.QueryRowContext(ctx,
-		"SELECT id, name, code, description, team_type, status, created_at, updated_at FROM risk_team WHERE id = ?", id)
+		"SELECT id, name, code, description, team_type, register_template, status, created_at, updated_at FROM risk_team WHERE id = ?", id)
 	t, err := scanRiskTeam(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, &apierror.NotFoundError{Msg: fmt.Sprintf("risk team %d not found", id)}
@@ -109,10 +117,14 @@ func (r *riskTeamRepo) CreateRiskTeam(ctx context.Context, req domain.CreateRisk
 	if status == "" {
 		status = "ACTIVE"
 	}
+	template := req.RegisterTemplate
+	if template == "" {
+		template = "STANDARD"
+	}
 	res, err := r.db.ExecContext(ctx,
-		"INSERT INTO risk_team (name, code, description, team_type, status, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		"INSERT INTO risk_team (name, code, description, team_type, register_template, status, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
 		req.Name, nullableString(req.Code), nullableString(req.Description),
-		req.TeamType, status, req.CreatedBy, req.CreatedBy)
+		req.TeamType, template, status, req.CreatedBy, req.CreatedBy)
 	if err != nil {
 		return nil, fmt.Errorf("risk_team.Create: %w", err)
 	}
@@ -120,7 +132,28 @@ func (r *riskTeamRepo) CreateRiskTeam(ctx context.Context, req domain.CreateRisk
 	return r.GetRiskTeamByID(ctx, int(id))
 }
 
+// UpdateRiskTeam applies a partial update. A change of register_template is
+// refused once any risk has this team as its source register: those risks
+// would otherwise carry fields the new template lacks, or lack fields it
+// requires. The team row is locked first, and CreateRisk reads the template
+// under a shared lock on the same row, so a risk cannot be created between
+// the check and the change.
 func (r *riskTeamRepo) UpdateRiskTeam(ctx context.Context, id int, req domain.UpdateRiskTeamRequest) (*domain.RiskTeam, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("risk_team.Update(%d) begin: %w", id, err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	var currentTemplate string
+	if err := tx.QueryRowContext(ctx,
+		"SELECT register_template FROM risk_team WHERE id = ? FOR UPDATE", id).Scan(&currentTemplate); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &apierror.NotFoundError{Msg: fmt.Sprintf("risk team %d not found", id)}
+		}
+		return nil, fmt.Errorf("risk_team.Update(%d) lock: %w", id, err)
+	}
+
 	sets := []string{}
 	args := []any{}
 
@@ -140,6 +173,19 @@ func (r *riskTeamRepo) UpdateRiskTeam(ctx context.Context, id int, req domain.Up
 		sets = append(sets, "team_type = ?")
 		args = append(args, *req.TeamType)
 	}
+	if req.RegisterTemplate != nil && *req.RegisterTemplate != currentTemplate {
+		var hasRisks bool
+		if err := tx.QueryRowContext(ctx,
+			"SELECT EXISTS(SELECT 1 FROM risk WHERE source_register_id = ?)", id).Scan(&hasRisks); err != nil {
+			return nil, fmt.Errorf("risk_team.Update(%d) has-risks check: %w", id, err)
+		}
+		if hasRisks {
+			return nil, &apierror.ConflictError{
+				Msg: "this register already has risks, so its template can no longer be changed"}
+		}
+		sets = append(sets, "register_template = ?")
+		args = append(args, *req.RegisterTemplate)
+	}
 	if req.Status != nil {
 		sets = append(sets, "status = ?")
 		args = append(args, *req.Status)
@@ -148,9 +194,12 @@ func (r *riskTeamRepo) UpdateRiskTeam(ctx context.Context, id int, req domain.Up
 	args = append(args, req.UpdatedBy)
 	args = append(args, id)
 
-	if _, err := r.db.ExecContext(ctx,
+	if _, err := tx.ExecContext(ctx,
 		"UPDATE risk_team SET "+strings.Join(sets, ", ")+" WHERE id = ?", args...); err != nil { // #nosec G202
 		return nil, fmt.Errorf("risk_team.Update(%d): %w", id, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("risk_team.Update(%d) commit: %w", id, err)
 	}
 	return r.GetRiskTeamByID(ctx, id)
 }
@@ -158,7 +207,7 @@ func (r *riskTeamRepo) UpdateRiskTeam(ctx context.Context, id int, req domain.Up
 func scanRiskTeam(s scanner) (*domain.RiskTeam, error) {
 	var t domain.RiskTeam
 	var code, description sql.NullString
-	if err := s.Scan(&t.ID, &t.Name, &code, &description, &t.TeamType, &t.Status, &t.CreatedOn, &t.UpdatedOn); err != nil {
+	if err := s.Scan(&t.ID, &t.Name, &code, &description, &t.TeamType, &t.RegisterTemplate, &t.Status, &t.CreatedOn, &t.UpdatedOn); err != nil {
 		return nil, err
 	}
 	if code.Valid {
