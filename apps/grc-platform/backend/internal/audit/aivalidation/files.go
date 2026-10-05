@@ -70,8 +70,11 @@ func buildFileContent(ctx context.Context, dl FileDownloader, files []fileRef, b
 	}
 
 	var total int64
-	for i, f := range files {
-		if i >= maxFiles {
+	// sent counts only files actually handed to the model, so skipped ones
+	// (unsupported, unreadable, over a size cap) don't use up the file cap.
+	sent := 0
+	for _, f := range files {
+		if sent >= maxFiles {
 			fmt.Fprintf(&manifest, "- %s: not reviewed (over the %d-file cap for this job)\n", f.Name, maxFiles)
 			continue
 		}
@@ -99,6 +102,7 @@ func buildFileContent(ctx context.Context, dl FileDownloader, files []fileRef, b
 		if len(newBlocks) > 0 {
 			blocks = append(blocks, newBlocks...)
 			total += int64(len(data))
+			sent++
 		}
 	}
 	return blocks, manifest.String()
