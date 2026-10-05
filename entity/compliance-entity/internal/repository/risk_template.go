@@ -310,8 +310,10 @@ func touchesTemplate(req domain.UpdateRiskRequest) bool {
 //   - newly added lookup values must be ACTIVE, while values the risk
 //     already has may stay even if since deactivated.
 //
-// The risk and its register are read FOR SHARE, so the register's template
-// cannot change underneath this edit.
+// The risk row is locked FOR UPDATE, because UpdateRisk writes it later in the
+// same transaction (a FOR SHARE here would deadlock two concurrent edits when
+// both upgrade to exclusive). Its register is read FOR SHARE, so the
+// register's template cannot change underneath this edit.
 func checkTemplateUpdate(ctx context.Context, tx *sql.Tx, riskID int, req domain.UpdateRiskRequest) error {
 	if !touchesTemplate(req) {
 		return nil
@@ -321,7 +323,7 @@ func checkTemplateUpdate(ctx context.Context, tx *sql.Tx, riskID int, req domain
 	if err := tx.QueryRowContext(ctx, `
 		SELECT t.register_template, r.assignment_team_id
 		FROM risk r JOIN risk_team t ON t.id = r.source_register_id
-		WHERE r.id = ? FOR SHARE`, riskID).Scan(&template, &currentTeam); err != nil {
+		WHERE r.id = ? FOR UPDATE OF r FOR SHARE OF t`, riskID).Scan(&template, &currentTeam); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return &apierror.NotFoundError{Msg: fmt.Sprintf("risk %d not found", riskID)}
 		}
