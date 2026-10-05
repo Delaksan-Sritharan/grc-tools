@@ -221,6 +221,16 @@ func (s *Service) run(auditID int, ref submissionRef, actor string, skip bool, k
 // lookup, fetch, the LLM call (unless an identical input was already
 // validated), and the terminal row.
 func (s *Service) runOnce(auditID int, ref submissionRef, actor string, kind submissionKind, fetch submissionFetch) {
+	// This runs in a bare goroutine and parses untrusted uploads (xlsx,
+	// Office, images); an unrecovered panic would take the whole process
+	// down. Registered first so it runs last — after the worker slot is
+	// released — and run's dedupe release then proceeds as for any failure.
+	defer func() {
+		if p := recover(); p != nil {
+			slog.Error("ai validation: panic", ref.logAttr(), "actor", actor, "panic", p)
+			s.writeError(context.Background(), ref, "AI validation could not complete")
+		}
+	}()
 	s.writePending(context.Background(), ref)
 	s.sem <- struct{}{}
 	defer func() { <-s.sem }()
