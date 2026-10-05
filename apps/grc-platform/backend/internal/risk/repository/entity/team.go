@@ -43,6 +43,7 @@ type entTeam struct {
 	TeamType    string  `json:"teamType"`
 	// RegisterTemplate: STANDARD | AGGREGATED | MANAGED_SERVICES.
 	RegisterTemplate string `json:"registerTemplate"`
+	HasRisks         bool   `json:"hasRisks"`
 	Status           string `json:"status"`
 }
 
@@ -54,6 +55,7 @@ func (t entTeam) toModel() *model.Team {
 		Description:      t.Description,
 		TeamType:         t.TeamType,
 		RegisterTemplate: t.RegisterTemplate,
+		HasRisks:         t.HasRisks,
 		Status:           t.Status,
 	}
 }

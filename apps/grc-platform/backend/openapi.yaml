@@ -5664,6 +5664,7 @@ components:
       properties:
         name:
           type: string
+          maxLength: 255
         code:
           type: string
           pattern: '^[A-Z0-9]{1,12}$'
@@ -5673,6 +5674,7 @@ components:
       properties:
         name:
           type: string
+          maxLength: 255
         code:
           type: string
           pattern: '^[A-Z0-9]{1,12}$'
@@ -5734,6 +5736,9 @@ components:
           - STANDARD
           - AGGREGATED
           - MANAGED_SERVICES
+        has_risks:
+          type: boolean
+          description: True once any risk uses the team, as its source register or its assignment team. Its template can then no longer change (a PUT that tries is a 409).
         status:
           type: string
     RiskScore:

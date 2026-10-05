@@ -37,10 +37,10 @@ type lookupKind struct {
 
 func (d *Deps) lookupKinds() []lookupKind {
 	return []lookupKind{
-		{"platforms", d.Platforms, adminactivity.EntityRiskPlatform},
-		{"customers", d.Customers, adminactivity.EntityRiskCustomer},
-		{"products", d.Products, adminactivity.EntityRiskProduct},
-		{"deployment-types", d.DeploymentTypes, adminactivity.EntityRiskDeploymentType},
+		{path: "platforms", svc: d.Platforms, entityType: adminactivity.EntityRiskPlatform},
+		{path: "customers", svc: d.Customers, entityType: adminactivity.EntityRiskCustomer},
+		{path: "products", svc: d.Products, entityType: adminactivity.EntityRiskProduct},
+		{path: "deployment-types", svc: d.DeploymentTypes, entityType: adminactivity.EntityRiskDeploymentType},
 	}
 }
 
@@ -97,9 +97,8 @@ func (d *Deps) handleUpdateLookup(k lookupKind) http.HandlerFunc {
 		if !auth.RequirePrivilege(r.Context(), w, privilege.ManageRiskHub) {
 			return
 		}
-		id, err := strconv.Atoi(r.PathValue("id"))
-		if err != nil || id <= 0 {
-			response.WriteError(w, http.StatusBadRequest, "id must be a positive integer")
+		id, ok := lookupID(w, r)
+		if !ok {
 			return
 		}
 		var req model.UpdateLookupRequest
@@ -130,9 +129,8 @@ func (d *Deps) handleDeleteLookup(k lookupKind) http.HandlerFunc {
 		if !auth.RequirePrivilege(r.Context(), w, privilege.ManageRiskHub) {
 			return
 		}
-		id, err := strconv.Atoi(r.PathValue("id"))
-		if err != nil || id <= 0 {
-			response.WriteError(w, http.StatusBadRequest, "id must be a positive integer")
+		id, ok := lookupID(w, r)
+		if !ok {
 			return
 		}
 		// Read the name first: once deleted, the log entry is all that is
@@ -170,4 +168,15 @@ func callerSubject(r *http.Request) string {
 		return user.Subject
 	}
 	return ""
+}
+
+// lookupID parses the {id} path value, answering 400 itself when it isn't a
+// positive integer.
+func lookupID(w http.ResponseWriter, r *http.Request) (int, bool) {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil || id <= 0 {
+		response.WriteError(w, http.StatusBadRequest, "id must be a positive integer")
+		return 0, false
+	}
+	return id, true
 }

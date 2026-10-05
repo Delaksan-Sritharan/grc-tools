@@ -28,7 +28,11 @@ type Team struct {
 	// show the right form); on an assignment team, which registers' pickers
 	// offer it. See RISK_MODULE_DESIGN.md §14.
 	RegisterTemplate string `json:"register_template"`
-	Status           string `json:"status"`
+	// HasRisks is true once any risk uses the team, as its source register or
+	// its assignment team. The template can then no longer change, so the Admin
+	// Console disables that choice.
+	HasRisks bool   `json:"has_risks"`
+	Status   string `json:"status"`
 }
 
 // Register templates, as stored in risk_team.register_template.
