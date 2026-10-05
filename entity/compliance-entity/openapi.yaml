@@ -5716,6 +5716,10 @@ components:
       - COMPLIANCE_REFERENCE
       - RISK_SCORE
       - AUDIT_TEAM
+      - RISK_PLATFORM
+      - RISK_CUSTOMER
+      - RISK_PRODUCT
+      - RISK_DEPLOYMENT_TYPE
     AdminActivityLog:
       type: object
       properties:
