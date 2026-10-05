@@ -238,7 +238,11 @@ type RiskEventInfo struct {
 	RiskCode       string
 	RiskTitle      string
 	SourceRegister string
-	RiskLevel      string
+	// Customer is the Managed Services customer's name, rendered as a
+	// "Customer" row; empty for every other register template, and the body
+	// then omits the row (RISK_MODULE_DESIGN.md §14).
+	Customer  string
+	RiskLevel string
 	// Actor is whoever performed the action that triggered this email — the
 	// person who created, approved, rejected, or completed something. It is
 	// NOT the risk's assigner or owner, which are permanent fields on the risk;
@@ -472,6 +476,10 @@ var bodyTemplate = template.Must(template.New("riskEvent").Parse(`<html>
 <td width="170" valign="top" style="padding:6px 12px 6px 0; color:#57606a;">Source Register</td>
 <td valign="top" style="padding:6px 0;">{{.Info.SourceRegister}}</td>
 </tr>
+{{if .Info.Customer}}<tr>
+<td width="170" valign="top" style="padding:6px 12px 6px 0; color:#57606a;">Customer</td>
+<td valign="top" style="padding:6px 0;">{{.Info.Customer}}</td>
+</tr>{{end}}
 <tr>
 <td width="170" valign="top" style="padding:6px 12px 6px 0; color:#57606a;">Risk Level</td>
 <td valign="top" style="padding:6px 0;">{{.Info.RiskLevel}}</td>
@@ -589,6 +597,92 @@ func (c *Client) SendRiskEvent(ctx context.Context, ev RiskEvent, to []string, i
 		Template: base64.StdEncoding.EncodeToString(body.Bytes()),
 	}
 	return c.deliver(ctx, "risk event", reqBody)
+}
+
+// CustomerRequest is a Risk Assigner's request for a Managed Services customer
+// that is missing from the Customer Name dropdown (RISK_MODULE_DESIGN.md §14).
+// Nothing about it is stored: this email is the whole record.
+type CustomerRequest struct {
+	CustomerName  string
+	SuggestedCode string // optional
+	Note          string // optional
+	// Requester is "Display Name (email)" or whatever describes the caller.
+	Requester string
+	// AdminURL is the Admin Console page where the customer is added.
+	AdminURL string
+}
+
+var customerRequestTemplate = template.Must(template.New("customerRequest").Parse(`<html>
+<body style="margin:0; padding:0; background-color:#f4f5f7;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f5f7; padding:24px 12px;">
+<tr><td align="center">
+<table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px; background-color:#ffffff; border:1px solid #e1e4e8; border-radius:6px; font-family:Arial,Helvetica,sans-serif; font-size:14px; color:#1a1a1a;">
+
+<tr><td style="padding:20px 24px 8px 24px; font-size:15px; line-height:1.5;">A new customer has been requested for the Managed Services Customer Name list. Please add it in the Admin Console, then reply to this email so the requester knows they can raise their risk.</td></tr>
+
+<tr><td style="padding:8px 24px 4px 24px;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:14px;">
+<tr>
+<td width="170" valign="top" style="padding:6px 12px 6px 0; color:#57606a;">Customer name</td>
+<td valign="top" style="padding:6px 0; font-weight:bold;">{{.CustomerName}}</td>
+</tr>
+{{if .SuggestedCode}}<tr>
+<td width="170" valign="top" style="padding:6px 12px 6px 0; color:#57606a;">Suggested code</td>
+<td valign="top" style="padding:6px 0;">{{.SuggestedCode}}</td>
+</tr>{{end}}
+<tr>
+<td width="170" valign="top" style="padding:6px 12px 6px 0; color:#57606a;">Requested by</td>
+<td valign="top" style="padding:6px 0;">{{.Requester}}</td>
+</tr>
+</table>
+</td></tr>
+
+{{if .Note}}<tr><td style="padding:12px 24px 4px 24px;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0">
+<tr><td style="padding:12px 14px; background-color:#fff8e1; border-left:3px solid #f0ad4e; font-size:14px; line-height:1.5;">
+<span style="color:#57606a;">Note</span><br>{{.Note}}
+</td></tr>
+</table>
+</td></tr>{{end}}
+
+<tr><td style="padding:20px 24px 24px 24px;">
+<a href="{{.AdminURL}}" style="display:inline-block; padding:10px 20px; background-color:#ff7300; color:#ffffff; text-decoration:none; border-radius:4px; font-weight:bold; font-size:14px;">Open Admin Console</a>
+</td></tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>`))
+
+// SendCustomerRequest emails a customer request to every address in to — the
+// platform admins and the requester together, in one To header like every
+// other platform email (the email-service has no cc). Same retry and blocking
+// behaviour as SendRiskEvent, so callers should not run it on a request path.
+func (c *Client) SendCustomerRequest(ctx context.Context, to []string, req CustomerRequest) error {
+	if !c.enabled {
+		slog.Info("emailer: notifications disabled, skipping customer request", "customer", req.CustomerName)
+		return nil
+	}
+	recipients := make([]string, 0, len(to))
+	for _, addr := range to {
+		if strings.TrimSpace(addr) != "" {
+			recipients = append(recipients, addr)
+		}
+	}
+	if len(recipients) == 0 {
+		return fmt.Errorf("emailer: no recipients for customer request")
+	}
+	var body bytes.Buffer
+	if err := customerRequestTemplate.Execute(&body, req); err != nil {
+		return fmt.Errorf("emailer: render customer request: %w", err)
+	}
+	return c.deliver(ctx, "customer request", sendEmailRequest{
+		To:       recipients,
+		From:     c.from,
+		Subject:  sanitizeSubject("[GRC Platform] Customer request: " + req.CustomerName),
+		Template: base64.StdEncoding.EncodeToString(body.Bytes()),
+	})
 }
 
 // deliver marshals one send request and posts it, retrying a transport failure

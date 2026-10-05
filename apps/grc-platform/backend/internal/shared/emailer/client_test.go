@@ -567,3 +567,81 @@ func TestDisabledClientSkipsAuditSend(t *testing.T) {
 		t.Fatalf("SendAuditEvent on disabled client: want nil, got %v", err)
 	}
 }
+
+// The Customer row appears only on Managed Services risks; every other
+// template leaves Customer empty and must not render a dangling label.
+func TestSendRiskEventRendersCustomerRowOnlyWhenSet(t *testing.T) {
+	if body := renderBody(t, EventCreated, RiskEventInfo{RiskCode: "2026-MS-BANKONESUB-Q2-0001", Customer: "Bank One Sub"}); !strings.Contains(body, ">Customer<") || !strings.Contains(body, "Bank One Sub") {
+		t.Error("customer row missing for a Managed Services risk")
+	}
+	if body := renderBody(t, EventCreated, RiskEventInfo{RiskCode: "2026-ASG-Q2-0001"}); strings.Contains(body, ">Customer<") {
+		t.Error("customer row rendered for a risk without a customer")
+	}
+}
+
+func TestSendCustomerRequest(t *testing.T) {
+	var got struct {
+		To       []string `json:"to"`
+		Subject  string   `json:"subject"`
+		Template string   `json:"template"`
+	}
+	cl := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"message":"ok"}`))
+	})
+	err := cl.SendCustomerRequest(context.Background(), []string{"admin@x.com", " ", "user1@x.com"}, CustomerRequest{
+		CustomerName:  "Acme <Corp>",
+		SuggestedCode: "ACME",
+		Note:          "needed for <b>Q3</b>",
+		Requester:     "User One (user1@x.com)",
+		AdminURL:      "https://one.example/security/admin/risk-hub?tab=customers",
+	})
+	if err != nil {
+		t.Fatalf("SendCustomerRequest: %v", err)
+	}
+	if len(got.To) != 2 {
+		t.Errorf("to = %v, want the two non-blank addresses", got.To)
+	}
+	if got.Subject != "[GRC Platform] Customer request: Acme <Corp>" {
+		t.Errorf("subject = %q", got.Subject)
+	}
+	raw, _ := base64.StdEncoding.DecodeString(got.Template)
+	body := string(raw)
+	for _, want := range []string{"Acme &lt;Corp&gt;", "ACME", "needed for &lt;b&gt;Q3&lt;/b&gt;", "User One", "tab=customers"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q", want)
+		}
+	}
+	if strings.Contains(body, "<b>Q3</b>") {
+		t.Error("note was not HTML-escaped")
+	}
+}
+
+func TestSendCustomerRequestOmitsEmptyOptionalRows(t *testing.T) {
+	var tmpl string
+	cl := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		var b struct {
+			Template string `json:"template"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&b)
+		raw, _ := base64.StdEncoding.DecodeString(b.Template)
+		tmpl = string(raw)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"message":"ok"}`))
+	})
+	if err := cl.SendCustomerRequest(context.Background(), []string{"a@x.com"},
+		CustomerRequest{CustomerName: "Acme", Requester: "r"}); err != nil {
+		t.Fatalf("SendCustomerRequest: %v", err)
+	}
+	if strings.Contains(tmpl, "Suggested code") || strings.Contains(tmpl, ">Note<") {
+		t.Error("optional rows rendered while empty")
+	}
+}
+
+func TestDisabledClientSkipsCustomerRequest(t *testing.T) {
+	if err := newDisabledClient(t).SendCustomerRequest(context.Background(), []string{"a@x.com"},
+		CustomerRequest{CustomerName: "Acme"}); err != nil {
+		t.Fatalf("disabled client returned %v", err)
+	}
+}

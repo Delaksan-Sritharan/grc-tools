@@ -121,6 +121,7 @@ func (d *Deps) sendDueReminder(ctx context.Context, riskID int, tier, dueDate st
 		RiskCode:       detail.RiskCode,
 		RiskTitle:      detail.RiskTitle,
 		SourceRegister: detail.SourceRegisterName,
+		Customer:       customerName(detail),
 		// The effective (residual) level — the one this reminder's schedule
 		// was decided on, and the one the register table shows. Deliberately
 		// not the gross level the other risk emails print.

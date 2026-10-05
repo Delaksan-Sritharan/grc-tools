@@ -44,9 +44,15 @@ type Deps struct {
 	History    riskservice.HistoryService
 	Compliance riskservice.ComplianceReferenceService
 	Category   riskservice.RiskCategoryService
-	Analytics  riskservice.AnalyticsService
-	Dashboard  riskservice.DashboardService
-	Employee   riskservice.EmployeeSearchService
+	// Register-template lookups (RISK_MODULE_DESIGN.md §14), served by the
+	// generic handlers in lookup.go.
+	Platforms       riskservice.LookupService
+	Customers       riskservice.LookupService
+	Products        riskservice.LookupService
+	DeploymentTypes riskservice.LookupService
+	Analytics       riskservice.AnalyticsService
+	Dashboard       riskservice.DashboardService
+	Employee        riskservice.EmployeeSearchService
 	// Users resolves an authenticated caller's email to their internal
 	// user.id — used by handleListRisks (Action Owner list scoping) and the
 	// action-plan handlers (ownership checks). Also backs GET
@@ -141,6 +147,15 @@ func RegisterRoutes(mux routeguard.Router, deps Deps) {
 	mux.HandleFunc("POST /api/v1/risks/categories", d.handleCreateRiskCategory)
 	mux.HandleFunc("PUT /api/v1/risks/categories/{id}", d.handleUpdateRiskCategory)
 	mux.HandleFunc("DELETE /api/v1/risks/categories/{id}", d.handleDeleteRiskCategory)
+
+	// Register-template lookups: platforms, customers, products, deployment types
+	mux.HandleFunc("POST /api/v1/risks/customer-requests", d.handleRequestCustomer)
+	for _, k := range d.lookupKinds() {
+		mux.HandleFunc("GET /api/v1/risks/"+k.path, d.handleListLookups(k))
+		mux.HandleFunc("POST /api/v1/risks/"+k.path, d.handleCreateLookup(k))
+		mux.HandleFunc("PUT /api/v1/risks/"+k.path+"/{id}", d.handleUpdateLookup(k))
+		mux.HandleFunc("DELETE /api/v1/risks/"+k.path+"/{id}", d.handleDeleteLookup(k))
+	}
 
 	// Shared user endpoints — Risk-module-only in practice (Audit Hub has its
 	// own GET /api/v1/audits/users). Handlers in users.go.
