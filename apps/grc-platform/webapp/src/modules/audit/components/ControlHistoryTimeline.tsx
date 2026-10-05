@@ -337,8 +337,20 @@ export default function ControlHistoryTimeline({
     return <Alert severity="error" sx={{ fontSize: "0.8rem" }}>Couldn’t load this control’s history.</Alert>;
   }
 
+  // The population rounds, or a round's AI runs, failed to load: whatever did
+  // load is still shown, but say the timeline may be missing entries.
+  const populationAiIncomplete =
+    (population.isError && !population.data) || populationAiResults.some((r) => r.isError);
+  const partialWarning = populationAiIncomplete ? (
+    <Alert severity="warning" sx={{ fontSize: "0.8rem" }}>
+      Couldn’t load the population AI validation results, so this history may be incomplete.
+    </Alert>
+  ) : null;
+
   if (events.length === 0) {
     return (
+      <>
+      {partialWarning}
       <Box sx={{ py: 6, display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 1.25 }}>
         <Box sx={{ width: 52, height: 52, borderRadius: "50%", bgcolor: "action.hover", display: "flex", alignItems: "center", justifyContent: "center", color: "text.secondary" }}>
           <History size={24} />
@@ -348,6 +360,7 @@ export default function ControlHistoryTimeline({
           Events appear here as the control moves through submission, internal review, and auditor validation.
         </Typography>
       </Box>
+      </>
     );
   }
 
@@ -355,6 +368,7 @@ export default function ControlHistoryTimeline({
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      {partialWarning}
       {/* Journey summary */}
       <Box
         sx={{
