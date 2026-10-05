@@ -14,7 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { ControlStatus, RoundStatus } from "@modules/audit/types/audit";
+import type { AuditControl, ControlStatus, RoundStatus } from "@modules/audit/types/audit";
+import { daysLeft } from "@modules/audit/utils/format";
 
 export const CONTROL_STATUS_LABELS: Record<ControlStatus, string> = {
   POPULATION_PENDING:            "Population Pending",
@@ -140,3 +141,12 @@ export const CONTROL_STATUS_COLORS: Record<ControlStatus, string> = {
   EVIDENCE_NEED_CLARIFICATION:   "#EF4444", // red     — blocked
   COMPLETE:                      "#10B981", // emerald — approved & closed
 };
+
+// Same rule the reminder sweep uses for population overdue emails: past due
+// and not yet approved. Separate from isOverdue, which tracks the evidence due date.
+export function isPopulationOverdue(
+  control: Pick<AuditControl, "populationDueDate" | "populationStatus">,
+): boolean {
+  const days = daysLeft(control.populationDueDate);
+  return days !== null && days < 0 && control.populationStatus !== "APPROVED";
+}

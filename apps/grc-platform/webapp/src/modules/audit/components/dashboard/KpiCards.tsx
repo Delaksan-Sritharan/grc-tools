@@ -88,6 +88,7 @@ interface KpiCardsProps {
   /** null hides the awaiting card entirely (e.g. management). */
   awaitingCount: number | null;
   awaitingLabel: string;
+  onTotalClick: () => void;
   onAwaitingClick: () => void;
   onOverdueClick: () => void;
 }
@@ -99,6 +100,7 @@ export default function KpiCards({
   overdueControls,
   awaitingCount,
   awaitingLabel,
+  onTotalClick,
   onAwaitingClick,
   onOverdueClick,
 }: KpiCardsProps): JSX.Element {
@@ -118,7 +120,8 @@ export default function KpiCards({
         iconColor={primary}
         value={totalControls}
         label="Total Controls"
-        sub="across active audits"
+        sub="click to view open items"
+        onClick={onTotalClick}
       />
       <KpiCard
         icon={<CheckCircle size={22} />}
