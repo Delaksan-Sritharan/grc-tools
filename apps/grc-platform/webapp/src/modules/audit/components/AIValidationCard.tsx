@@ -51,10 +51,6 @@ const RESULT_STYLE: Record<"PASS" | "FAIL" | "UNCERTAIN" | "SKIPPED", { label: s
 const PASS_NOTE = "Meets the requirement.";
 const ADVISORY_REVIEWER = "Advisory only - your decision is authoritative.";
 
-// Deploy-time switch mirroring the backend's AI_VALIDATION_ENABLED, so the card
-// never promises a review the backend won't run.
-const AI_VALIDATION_ENABLED = window.config?.GRC_PLATFORM_AI_VALIDATION_ENABLED === true;
-
 interface AIValidationCardProps {
   auditId: number;
   controlId: number;
@@ -86,8 +82,8 @@ export default function AIValidationCard({ auditId, controlId, variant, phase = 
   // Computed once; every phase-dependent pick below keys off this instead of
   // re-testing `phase` at each call site.
   const isPopulation = phase === "population";
-  const evidenceEnabled = !isPopulation && AI_VALIDATION_ENABLED && isInternal;
-  const populationEnabled = isPopulation && AI_VALIDATION_ENABLED && isInternal;
+  const evidenceEnabled = !isPopulation && isInternal;
+  const populationEnabled = isPopulation && isInternal;
 
   const { data: submissions } = useGetEvidence(auditId, controlId, evidenceEnabled);
   const { data: population } = useGetPopulation(auditId, controlId, populationEnabled);
@@ -104,7 +100,7 @@ export default function AIValidationCard({ auditId, controlId, variant, phase = 
   const { data: validations, isLoading, isError, refetch } = isPopulation ? populationValidations : evidenceValidations;
   const latestId = isPopulation ? latestPopulationId : latestEvidenceId;
 
-  if (!AI_VALIDATION_ENABLED || privilegesLoading || !isInternal) return null;
+  if (privilegesLoading || !isInternal) return null;
 
   const latest = validations?.[0];
 
