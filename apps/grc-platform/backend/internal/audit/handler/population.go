@@ -175,7 +175,7 @@ func (h *evidenceHandler) submitPopulation(w http.ResponseWriter, r *http.Reques
 
 	// Fire AI validation — population phase, same fire-and-forget semantics
 	// as the evidence submit path (finalizeEvidenceSubmission).
-	h.aiValidation.TriggerPopulation(auditID, controlID, populationID, actor, req.SkipAiValidation)
+	h.aiValidation.TriggerPopulation(auditID, controlID, populationID, actor, skipAiValidationAllowed(r.Context(), req.SkipAiValidation))
 
 	response.WriteJSONValue(w, http.StatusCreated, result)
 }

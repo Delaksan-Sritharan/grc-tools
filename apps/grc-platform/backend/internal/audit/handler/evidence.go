@@ -443,7 +443,7 @@ func (h *evidenceHandler) submitEvidence(w http.ResponseWriter, r *http.Request)
 	// fire AI validation — the shared path the Evidence Portal ingress also
 	// runs, so both channels stay in step. channelWebApp / user.Issuer tag
 	// this submission as a web-app one.
-	evidence, err := h.finalizeEvidenceSubmission(r.Context(), auditID, controlID, req.Files, req.Attestation, isAdmin, actor, channelWebApp, user.Issuer, req.SkipAiValidation)
+	evidence, err := h.finalizeEvidenceSubmission(r.Context(), auditID, controlID, req.Files, req.Attestation, isAdmin, actor, channelWebApp, user.Issuer, skipAiValidationAllowed(r.Context(), req.SkipAiValidation))
 	if err != nil {
 		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
 		return
@@ -500,7 +500,7 @@ func (h *evidenceHandler) addEvidenceFiles(w http.ResponseWriter, r *http.Reques
 
 	// Re-run AI validation now that more files are attached — same best-effort,
 	// fire-and-forget semantics as the initial submission.
-	h.aiValidation.TriggerEvidence(auditID, controlID, evidence.ID, actor, req.SkipAiValidation)
+	h.aiValidation.TriggerEvidence(auditID, controlID, evidence.ID, actor, skipAiValidationAllowed(r.Context(), req.SkipAiValidation))
 
 	response.WriteJSONValue(w, http.StatusOK, evidence)
 }
@@ -930,4 +930,11 @@ func (h *evidenceHandler) listEvidence(w http.ResponseWriter, r *http.Request) {
 	h.resolveEvidenceSubmitters(r.Context(), evidence)
 	h.resolveEvidenceFileUploaders(r.Context(), evidence)
 	response.WriteJSONValue(w, http.StatusOK, evidence)
+}
+
+// skipAiValidationAllowed honors a submission's AI-validation opt-out only for
+// internal submitters — the same ViewInternalComments gate the checkbox is
+// rendered behind. Anyone else's flag is silently dropped.
+func skipAiValidationAllowed(ctx context.Context, requested bool) bool {
+	return requested && auth.HasPrivilege(ctx, privilege.ViewInternalComments)
 }

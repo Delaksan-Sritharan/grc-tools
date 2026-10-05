@@ -4683,7 +4683,7 @@ components:
           description: Fileless-completion justification. Only honored when files is empty AND the caller holds ManageControls.
         skipAiValidation:
           type: boolean
-          description: Opts this one submission out of AI validation. Decided fresh per submission; never persisted.
+          description: Opts this one submission out of AI validation. Decided fresh per submission; never persisted. Only honored when the caller holds AUDIT_VIEW_INTERNAL_COMMENTS; ignored otherwise.
     PopulationSubmitRequest:
       type: object
       properties:
@@ -4694,7 +4694,7 @@ components:
           description: Written note standing in for population files — required when the folder has none.
         skipAiValidation:
           type: boolean
-          description: Opts this one submission out of AI validation. Decided fresh per submission; never persisted.
+          description: Opts this one submission out of AI validation. Decided fresh per submission; never persisted. Only honored when the caller holds AUDIT_VIEW_INTERNAL_COMMENTS; ignored otherwise.
     AuditPopulation:
       type: object
       description: One population round for an OE control. A control normally has exactly one round for its whole lifecycle.

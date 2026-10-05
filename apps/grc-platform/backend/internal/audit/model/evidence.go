@@ -129,10 +129,8 @@ type SubmitEvidenceRequest struct {
 	Attestation string            `json:"attestation,omitempty"`
 	// SkipAiValidation opts this one submission out of AI validation (the
 	// submission form's checkbox — decided fresh per submission, never
-	// persisted). Not a security control: at worst, trusting it skips an
-	// advisory check, so it needs no separate server-side role gate beyond
-	// the ordinary SubmitEvidence privilege this endpoint already requires.
-	// The checkbox itself is only rendered for internal submitter roles.
+	// persisted). Only honored when the caller holds ViewInternalComments —
+	// the same gate the checkbox is rendered behind; ignored otherwise.
 	SkipAiValidation bool `json:"skipAiValidation,omitempty"`
 }
 
