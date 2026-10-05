@@ -13,7 +13,8 @@
 --   • four new values on admin_activity_log.entity_type (a shared.sql
 --     table), so changes to those values are recorded in the Admin Console's
 --     activity log. Appended at the end of the ENUM, which MySQL 8 applies as
---     a metadata-only change; no existing row is touched.
+--     a metadata-only change; no existing row is touched. Skipped, harmlessly,
+--     on a database that has no admin_activity_log table.
 -- No existing row is rewritten and the risk table is not altered: existing
 -- risks are STANDARD, which has no rows in any of the new tables.
 --
@@ -57,14 +58,18 @@ DEALLOCATE PREPARE add_risk_team_template_stmt;
 
 -- -----------------------------------------------------------------------------
 -- admin_activity_log.entity_type: four new values for the lookups below.
--- Guarded the same way: MODIFY only when the new values are missing.
+-- admin_activity_log belongs to the Admin Console (shared.sql) and a database
+-- may not have it yet. The step therefore runs only when the column exists AND
+-- lacks the new values: with no table there is nothing to extend (a table
+-- created later from shared.sql already has the values), and a second run
+-- finds them and does nothing.
 -- -----------------------------------------------------------------------------
-SET @activity_log_has_lookups = (
+SET @activity_log_needs_lookups = (
   SELECT COUNT(*) FROM information_schema.COLUMNS
   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'admin_activity_log'
-    AND COLUMN_NAME = 'entity_type' AND COLUMN_TYPE LIKE '%''RISK_DEPLOYMENT_TYPE''%'
+    AND COLUMN_NAME = 'entity_type' AND COLUMN_TYPE NOT LIKE '%''RISK_DEPLOYMENT_TYPE''%'
 );
-SET @extend_activity_log_sql = IF(@activity_log_has_lookups = 0,
+SET @extend_activity_log_sql = IF(@activity_log_needs_lookups > 0,
   'ALTER TABLE admin_activity_log MODIFY entity_type '
   'ENUM(''USER'',''GRANT'',''RISK_TEAM'',''RISK_CATEGORY'',''COMPLIANCE_REFERENCE'',''RISK_SCORE'',''AUDIT_TEAM'','
   '''RISK_PLATFORM'',''RISK_CUSTOMER'',''RISK_PRODUCT'',''RISK_DEPLOYMENT_TYPE'') NOT NULL',
