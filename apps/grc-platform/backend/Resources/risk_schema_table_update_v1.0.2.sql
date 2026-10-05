@@ -10,6 +10,10 @@
 --     moment it lands, with no UPDATE. risk_team is a small table.
 --   • eight new tables. Nothing is created in them; admins add the lookup
 --     values through the Admin Console.
+--   • four new values on admin_activity_log.entity_type (a shared.sql
+--     table), so changes to those values are recorded in the Admin Console's
+--     activity log. Appended at the end of the ENUM, which MySQL 8 applies as
+--     a metadata-only change; no existing row is touched.
 -- No existing row is rewritten and the risk table is not altered: existing
 -- risks are STANDARD, which has no rows in any of the new tables.
 --
@@ -27,6 +31,10 @@
 --              risk_managed_service_detail, risk_deployment_type,
 --              risk_product, risk_customer, risk_platform;
 --   ALTER TABLE risk_team DROP COLUMN register_template;
+--   (and, only once no log row uses the four new values:)
+--   ALTER TABLE admin_activity_log MODIFY entity_type
+--     ENUM('USER','GRANT','RISK_TEAM','RISK_CATEGORY','COMPLIANCE_REFERENCE',
+--          'RISK_SCORE','AUDIT_TEAM') NOT NULL;
 
 USE grc_platform;
 
@@ -46,6 +54,24 @@ SET @add_risk_team_template_sql = IF(@risk_team_has_template = 0,
 PREPARE add_risk_team_template_stmt FROM @add_risk_team_template_sql;
 EXECUTE add_risk_team_template_stmt;
 DEALLOCATE PREPARE add_risk_team_template_stmt;
+
+-- -----------------------------------------------------------------------------
+-- admin_activity_log.entity_type: four new values for the lookups below.
+-- Guarded the same way: MODIFY only when the new values are missing.
+-- -----------------------------------------------------------------------------
+SET @activity_log_has_lookups = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'admin_activity_log'
+    AND COLUMN_NAME = 'entity_type' AND COLUMN_TYPE LIKE '%''RISK_DEPLOYMENT_TYPE''%'
+);
+SET @extend_activity_log_sql = IF(@activity_log_has_lookups = 0,
+  'ALTER TABLE admin_activity_log MODIFY entity_type '
+  'ENUM(''USER'',''GRANT'',''RISK_TEAM'',''RISK_CATEGORY'',''COMPLIANCE_REFERENCE'',''RISK_SCORE'',''AUDIT_TEAM'','
+  '''RISK_PLATFORM'',''RISK_CUSTOMER'',''RISK_PRODUCT'',''RISK_DEPLOYMENT_TYPE'') NOT NULL',
+  'SELECT 1');
+PREPARE extend_activity_log_stmt FROM @extend_activity_log_sql;
+EXECUTE extend_activity_log_stmt;
+DEALLOCATE PREPARE extend_activity_log_stmt;
 
 -- -----------------------------------------------------------------------------
 -- Lookups — deactivated, never deleted once used; every FK to them RESTRICT.

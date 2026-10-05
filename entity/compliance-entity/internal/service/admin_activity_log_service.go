@@ -51,6 +51,7 @@ var validAdminActivityActions = map[string]bool{
 var validAdminActivityEntityTypes = map[string]bool{
 	"USER": true, "GRANT": true, "RISK_TEAM": true, "RISK_CATEGORY": true,
 	"COMPLIANCE_REFERENCE": true, "RISK_SCORE": true, "AUDIT_TEAM": true,
+	"RISK_PLATFORM": true, "RISK_CUSTOMER": true, "RISK_PRODUCT": true, "RISK_DEPLOYMENT_TYPE": true,
 }
 
 func (s *adminActivityLogService) CreateAdminActivityLog(ctx context.Context, req domain.CreateAdminActivityLogRequest) (domain.AdminActivityLog, error) {
