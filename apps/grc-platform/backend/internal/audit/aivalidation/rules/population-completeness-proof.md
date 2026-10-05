@@ -1,8 +1,7 @@
 # Population Completeness Proof
 
-Applies to population submissions on OE controls only. This context assembly
-step only sends this rule when the submission is a population submission;
-ignore it entirely for an evidence submission.
+Applies to population submissions on OE controls only. This rule is sent
+with every call; ignore it entirely when the submission kind is EVIDENCE.
 
 A population submission (a list of in-scope items — usually CSV/Excel, but
 a PDF, Word or text list is equally valid unless the control's evidence
