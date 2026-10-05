@@ -8,7 +8,7 @@
 --   • one new column on risk_team, register_template, defaulting to
 --     STANDARD — every existing register and team reads as STANDARD the
 --     moment it lands, with no UPDATE. risk_team is a small table.
---   • eight new tables. Nothing is created in them; admins add the lookup
+--   • nine new tables. Nothing is created in them; admins add the lookup
 --     values through the Admin Console.
 --   • four new values on admin_activity_log.entity_type (a shared.sql
 --     table), so changes to those values are recorded in the Admin Console's
