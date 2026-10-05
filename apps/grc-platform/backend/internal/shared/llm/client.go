@@ -41,7 +41,7 @@ import (
 const DefaultModel = "claude-sonnet-5"
 
 // defaultMaxTokens is used when a Request leaves MaxTokens unset.
-const defaultMaxTokens = 2000
+const defaultMaxTokens = 4000
 
 // Block is one piece of user-turn content: text, an image, or a PDF
 // document. The concrete Anthropic SDK type stays unexported so this

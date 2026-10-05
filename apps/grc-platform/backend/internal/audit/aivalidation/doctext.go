@@ -111,21 +111,29 @@ func extractOOXMLText(data []byte, ext string) (text string, truncated bool, err
 			continue
 		}
 		if p.label != "" {
-			out.WriteString(p.label + "\n")
+			out.WriteString(p.label)
+			out.WriteString("\n")
 		}
 		out.WriteString(t)
 		out.WriteString("\n\n")
 	}
 
 	text = strings.TrimSpace(extraBlankRuns.ReplaceAllString(out.String(), "\n\n"))
-	if len(text) > maxDocTextChars {
-		cut := maxDocTextChars
-		for cut > 0 && !isRuneStart(text[cut]) {
-			cut--
-		}
-		return text[:cut], true, nil
+	text, truncated = capDocText(text)
+	return text, truncated, nil
+}
+
+// capDocText cuts text at maxDocTextChars, on a rune boundary, and reports
+// whether anything was dropped.
+func capDocText(text string) (string, bool) {
+	if len(text) <= maxDocTextChars {
+		return text, false
 	}
-	return text, false, nil
+	cut := maxDocTextChars
+	for cut > 0 && !isRuneStart(text[cut]) {
+		cut--
+	}
+	return text[:cut], true
 }
 
 func isRuneStart(b byte) bool { return b&0xC0 != 0x80 }

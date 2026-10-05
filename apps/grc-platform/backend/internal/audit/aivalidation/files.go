@@ -134,7 +134,12 @@ func blocksForFile(ext, name string, data []byte, budget *jobBudget) (blocks []l
 	case "csv":
 		return []llm.Block{llm.NewTextBlock("--- " + quoteUntrusted(name) + " ---\n" + csvHeadTail(data))}, "reviewed"
 	case "txt":
-		return []llm.Block{llm.NewTextBlock("--- " + quoteUntrusted(name) + " ---\n" + string(data))}, "reviewed"
+		text, truncated := capDocText(string(data))
+		note := "reviewed"
+		if truncated {
+			note = fmt.Sprintf("reviewed only up to the first %d characters; the rest NOT reviewed", maxDocTextChars)
+		}
+		return []llm.Block{llm.NewTextBlock("--- " + quoteUntrusted(name) + " ---\n" + text)}, note
 	case "docx", "pptx":
 		return ooxmlDocumentBlocks(ext, name, data, budget)
 	case "doc", "ppt", "xls":

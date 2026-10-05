@@ -117,23 +117,22 @@ func extractLegacyOLEImages(data []byte) []extractedImage {
 }
 
 // carveImages scans b for embedded JPEG/PNG/GIF file signatures and returns
-// each one as a separate image, start-to-end-marker. See
-// extractLegacyOLEImages for why this signature-carving approach is used
-// instead of a full MS-ODRAW parse.
+// each one as a separate image. See extractLegacyOLEImages for why this
+// signature-carving approach is used instead of a full MS-ODRAW parse.
 func carveImages(b []byte) []extractedImage {
 	var out []extractedImage
-	out = append(out, carveBySignature(b, []byte{0xFF, 0xD8, 0xFF}, []byte{0xFF, 0xD9}, "image/jpeg", true)...)
-	out = append(out, carveBySignature(b, []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}, []byte("IEND"), "image/png", false)...)
-	out = append(out, carveBySignature(b, []byte("GIF89a"), []byte{0x3B}, "image/gif", true)...)
-	out = append(out, carveBySignature(b, []byte("GIF87a"), []byte{0x3B}, "image/gif", true)...)
+	out = append(out, carveBySignature(b, []byte{0xFF, 0xD8, 0xFF}, "image/jpeg", jpegLen)...)
+	out = append(out, carveBySignature(b, []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}, "image/png", pngLen)...)
+	out = append(out, carveBySignature(b, []byte("GIF89a"), "image/gif", gifLen)...)
+	out = append(out, carveBySignature(b, []byte("GIF87a"), "image/gif", gifLen)...)
 	return out
 }
 
 // carveBySignature finds every non-overlapping occurrence of start in b and
-// extracts through the next occurrence of end (inclusive). When
-// endIsFileEnd is false, end (e.g. PNG's "IEND") is followed by a 4-byte CRC
-// that belongs to the file too.
-func carveBySignature(b, start, end []byte, mediaType string, endIsFileEnd bool) []extractedImage {
+// extracts the image beginning there. length reports how many bytes that
+// image spans, or -1 when what follows the signature isn't a complete image —
+// such a match is skipped rather than carved short.
+func carveBySignature(b, start []byte, mediaType string, length func([]byte) int) []extractedImage {
 	var out []extractedImage
 	pos := 0
 	for {
@@ -142,22 +141,111 @@ func carveBySignature(b, start, end []byte, mediaType string, endIsFileEnd bool)
 			break
 		}
 		from := pos + i
-		j := bytes.Index(b[from+len(start):], end)
-		if j < 0 {
-			break
+		n := length(b[from:])
+		if n < 0 {
+			pos = from + len(start)
+			continue
 		}
-		to := from + len(start) + j + len(end)
-		if !endIsFileEnd {
-			to += 4 // CRC32 trailing the PNG IEND chunk tag
-		}
-		if to > len(b) {
-			to = len(b)
-		}
-		out = append(out, extractedImage{MediaType: mediaType, Data: b[from:to]})
-		pos = to
+		out = append(out, extractedImage{MediaType: mediaType, Data: b[from : from+n]})
+		pos = from + n
 		if len(out) >= 20 {
 			break
 		}
 	}
 	return out
+}
+
+// pngLen ends a PNG at its IEND chunk tag plus the 4-byte CRC that follows.
+func pngLen(b []byte) int {
+	i := bytes.Index(b, []byte("IEND"))
+	if i < 0 || i+8 > len(b) {
+		return -1
+	}
+	return i + 8
+}
+
+// jpegLen walks a JPEG's marker segments to its real EOI. Searching for the
+// first FF D9 instead would stop at an embedded EXIF thumbnail's EOI.
+func jpegLen(b []byte) int {
+	i := 2 // past SOI
+	for i+2 <= len(b) {
+		if b[i] != 0xFF {
+			return -1
+		}
+		marker := b[i+1]
+		switch {
+		case marker == 0xFF: // fill byte
+			i++
+			continue
+		case marker == 0xD9: // EOI
+			return i + 2
+		case marker == 0x01 || (marker >= 0xD0 && marker <= 0xD7): // no payload
+			i += 2
+			continue
+		}
+		if i+4 > len(b) {
+			return -1
+		}
+		i += 2 + (int(b[i+2])<<8 | int(b[i+3]))
+		if marker != 0xDA { // not SOS: no entropy-coded data follows
+			continue
+		}
+		// Entropy-coded data runs to the next real marker; FF 00 is a
+		// stuffed data byte and FF D0-D7 are restart markers inside it.
+		for {
+			if i+2 > len(b) {
+				return -1
+			}
+			if b[i] == 0xFF && b[i+1] != 0x00 && !(b[i+1] >= 0xD0 && b[i+1] <= 0xD7) {
+				break
+			}
+			i++
+		}
+	}
+	return -1
+}
+
+// gifLen walks a GIF's blocks to its trailer. The trailer byte (0x3B) also
+// occurs freely inside colour tables and pixel data, so it can't be searched for.
+func gifLen(b []byte) int {
+	// colorTable is the size of a colour table described by a packed-flags byte.
+	colorTable := func(flags byte) int {
+		if flags&0x80 == 0 {
+			return 0
+		}
+		return 3 << ((flags & 0x07) + 1)
+	}
+	// subBlocks skips a run of length-prefixed data sub-blocks through its
+	// zero-length terminator.
+	subBlocks := func(i int) int {
+		for i < len(b) {
+			n := int(b[i])
+			i += 1 + n
+			if n == 0 {
+				return i
+			}
+		}
+		return -1
+	}
+
+	if len(b) < 13 {
+		return -1
+	}
+	i := 13 + colorTable(b[10]) // header + logical screen descriptor
+	for i >= 0 && i < len(b) {
+		switch b[i] {
+		case 0x3B: // trailer
+			return i + 1
+		case 0x21: // extension: label byte, then sub-blocks
+			i = subBlocks(i + 2)
+		case 0x2C: // image descriptor, local colour table, LZW code size, data
+			if i+10 > len(b) {
+				return -1
+			}
+			i = subBlocks(i + 10 + colorTable(b[i+9]) + 1)
+		default:
+			return -1
+		}
+	}
+	return -1
 }
