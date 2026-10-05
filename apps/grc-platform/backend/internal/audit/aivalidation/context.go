@@ -19,6 +19,7 @@ package aivalidation
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
@@ -53,6 +54,12 @@ type PopulationSource interface {
 // never internal reviewer notes.
 type CommentSource interface {
 	List(ctx context.Context, auditID, controlID int, includeInternal bool) ([]*model.AuditComment, error)
+}
+
+// quoteUntrusted renders a user-supplied value as one quoted line, so embedded
+// newlines can't forge a section heading or manifest entry in the prompt.
+func quoteUntrusted(s string) string {
+	return strconv.Quote(s)
 }
 
 // evidenceFileRefs converts a round's files to fileRefs for buildFileContent.
@@ -126,7 +133,7 @@ func sampleContext(ctx context.Context, popSvc PopulationSource, auditID, contro
 	var b strings.Builder
 	b.WriteString("## Sample selected by the external auditor\n\n")
 	if note != "" {
-		fmt.Fprintf(&b, "Auditor's note: %s\n\n", note)
+		fmt.Fprintf(&b, "Auditor's note: %s\n\n", quoteUntrusted(note))
 	}
 	b.WriteString(manifest)
 	return blocks, b.String()
@@ -159,10 +166,10 @@ func previousEvidenceContext(ctx context.Context, evSvc EvidenceSource, commentS
 	for _, r := range previous {
 		fmt.Fprintf(&b, "Round #%d (status: %s):\n", r.ID, r.Status)
 		for _, f := range r.Files {
-			fmt.Fprintf(&b, "- file: %s\n", f.FileName)
+			fmt.Fprintf(&b, "- file: %s\n", quoteUntrusted(f.FileName))
 		}
 		if r.Attestation != "" {
-			fmt.Fprintf(&b, "- submitter note: %s\n", r.Attestation)
+			fmt.Fprintf(&b, "- submitter note: %s\n", quoteUntrusted(r.Attestation))
 		}
 	}
 	b.WriteString("\n")
@@ -171,7 +178,7 @@ func previousEvidenceContext(ctx context.Context, evSvc EvidenceSource, commentS
 	if err == nil && len(comments) > 0 {
 		b.WriteString("## Reviewer comments visible to the external auditor\n\n")
 		for _, c := range comments {
-			fmt.Fprintf(&b, "- %s\n", c.Content)
+			fmt.Fprintf(&b, "- %s\n", quoteUntrusted(c.Content))
 		}
 		b.WriteString("\n")
 	}

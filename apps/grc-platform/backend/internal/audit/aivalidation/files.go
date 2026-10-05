@@ -75,30 +75,30 @@ func buildFileContent(ctx context.Context, dl FileDownloader, files []fileRef, b
 	sent := 0
 	for _, f := range files {
 		if sent >= maxFiles {
-			fmt.Fprintf(&manifest, "- %s: not reviewed (over the %d-file cap for this job)\n", f.Name, maxFiles)
+			fmt.Fprintf(&manifest, "- %s: not reviewed (over the %d-file cap for this job)\n", quoteUntrusted(f.Name), maxFiles)
 			continue
 		}
 		ext := strings.ToLower(strings.TrimPrefix(path.Ext(f.Name), "."))
 		if !supportedExt[ext] {
-			fmt.Fprintf(&manifest, "- %s: not reviewed (unsupported format)\n", f.Name)
+			fmt.Fprintf(&manifest, "- %s: not reviewed (unsupported format)\n", quoteUntrusted(f.Name))
 			continue
 		}
 		data, _, _, err := dl.DownloadFile(ctx, f.ID)
 		if err != nil {
-			fmt.Fprintf(&manifest, "- %s: not reviewed (could not be read)\n", f.Name)
+			fmt.Fprintf(&manifest, "- %s: not reviewed (could not be read)\n", quoteUntrusted(f.Name))
 			continue
 		}
 		if int64(len(data)) > maxFileBytes {
-			fmt.Fprintf(&manifest, "- %s: not reviewed (exceeds the %dMB per-file cap)\n", f.Name, maxFileBytes>>20)
+			fmt.Fprintf(&manifest, "- %s: not reviewed (exceeds the %dMB per-file cap)\n", quoteUntrusted(f.Name), maxFileBytes>>20)
 			continue
 		}
 		if total+int64(len(data)) > maxTotalBytes {
-			fmt.Fprintf(&manifest, "- %s: not reviewed (job's %dMB total cap reached)\n", f.Name, maxTotalBytes>>20)
+			fmt.Fprintf(&manifest, "- %s: not reviewed (job's %dMB total cap reached)\n", quoteUntrusted(f.Name), maxTotalBytes>>20)
 			continue
 		}
 
 		newBlocks, note := blocksForFile(ext, f.Name, data, budget)
-		fmt.Fprintf(&manifest, "- %s: %s\n", f.Name, note)
+		fmt.Fprintf(&manifest, "- %s: %s\n", quoteUntrusted(f.Name), note)
 		if len(newBlocks) > 0 {
 			blocks = append(blocks, newBlocks...)
 			total += int64(len(data))
@@ -130,11 +130,11 @@ func blocksForFile(ext, name string, data []byte, budget *jobBudget) (blocks []l
 		if err != nil {
 			return nil, "not reviewed (could not parse spreadsheet)"
 		}
-		return []llm.Block{llm.NewTextBlock("--- " + name + " ---\n" + text)}, "reviewed"
+		return []llm.Block{llm.NewTextBlock("--- " + quoteUntrusted(name) + " ---\n" + text)}, "reviewed"
 	case "csv":
-		return []llm.Block{llm.NewTextBlock("--- " + name + " ---\n" + csvHeadTail(data))}, "reviewed"
+		return []llm.Block{llm.NewTextBlock("--- " + quoteUntrusted(name) + " ---\n" + csvHeadTail(data))}, "reviewed"
 	case "txt":
-		return []llm.Block{llm.NewTextBlock("--- " + name + " ---\n" + string(data))}, "reviewed"
+		return []llm.Block{llm.NewTextBlock("--- " + quoteUntrusted(name) + " ---\n" + string(data))}, "reviewed"
 	case "docx", "pptx":
 		return ooxmlDocumentBlocks(ext, name, data, budget)
 	case "doc", "ppt", "xls":

@@ -43,7 +43,7 @@ func TestBuildFileContent_SkippedFilesDoNotCountTowardCap(t *testing.T) {
 	if len(blocks) != 1 {
 		t.Fatalf("got %d blocks, want 1", len(blocks))
 	}
-	if !strings.Contains(manifest, "- evidence.txt: reviewed\n") {
+	if !strings.Contains(manifest, "- \"evidence.txt\": reviewed\n") {
 		t.Errorf("evidence.txt not marked reviewed in manifest:\n%s", manifest)
 	}
 }
