@@ -227,3 +227,45 @@ func TestCheckTemplateUpdate_UntouchedSkipsRead(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+// A Managed Services risk with no detail row would have its deployment type
+// "updated" by a plain UPDATE that changes nothing and reports nothing. The
+// check turns that into an error. sqlmock fails the test if the update path runs.
+func TestCheckTemplateUpdate_MissingManagedServiceDetailIsAnError(t *testing.T) {
+	tx, mock := templateTx(t, TemplateManagedServices, 5)
+	mock.ExpectQuery(re("SELECT EXISTS(SELECT 1 FROM risk_managed_service_detail WHERE risk_id = ?)")).WithArgs(9).
+		WillReturnRows(sqlmock.NewRows([]string{"e"}).AddRow(false))
+
+	err := checkTemplateUpdate(context.Background(), tx, 9, domain.UpdateRiskRequest{DeploymentTypeID: intPtr(2)})
+	var ve *apierror.ValidationError
+	if err == nil || errors.As(err, &ve) {
+		t.Fatalf("err = %v, want a non-validation (data integrity) error", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Error(err)
+	}
+}
+
+// The assignment team is read FOR SHARE so UpdateRiskTeam's FOR UPDATE on the
+// same row cannot change its template between this check and the commit of the
+// risk checked against it. A plain SELECT would pass the check yet leave that
+// window open, so the lock is part of what is asserted: sqlmock matches the
+// query text.
+func TestCheckAssignmentTeam_ReadsTheTeamUnderASharedLock(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	tx, _ := db.Begin()
+	mock.ExpectQuery(re("SELECT register_template FROM risk_team WHERE id = ? FOR SHARE")).WithArgs(20).
+		WillReturnRows(sqlmock.NewRows([]string{"t"}).AddRow(TemplateManagedServices))
+
+	if err := checkAssignmentTeam(context.Background(), tx, TemplateManagedServices, 20); err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Error(err)
+	}
+}

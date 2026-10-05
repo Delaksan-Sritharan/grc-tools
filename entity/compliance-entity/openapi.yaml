@@ -5495,6 +5495,7 @@ components:
       properties:
         name:
           type: string
+          maxLength: 255
         code:
           type: string
           nullable: true
@@ -5510,6 +5511,7 @@ components:
         name:
           type: string
           nullable: true
+          maxLength: 255
         code:
           type: string
           nullable: true
@@ -5804,6 +5806,9 @@ components:
           - STANDARD
           - AGGREGATED
           - MANAGED_SERVICES
+        hasRisks:
+          type: boolean
+          description: True once any risk uses the team, as its source register or its assignment team. The template can then no longer change.
         status:
           type: string
         createdOn:
@@ -5892,7 +5897,7 @@ components:
         registerTemplate:
           type: string
           nullable: true
-          description: Conflicts (409) once any risk has this team as its source register.
+          description: Conflicts (409) once any risk uses this team, as its source register or as its assignment team (see hasRisks).
           enum:
           - STANDARD
           - AGGREGATED

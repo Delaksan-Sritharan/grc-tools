@@ -445,10 +445,14 @@ type RiskTeam struct {
 	// RegisterTemplate is STANDARD | AGGREGATED | MANAGED_SERVICES. On a
 	// register it decides which fields its risks carry; on an assignment team,
 	// which registers' pickers offer it (RISK_MODULE_DESIGN.md §14).
-	RegisterTemplate string    `json:"registerTemplate"`
-	Status           string    `json:"status"`
-	CreatedOn        time.Time `json:"createdOn"`
-	UpdatedOn        time.Time `json:"updatedOn"`
+	RegisterTemplate string `json:"registerTemplate"`
+	// HasRisks reports whether any risk uses this team, as its source register
+	// or as its assignment team. While true the template can no longer change,
+	// because those risks were checked against it.
+	HasRisks  bool      `json:"hasRisks"`
+	Status    string    `json:"status"`
+	CreatedOn time.Time `json:"createdOn"`
+	UpdatedOn time.Time `json:"updatedOn"`
 }
 
 // SearchRiskTeamsRequest is the payload for POST /risk/teams/search.

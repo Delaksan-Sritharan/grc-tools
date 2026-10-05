@@ -19,6 +19,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/apierror"
@@ -106,5 +107,28 @@ func TestCreateRiskLookup_NameTrimmedAndRequired(t *testing.T) {
 	}
 	if got.Name != "Choreo" {
 		t.Errorf("name = %q, want trimmed %q", got.Name, "Choreo")
+	}
+}
+
+// A name longer than the column would otherwise reach MySQL and come back as a
+// 500; it must be a 400, on create and on rename, counted in characters.
+func TestRiskLookupNameLength(t *testing.T) {
+	long := strings.Repeat("é", maxLookupNameLen+1) // multi-byte: counts characters, not bytes
+	fits := strings.Repeat("é", maxLookupNameLen)
+	var ve *apierror.ValidationError
+
+	repo := &fakeLookupRepo{}
+	svc := NewRiskLookupService(repo, repository.LookupPlatform)
+	if _, err := svc.CreateRiskLookup(context.Background(), domain.CreateRiskLookupRequest{Name: long, CreatedBy: "a"}); !errors.As(err, &ve) {
+		t.Fatalf("create with %d chars: err = %v, want ValidationError", maxLookupNameLen+1, err)
+	}
+	if repo.created != nil {
+		t.Error("an over-long name reached the repository")
+	}
+	if _, err := svc.CreateRiskLookup(context.Background(), domain.CreateRiskLookupRequest{Name: fits, CreatedBy: "a"}); err != nil {
+		t.Errorf("create with exactly %d chars: %v", maxLookupNameLen, err)
+	}
+	if _, err := svc.UpdateRiskLookup(context.Background(), 1, domain.UpdateRiskLookupRequest{Name: &long, UpdatedBy: "a"}); !errors.As(err, &ve) {
+		t.Errorf("rename to %d chars: err = %v, want ValidationError", maxLookupNameLen+1, err)
 	}
 }

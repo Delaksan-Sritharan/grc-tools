@@ -27,6 +27,11 @@ import (
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/domain"
 )
 
+// teamHasRisks is the SELECT expression behind RiskTeam.HasRisks: any risk
+// using the team as its source register or its assignment team. It also drives
+// the template lock in UpdateRiskTeam, so the two cannot disagree.
+const teamHasRisks = "EXISTS(SELECT 1 FROM risk r WHERE r.source_register_id = risk_team.id OR r.assignment_team_id = risk_team.id)"
+
 // RiskTeamRepository defines persistence operations for the risk_team table.
 type RiskTeamRepository interface {
 	SearchRiskTeams(ctx context.Context, req domain.SearchRiskTeamsRequest) ([]domain.RiskTeam, int, error)
@@ -77,7 +82,7 @@ func (r *riskTeamRepo) SearchRiskTeams(ctx context.Context, req domain.SearchRis
 
 	dataArgs := append(append([]any{}, args...), req.Pagination.Limit, req.Pagination.Offset)
 	rows, err := r.db.QueryContext(ctx,
-		"SELECT id, name, code, description, team_type, register_template, status, created_at, updated_at "+
+		"SELECT id, name, code, description, team_type, register_template, "+teamHasRisks+", status, created_at, updated_at "+
 			"FROM risk_team "+where+" ORDER BY name LIMIT ? OFFSET ?",
 		dataArgs...)
 	if err != nil {
@@ -101,7 +106,7 @@ func (r *riskTeamRepo) SearchRiskTeams(ctx context.Context, req domain.SearchRis
 
 func (r *riskTeamRepo) GetRiskTeamByID(ctx context.Context, id int) (*domain.RiskTeam, error) {
 	row := r.db.QueryRowContext(ctx,
-		"SELECT id, name, code, description, team_type, register_template, status, created_at, updated_at FROM risk_team WHERE id = ?", id)
+		"SELECT id, name, code, description, team_type, register_template, "+teamHasRisks+", status, created_at, updated_at FROM risk_team WHERE id = ?", id)
 	t, err := scanRiskTeam(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, &apierror.NotFoundError{Msg: fmt.Sprintf("risk team %d not found", id)}
@@ -133,11 +138,12 @@ func (r *riskTeamRepo) CreateRiskTeam(ctx context.Context, req domain.CreateRisk
 }
 
 // UpdateRiskTeam applies a partial update. A change of register_template is
-// refused once any risk has this team as its source register: those risks
-// would otherwise carry fields the new template lacks, or lack fields it
-// requires. The team row is locked first, and CreateRisk reads the template
-// under a shared lock on the same row, so a risk cannot be created between
-// the check and the change.
+// refused once any risk uses this team, as its source register or as its
+// assignment team: the first kind would carry fields the new template lacks (or
+// lack ones it requires), the second would be routed to a team the picker rule
+// no longer allows. The team row is locked first, and CreateRisk and
+// UpdateRisk read the template under a shared lock on the same row, so a risk
+// cannot be created or re-routed between the check and the change.
 func (r *riskTeamRepo) UpdateRiskTeam(ctx context.Context, id int, req domain.UpdateRiskTeamRequest) (*domain.RiskTeam, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -176,12 +182,12 @@ func (r *riskTeamRepo) UpdateRiskTeam(ctx context.Context, id int, req domain.Up
 	if req.RegisterTemplate != nil && *req.RegisterTemplate != currentTemplate {
 		var hasRisks bool
 		if err := tx.QueryRowContext(ctx,
-			"SELECT EXISTS(SELECT 1 FROM risk WHERE source_register_id = ?)", id).Scan(&hasRisks); err != nil {
+			"SELECT EXISTS(SELECT 1 FROM risk WHERE source_register_id = ? OR assignment_team_id = ?)", id, id).Scan(&hasRisks); err != nil {
 			return nil, fmt.Errorf("risk_team.Update(%d) has-risks check: %w", id, err)
 		}
 		if hasRisks {
 			return nil, &apierror.ConflictError{
-				Msg: "this register already has risks, so its template can no longer be changed"}
+				Msg: "this team already has risks, so its template can no longer be changed"}
 		}
 		sets = append(sets, "register_template = ?")
 		args = append(args, *req.RegisterTemplate)
@@ -207,7 +213,7 @@ func (r *riskTeamRepo) UpdateRiskTeam(ctx context.Context, id int, req domain.Up
 func scanRiskTeam(s scanner) (*domain.RiskTeam, error) {
 	var t domain.RiskTeam
 	var code, description sql.NullString
-	if err := s.Scan(&t.ID, &t.Name, &code, &description, &t.TeamType, &t.RegisterTemplate, &t.Status, &t.CreatedOn, &t.UpdatedOn); err != nil {
+	if err := s.Scan(&t.ID, &t.Name, &code, &description, &t.TeamType, &t.RegisterTemplate, &t.HasRisks, &t.Status, &t.CreatedOn, &t.UpdatedOn); err != nil {
 		return nil, err
 	}
 	if code.Valid {

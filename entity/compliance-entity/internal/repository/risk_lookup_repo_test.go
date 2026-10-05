@@ -149,9 +149,11 @@ func TestDeleteRiskLookup_NotFound(t *testing.T) {
 	}
 }
 
-// TestRiskTeamUpdate_TemplateLockedOnceRegisterHasRisks: changing a
-// register's template after its first risk is a 409 and nothing is written.
-func TestRiskTeamUpdate_TemplateLockedOnceRegisterHasRisks(t *testing.T) {
+// TestRiskTeamUpdate_TemplateLockedOnceTeamHasRisks: changing a team's
+// template once any risk uses it — as the source register OR as the assignment
+// team — is a 409 and nothing is written. The single query covers both uses;
+// an SRE team with risks routed to it must not be re-tagged under them.
+func TestRiskTeamUpdate_TemplateLockedOnceTeamHasRisks(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
@@ -162,8 +164,8 @@ func TestRiskTeamUpdate_TemplateLockedOnceRegisterHasRisks(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectQuery(re("SELECT register_template FROM risk_team WHERE id = ? FOR UPDATE")).WithArgs(5).
 		WillReturnRows(sqlmock.NewRows([]string{"register_template"}).AddRow("STANDARD"))
-	mock.ExpectQuery(re("SELECT EXISTS(SELECT 1 FROM risk WHERE source_register_id = ?)")).WithArgs(5).
-		WillReturnRows(sqlmock.NewRows([]string{"e"}).AddRow(true))
+	mock.ExpectQuery(re("SELECT EXISTS(SELECT 1 FROM risk WHERE source_register_id = ? OR assignment_team_id = ?)")).
+		WithArgs(5, 5).WillReturnRows(sqlmock.NewRows([]string{"e"}).AddRow(true))
 	mock.ExpectRollback()
 
 	_, err = repo.UpdateRiskTeam(context.Background(), 5, domain.UpdateRiskTeamRequest{
@@ -196,12 +198,17 @@ func TestRiskTeamUpdate_SameTemplateSkipsLockCheck(t *testing.T) {
 	mock.ExpectCommit()
 	mock.ExpectQuery(re("FROM risk_team WHERE id = ?")).WithArgs(5).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "code", "description", "team_type",
-			"register_template", "status", "created_at", "updated_at"}).
-			AddRow(5, "Asgardeo IAM", "ASG", nil, "BOTH", "STANDARD", "ACTIVE", time.Now(), time.Now()))
+			"register_template", "has_risks", "status", "created_at", "updated_at"}).
+			AddRow(5, "Asgardeo IAM", "ASG", nil, "BOTH", "STANDARD", true, "ACTIVE", time.Now(), time.Now()))
 
-	if _, err := repo.UpdateRiskTeam(context.Background(), 5, domain.UpdateRiskTeamRequest{
-		Name: strPtr("Asgardeo IAM"), RegisterTemplate: strPtr("STANDARD"), UpdatedBy: "admin"}); err != nil {
+	got, err := repo.UpdateRiskTeam(context.Background(), 5, domain.UpdateRiskTeamRequest{
+		Name: strPtr("Asgardeo IAM"), RegisterTemplate: strPtr("STANDARD"), UpdatedBy: "admin"})
+	if err != nil {
 		t.Fatalf("UpdateRiskTeam: %v", err)
+	}
+	// HasRisks is what the Admin Console uses to disable the Template select.
+	if !got.HasRisks {
+		t.Error("HasRisks not read back from the team row")
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Error(err)

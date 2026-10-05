@@ -18,8 +18,10 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/apierror"
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/domain"
@@ -39,6 +41,18 @@ func NewRiskLookupService(repo repository.RiskLookupRepository, kind repository.
 // customerCodePattern mirrors chk_risk_customer_code in risk_schema.sql. The
 // code is embedded in risk codes, so it may not contain the "-" separator.
 var customerCodePattern = regexp.MustCompile(`^[A-Z0-9]{1,12}$`)
+
+// maxLookupNameLen matches the VARCHAR(255) name column of every lookup table.
+// Checked here so an over-long name is a clear 400 rather than a database
+// error that surfaces as a 500.
+const maxLookupNameLen = 255
+
+func checkLookupNameLength(name string) error {
+	if utf8.RuneCountInString(name) > maxLookupNameLen {
+		return &apierror.ValidationError{Msg: fmt.Sprintf("name must be at most %d characters", maxLookupNameLen)}
+	}
+	return nil
+}
 
 var validRiskLookupStatuses = map[string]bool{"ACTIVE": true, "INACTIVE": true}
 
@@ -61,6 +75,9 @@ func (s *riskLookupService) CreateRiskLookup(ctx context.Context, req domain.Cre
 	req.Name = strings.TrimSpace(req.Name)
 	if req.Name == "" {
 		return domain.RiskLookup{}, &apierror.ValidationError{Msg: "name is required"}
+	}
+	if err := checkLookupNameLength(req.Name); err != nil {
+		return domain.RiskLookup{}, err
 	}
 	if req.CreatedBy == "" {
 		return domain.RiskLookup{}, &apierror.ValidationError{Msg: "createdBy is required"}
@@ -93,6 +110,9 @@ func (s *riskLookupService) UpdateRiskLookup(ctx context.Context, id int, req do
 		trimmed := strings.TrimSpace(*req.Name)
 		if trimmed == "" {
 			return domain.RiskLookup{}, &apierror.ValidationError{Msg: "name cannot be empty"}
+		}
+		if err := checkLookupNameLength(trimmed); err != nil {
+			return domain.RiskLookup{}, err
 		}
 		req.Name = &trimmed
 	}

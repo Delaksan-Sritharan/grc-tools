@@ -110,11 +110,14 @@ func assignmentTeamFits(registerTemplate, teamTemplate string) bool {
 }
 
 // checkAssignmentTeam verifies, inside tx, that the assignment team exists
-// and its template fits the source register's.
+// and its template fits the source register's. The team row is read FOR SHARE:
+// UpdateRiskTeam locks it FOR UPDATE before changing its template, so the
+// template cannot change between this check and the commit of the risk that
+// was checked against it.
 func checkAssignmentTeam(ctx context.Context, tx *sql.Tx, registerTemplate string, teamID int) error {
 	var teamTemplate string
 	if err := tx.QueryRowContext(ctx,
-		"SELECT register_template FROM risk_team WHERE id = ?", teamID).Scan(&teamTemplate); err != nil {
+		"SELECT register_template FROM risk_team WHERE id = ? FOR SHARE", teamID).Scan(&teamTemplate); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return &apierror.ValidationError{Msg: fmt.Sprintf("assignment team %d not found", teamID)}
 		}
@@ -371,6 +374,19 @@ func checkTemplateUpdate(ctx context.Context, tx *sql.Tx, riskID int, req domain
 		return err
 	}
 	if req.DeploymentTypeID != nil {
+		// writeTemplateUpdate changes the deployment type with a plain UPDATE,
+		// which would silently change nothing if the risk had no detail row.
+		// Every Managed Services risk has one (it is written in the same
+		// transaction as the risk), so a missing row is a data problem to
+		// surface, not to skip.
+		var hasDetail bool
+		if err := tx.QueryRowContext(ctx,
+			"SELECT EXISTS(SELECT 1 FROM risk_managed_service_detail WHERE risk_id = ?)", riskID).Scan(&hasDetail); err != nil {
+			return fmt.Errorf("risk.Update check managed service detail: %w", err)
+		}
+		if !hasDetail {
+			return fmt.Errorf("risk %d is on a Managed Services register but has no managed service detail row", riskID)
+		}
 		if added, err = addedIDs(ctx, tx, "SELECT deployment_type_id FROM risk_managed_service_detail WHERE risk_id = ?",
 			riskID, []int{*req.DeploymentTypeID}); err != nil {
 			return err
