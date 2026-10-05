@@ -120,6 +120,23 @@ export function useGetAIValidation(auditId: number, controlId: number, evidenceI
 const FIRST_ROW_WINDOW_MS = 60_000;
 
 /**
+ * Poll interval for a population round's AI validation rows: 5s while the
+ * latest row is a fresh PENDING, or — bounded to FIRST_ROW_WINDOW_MS after
+ * `roundUpdatedAt` — while no row exists yet; otherwise off.
+ */
+export function populationAIValidationRefetchInterval(
+  data: AIValidationLog[] | undefined,
+  roundUpdatedAt: string | null,
+): number | false {
+  if (data?.length === 0 && roundUpdatedAt) {
+    // abs() so client/server clock skew can't make the window unbounded.
+    const age = Date.now() - new Date(roundUpdatedAt).getTime();
+    if (Math.abs(age) < FIRST_ROW_WINDOW_MS) return 5000;
+  }
+  return isFreshPending(data?.[0]) ? 5000 : false;
+}
+
+/**
  * useGetAIValidation for a population submission. Also polls, bounded to
  * FIRST_ROW_WINDOW_MS after `roundUpdatedAt`, while no row exists yet.
  */
@@ -144,14 +161,6 @@ export function useGetPopulationAIValidation(
       const body = (await res.json()) as AIValidationListResponse;
       return body.validations ?? [];
     },
-    refetchInterval: (query) => {
-      const data = query.state.data;
-      if (data?.length === 0 && roundUpdatedAt) {
-        // abs() so client/server clock skew can't make the window unbounded.
-        const age = Date.now() - new Date(roundUpdatedAt).getTime();
-        if (Math.abs(age) < FIRST_ROW_WINDOW_MS) return 5000;
-      }
-      return isFreshPending(data?.[0]) ? 5000 : false;
-    },
+    refetchInterval: (query) => populationAIValidationRefetchInterval(query.state.data, roundUpdatedAt),
   });
 }

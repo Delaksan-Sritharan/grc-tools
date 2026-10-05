@@ -37,6 +37,7 @@ import { useGetComments, type AuditComment } from "@modules/audit/api/useComment
 import {
   aiValidationQueryKey,
   populationAIValidationQueryKey,
+  populationAIValidationRefetchInterval,
   type AIValidationLog,
 } from "@modules/audit/api/useGetAIValidation";
 import ControlStatusChip from "@modules/audit/components/ControlStatusChip";
@@ -282,9 +283,16 @@ export default function ControlHistoryTimeline({
     })),
   });
 
+  // Only the current round can still have a run in progress, so only it
+  // polls (same bounded rule as the AI card); earlier rounds are settled.
+  const currentRound = population.data?.round ?? null;
   const populationAiResults = useQueries({
     queries: populationIds.map((id) => ({
       queryKey: populationAIValidationQueryKey(id),
+      refetchInterval: (query: { state: { data: AIValidationLog[] | undefined } }) =>
+        id === currentRound?.id
+          ? populationAIValidationRefetchInterval(query.state.data, currentRound.updatedAt)
+          : false,
       queryFn: async (): Promise<AIValidationLog[]> => {
         const res = await authFetch(
           `${BACKEND_BASE_URL}/api/v1/audits/${auditId}/controls/${controlId}/population/${id}/ai-validations`,
