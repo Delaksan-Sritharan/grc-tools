@@ -2039,6 +2039,7 @@ export default function ControlDrawer({ control, open, onClose }: ControlDrawerP
               auditId={control.auditId}
               controlId={control.id}
               currentStatus={displayStatus ?? control.status}
+              requirementType={control.requirementType}
             />
           </TabPanel>
           )}
