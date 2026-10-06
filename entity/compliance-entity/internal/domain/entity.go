@@ -443,12 +443,12 @@ type RiskTeam struct {
 	Description *string `json:"description"`
 	TeamType    string  `json:"teamType"` // SOURCE_REGISTER | ASSIGNMENT | BOTH
 	// RegisterTemplate is STANDARD | AGGREGATED | MANAGED_SERVICES. On a
-	// register it decides which fields its risks carry; on an assignment team,
-	// which registers' pickers offer it (RISK_MODULE_DESIGN.md §14).
+	// register it decides which fields its risks carry; an assignment-only team
+	// ignores it (RISK_MODULE_DESIGN.md §14).
 	RegisterTemplate string `json:"registerTemplate"`
-	// HasRisks reports whether any risk uses this team, as its source register
-	// or as its assignment team. While true the template can no longer change,
-	// because those risks were checked against it.
+	// HasRisks reports whether any risk uses this team as its source register.
+	// While true the template can no longer change, because those risks carry
+	// its fields.
 	HasRisks  bool      `json:"hasRisks"`
 	Status    string    `json:"status"`
 	CreatedOn time.Time `json:"createdOn"`

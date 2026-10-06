@@ -101,31 +101,19 @@ func checkTemplateFields(template string, req domain.CreateRiskRequest) error {
 	return nil
 }
 
-// assignmentTeamFits reports whether an assignment team on teamTemplate may
-// be picked on a register on registerTemplate: Managed Services registers
-// take only Managed Services teams, and every other register
-// takes every team except those.
-func assignmentTeamFits(registerTemplate, teamTemplate string) bool {
-	return (registerTemplate == TemplateManagedServices) == (teamTemplate == TemplateManagedServices)
-}
-
-// checkAssignmentTeam verifies, inside tx, that the assignment team exists
-// and its template fits the source register's. The team row is read FOR SHARE:
-// UpdateRiskTeam locks it FOR UPDATE before changing its template, so the
-// template cannot change between this check and the commit of the risk that
-// was checked against it.
-func checkAssignmentTeam(ctx context.Context, tx *sql.Tx, registerTemplate string, teamID int) error {
-	var teamTemplate string
+// checkAssignmentTeam verifies, inside tx, that the assignment team exists.
+// Any team may be the assignment team on any register: the register template
+// only decides which fields a register's risks carry. The row is read FOR SHARE
+// so an admin cannot delete it between this check and the risk that references
+// it.
+func checkAssignmentTeam(ctx context.Context, tx *sql.Tx, teamID int) error {
+	var one int
 	if err := tx.QueryRowContext(ctx,
-		"SELECT register_template FROM risk_team WHERE id = ? FOR SHARE", teamID).Scan(&teamTemplate); err != nil {
+		"SELECT 1 FROM risk_team WHERE id = ? FOR SHARE", teamID).Scan(&one); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return &apierror.ValidationError{Msg: fmt.Sprintf("assignment team %d not found", teamID)}
 		}
-		return fmt.Errorf("risk.Create assignment team template: %w", err)
-	}
-	if !assignmentTeamFits(registerTemplate, teamTemplate) {
-		return &apierror.ValidationError{
-			Msg: "this assignment team cannot be used for a risk in this register"}
+		return fmt.Errorf("risk.Create assignment team: %w", err)
 	}
 	return nil
 }
@@ -304,9 +292,8 @@ func touchesTemplate(req domain.UpdateRiskRequest) bool {
 //   - a template field may only be set on a risk whose template has it, and a
 //     multi-valued one may not be emptied;
 //   - a Managed Services risk takes no compliance references;
-//   - a new assignment team must fit the template (an unchanged one is not
-//     re-checked, so an edit form that re-posts every field still works on
-//     older data);
+//   - a new assignment team must exist (an unchanged one is not re-checked,
+//     so an edit form that re-posts every field still works on older data);
 //   - newly added lookup values must be ACTIVE, while values the risk
 //     already has may stay even if since deactivated.
 //
@@ -357,7 +344,7 @@ func checkTemplateUpdate(ctx context.Context, tx *sql.Tx, riskID int, req domain
 			Msg: fmt.Sprintf("complianceReferenceIds not allowed for a register on the %s template", template)}
 	}
 	if req.AssignmentTeamID != nil && *req.AssignmentTeamID != currentTeam {
-		if err := checkAssignmentTeam(ctx, tx, template, *req.AssignmentTeamID); err != nil {
+		if err := checkAssignmentTeam(ctx, tx, *req.AssignmentTeamID); err != nil {
 			return err
 		}
 	}

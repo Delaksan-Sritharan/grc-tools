@@ -150,9 +150,8 @@ func TestDeleteRiskLookup_NotFound(t *testing.T) {
 }
 
 // TestRiskTeamUpdate_TemplateLockedOnceTeamHasRisks: changing a team's
-// template once any risk uses it — as the source register OR as the assignment
-// team — is a 409 and nothing is written. The single query covers both uses;
-// a Managed Services team with risks routed to it must not be re-tagged under them.
+// template once any risk uses it as the source register is a 409 and nothing
+// is written. A risk routed to the team as its assignment team doesn't count.
 func TestRiskTeamUpdate_TemplateLockedOnceTeamHasRisks(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -164,8 +163,8 @@ func TestRiskTeamUpdate_TemplateLockedOnceTeamHasRisks(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectQuery(re("SELECT register_template FROM risk_team WHERE id = ? FOR UPDATE")).WithArgs(5).
 		WillReturnRows(sqlmock.NewRows([]string{"register_template"}).AddRow("STANDARD"))
-	mock.ExpectQuery(re("SELECT EXISTS(SELECT 1 FROM risk WHERE source_register_id = ? OR assignment_team_id = ?)")).
-		WithArgs(5, 5).WillReturnRows(sqlmock.NewRows([]string{"e"}).AddRow(true))
+	mock.ExpectQuery(re("SELECT EXISTS(SELECT 1 FROM risk WHERE source_register_id = ?)")).
+		WithArgs(5).WillReturnRows(sqlmock.NewRows([]string{"e"}).AddRow(true))
 	mock.ExpectRollback()
 
 	_, err = repo.UpdateRiskTeam(context.Background(), 5, domain.UpdateRiskTeamRequest{

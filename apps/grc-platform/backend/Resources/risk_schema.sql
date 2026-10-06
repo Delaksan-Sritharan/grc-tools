@@ -58,16 +58,11 @@ SET FOREIGN_KEY_CHECKS = 0;
 --   BOTH            → appears in both pickers
 -- code is NULL for teams that are never used as source registers (e.g. Legal, HR).
 --
--- register_template means two things, depending on the row:
---   on a register        → which fields its risks carry (STANDARD: the original
---                          set; AGGREGATED: + Platform; MANAGED_SERVICES:
---                          + Customer/Product/Deployment Type/Environment and
---                          no Security Compliance Reference)
---   on an assignment team → which registers' pickers offer it: MANAGED_SERVICES
---                          teams only on Managed Services
---                          registers, every other team only on the rest
--- A BOTH row has one template meaning both, which is consistent: a register
--- assigns to itself. Fixed once the register has risks — enforced by the
+-- register_template, on a register, is which fields its risks carry (STANDARD:
+-- the original set; AGGREGATED: + Platform; MANAGED_SERVICES:
+-- + Customer/Product/Deployment Type/Environment and no Security Compliance
+-- Reference). An assignment-only team ignores it, and every team is offered as
+-- an assignment team on every register. Fixed once the register has risks — enforced by the
 -- application, not here. See RISK_MODULE_DESIGN.md §14.
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS risk_team (

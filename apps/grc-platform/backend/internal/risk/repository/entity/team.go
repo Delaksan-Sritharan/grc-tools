@@ -87,27 +87,12 @@ func (r *teamRepository) List(ctx context.Context, filter model.ListTeamsFilter)
 		statusKey = ""
 	}
 
-	// Narrow to the teams that fit the register's template.
-	var templateKeys []string
-	if filter.ForRegisterID > 0 {
-		var reg entTeam
-		if err := r.c.Get(ctx, fmt.Sprintf("/risk/teams/%d", filter.ForRegisterID), &reg); err != nil {
-			return nil, fmt.Errorf("list teams for register %d: %w", filter.ForRegisterID, err)
-		}
-		if reg.RegisterTemplate == model.TemplateManagedServices {
-			templateKeys = []string{model.TemplateManagedServices}
-		} else {
-			templateKeys = []string{model.TemplateStandard, model.TemplateAggregated}
-		}
-	}
-
 	var teams []*model.Team
 	for offset := 0; ; offset += pageLimit {
 		body := map[string]any{
-			"teamTypeKeys":         teamTypeKeys,
-			"registerTemplateKeys": templateKeys,
-			"statusKey":            statusKey,
-			"pagination":           map[string]int{"limit": pageLimit, "offset": offset},
+			"teamTypeKeys": teamTypeKeys,
+			"statusKey":    statusKey,
+			"pagination":   map[string]int{"limit": pageLimit, "offset": offset},
 		}
 		var resp searchTeamsResponse
 		if err := r.c.Post(ctx, "/risk/teams/search", body, &resp); err != nil {

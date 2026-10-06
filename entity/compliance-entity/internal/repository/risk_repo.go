@@ -344,7 +344,7 @@ func (r *riskRepo) CreateRisk(ctx context.Context, req domain.CreateRiskRequest)
 	if err = checkTemplateFields(template, req); err != nil {
 		return nil, err
 	}
-	if err = checkAssignmentTeam(ctx, tx, template, req.AssignmentTeamID); err != nil {
+	if err = checkAssignmentTeam(ctx, tx, req.AssignmentTeamID); err != nil {
 		return nil, err
 	}
 	if err = checkTemplateValues(ctx, tx, req); err != nil {

@@ -64,16 +64,6 @@ func (d *Deps) handleListTeams(w http.ResponseWriter, r *http.Request) {
 		Type:            r.URL.Query().Get("type"),
 		IncludeInactive: r.URL.Query().Get("includeInactive") == "true",
 	}
-	// for_register narrows an assignment picker to the teams that fit that
-	// register's template (RISK_MODULE_DESIGN.md §14).
-	if raw := r.URL.Query().Get("for_register"); raw != "" {
-		id, err := strconv.Atoi(raw)
-		if err != nil || id <= 0 {
-			response.WriteError(w, http.StatusBadRequest, "for_register must be a positive integer")
-			return
-		}
-		filter.ForRegisterID = id
-	}
 	if filter.IncludeInactive && !auth.RequirePrivilege(r.Context(), w, privilege.ManageRiskHub) {
 		return
 	}

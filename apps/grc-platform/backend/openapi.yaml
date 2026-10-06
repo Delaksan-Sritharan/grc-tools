@@ -1978,11 +1978,6 @@ paths:
           enum:
           - SOURCE_REGISTER
           - ASSIGNMENT
-      - name: for_register
-        in: query
-        description: Source register ID. Keeps only teams that may be the assignment team for a risk in that register — Managed Services teams for a Managed Services register, every other team otherwise.
-        schema:
-          type: integer
       - name: mine
         in: query
         description: '"true" restricts the list to the caller''s own risk teams. Only narrows anything for a team-scoped-only caller (Risk Assigner/Owner); Compliance/Management/Admin always see every team regardless.'
@@ -5730,7 +5725,7 @@ components:
         team_type:
           type: string
         register_template:
-          description: On a register, which fields its risks carry; on an assignment team, which registers' pickers offer it.
+          description: Which fields the risks of this register carry. Not used for an assignment-only team.
           type: string
           enum:
           - STANDARD
@@ -5738,7 +5733,7 @@ components:
           - MANAGED_SERVICES
         has_risks:
           type: boolean
-          description: True once any risk uses the team, as its source register or its assignment team. Its template can then no longer change (a PUT that tries is a 409).
+          description: True once any risk uses the team as its source register. Its template can then no longer change (a PUT that tries is a 409).
         status:
           type: string
     RiskScore:

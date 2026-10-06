@@ -28,9 +28,11 @@ import (
 )
 
 // teamHasRisks is the SELECT expression behind RiskTeam.HasRisks: any risk
-// using the team as its source register or its assignment team. It also drives
-// the template lock in UpdateRiskTeam, so the two cannot disagree.
-const teamHasRisks = "EXISTS(SELECT 1 FROM risk r WHERE r.source_register_id = risk_team.id OR r.assignment_team_id = risk_team.id)"
+// using the team as its source register. It also drives the template lock in
+// UpdateRiskTeam, so the two cannot disagree. A risk routed to the team as its
+// assignment team doesn't count: the template only decides which fields a
+// register's risks carry.
+const teamHasRisks = "EXISTS(SELECT 1 FROM risk r WHERE r.source_register_id = risk_team.id)"
 
 // RiskTeamRepository defines persistence operations for the risk_team table.
 type RiskTeamRepository interface {
@@ -138,12 +140,11 @@ func (r *riskTeamRepo) CreateRiskTeam(ctx context.Context, req domain.CreateRisk
 }
 
 // UpdateRiskTeam applies a partial update. A change of register_template is
-// refused once any risk uses this team, as its source register or as its
-// assignment team: the first kind would carry fields the new template lacks (or
-// lack ones it requires), the second would be routed to a team the picker rule
-// no longer allows. The team row is locked first, and CreateRisk and
-// UpdateRisk read the template under a shared lock on the same row, so a risk
-// cannot be created or re-routed between the check and the change.
+// refused once any risk uses this team as its source register: those risks
+// would carry fields the new template lacks (or lack ones it requires). The
+// team row is locked first, and CreateRisk reads the template under a shared
+// lock on the same row, so a risk cannot be created between the check and the
+// change.
 func (r *riskTeamRepo) UpdateRiskTeam(ctx context.Context, id int, req domain.UpdateRiskTeamRequest) (*domain.RiskTeam, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -182,7 +183,7 @@ func (r *riskTeamRepo) UpdateRiskTeam(ctx context.Context, id int, req domain.Up
 	if req.RegisterTemplate != nil && *req.RegisterTemplate != currentTemplate {
 		var hasRisks bool
 		if err := tx.QueryRowContext(ctx,
-			"SELECT EXISTS(SELECT 1 FROM risk WHERE source_register_id = ? OR assignment_team_id = ?)", id, id).Scan(&hasRisks); err != nil {
+			"SELECT EXISTS(SELECT 1 FROM risk WHERE source_register_id = ?)", id).Scan(&hasRisks); err != nil {
 			return nil, fmt.Errorf("risk_team.Update(%d) has-risks check: %w", id, err)
 		}
 		if hasRisks {

@@ -25,12 +25,12 @@ type Team struct {
 	TeamType    string  `json:"team_type"`
 	// RegisterTemplate is STANDARD, AGGREGATED or MANAGED_SERVICES. On a
 	// register it decides which fields its risks carry (Add Risk reads it to
-	// show the right form); on an assignment team, which registers' pickers
-	// offer it. See RISK_MODULE_DESIGN.md §14.
+	// show the right form); an assignment-only team ignores it. See
+	// RISK_MODULE_DESIGN.md §14.
 	RegisterTemplate string `json:"register_template"`
-	// HasRisks is true once any risk uses the team, as its source register or
-	// its assignment team. The template can then no longer change, so the Admin
-	// Console disables that choice.
+	// HasRisks is true once any risk uses the team as its source register. The
+	// template can then no longer change, so the Admin Console disables that
+	// choice.
 	HasRisks bool   `json:"has_risks"`
 	Status   string `json:"status"`
 }
@@ -55,11 +55,6 @@ type ListTeamsFilter struct {
 	// management table — which needs to show and let someone reactivate an
 	// inactive team, not just hide it — sets it true.
 	IncludeInactive bool
-	// ForRegisterID, when set, keeps only teams that may be picked as the
-	// assignment team for a risk in that source register: Managed Services
-	// registers take only Managed Services teams, every other
-	// register takes every team but those.
-	ForRegisterID int
 }
 
 // CreateTeamRequest is the payload for POST /api/v1/risks/teams.

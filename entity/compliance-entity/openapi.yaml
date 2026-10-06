@@ -5805,14 +5805,14 @@ components:
           - BOTH
         registerTemplate:
           type: string
-          description: On a register, which fields its risks carry; on an assignment team, which registers' pickers offer it.
+          description: Which fields the risks of this register carry. Not used for an assignment-only team.
           enum:
           - STANDARD
           - AGGREGATED
           - MANAGED_SERVICES
         hasRisks:
           type: boolean
-          description: True once any risk uses the team, as its source register or its assignment team. The template can then no longer change.
+          description: True once any risk uses the team as its source register. The template can then no longer change.
         status:
           type: string
         createdOn:
@@ -5901,7 +5901,7 @@ components:
         registerTemplate:
           type: string
           nullable: true
-          description: Conflicts (409) once any risk uses this team, as its source register or as its assignment team (see hasRisks).
+          description: Conflicts (409) once any risk uses this team as its source register (see hasRisks).
           enum:
           - STANDARD
           - AGGREGATED

@@ -126,27 +126,6 @@ func TestCheckTemplateFields_UnknownTemplateIsInternal(t *testing.T) {
 	}
 }
 
-func TestAssignmentTeamFits(t *testing.T) {
-	cases := []struct {
-		register, team string
-		want           bool
-	}{
-		{TemplateManagedServices, TemplateManagedServices, true},
-		{TemplateManagedServices, TemplateStandard, false},
-		{TemplateManagedServices, TemplateAggregated, false},
-		{TemplateStandard, TemplateStandard, true},
-		{TemplateStandard, TemplateAggregated, true},
-		{TemplateStandard, TemplateManagedServices, false},
-		{TemplateAggregated, TemplateStandard, true},
-		{TemplateAggregated, TemplateManagedServices, false},
-	}
-	for _, tc := range cases {
-		if got := assignmentTeamFits(tc.register, tc.team); got != tc.want {
-			t.Errorf("assignmentTeamFits(%s, %s) = %v, want %v", tc.register, tc.team, got, tc.want)
-		}
-	}
-}
-
 // templateTx opens a sqlmock transaction whose first query reports the risk's
 // template and current assignment team.
 func templateTx(t *testing.T, template string, team int) (*sql.Tx, sqlmock.Sqlmock) {
@@ -195,8 +174,7 @@ func TestCheckTemplateUpdate_Rejections(t *testing.T) {
 }
 
 // An edit form that re-posts the risk's current assignment team must not be
-// refused, even if that team would no longer be offered for this register:
-// only a change of team is checked. sqlmock fails the test if the team
+// refused: only a change of team is checked. sqlmock fails the test if the team
 // lookup runs.
 func TestCheckTemplateUpdate_UnchangedTeamNotRechecked(t *testing.T) {
 	tx, mock := templateTx(t, TemplateManagedServices, 5)
@@ -246,11 +224,10 @@ func TestCheckTemplateUpdate_MissingManagedServiceDetailIsAnError(t *testing.T) 
 	}
 }
 
-// The assignment team is read FOR SHARE so UpdateRiskTeam's FOR UPDATE on the
-// same row cannot change its template between this check and the commit of the
-// risk checked against it. A plain SELECT would pass the check yet leave that
-// window open, so the lock is part of what is asserted: sqlmock matches the
-// query text.
+// The assignment team is read FOR SHARE so an admin cannot delete it between
+// this check and the commit of the risk that references it. A plain SELECT
+// would pass the check yet leave that window open, so the lock is part of what
+// is asserted: sqlmock matches the query text.
 func TestCheckAssignmentTeam_ReadsTheTeamUnderASharedLock(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -259,13 +236,31 @@ func TestCheckAssignmentTeam_ReadsTheTeamUnderASharedLock(t *testing.T) {
 	defer db.Close()
 	mock.ExpectBegin()
 	tx, _ := db.Begin()
-	mock.ExpectQuery(re("SELECT register_template FROM risk_team WHERE id = ? FOR SHARE")).WithArgs(20).
-		WillReturnRows(sqlmock.NewRows([]string{"t"}).AddRow(TemplateManagedServices))
+	mock.ExpectQuery(re("SELECT 1 FROM risk_team WHERE id = ? FOR SHARE")).WithArgs(20).
+		WillReturnRows(sqlmock.NewRows([]string{"one"}).AddRow(1))
 
-	if err := checkAssignmentTeam(context.Background(), tx, TemplateManagedServices, 20); err != nil {
+	if err := checkAssignmentTeam(context.Background(), tx, 20); err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Error(err)
+	}
+}
+
+func TestCheckAssignmentTeam_MissingTeamIsAValidationError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	tx, _ := db.Begin()
+	mock.ExpectQuery(re("SELECT 1 FROM risk_team WHERE id = ? FOR SHARE")).WithArgs(20).
+		WillReturnRows(sqlmock.NewRows([]string{"one"}))
+
+	err = checkAssignmentTeam(context.Background(), tx, 20)
+	var ve *apierror.ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("err = %v, want ValidationError", err)
 	}
 }
