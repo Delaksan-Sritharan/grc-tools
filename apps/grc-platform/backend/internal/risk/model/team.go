@@ -57,7 +57,7 @@ type ListTeamsFilter struct {
 	IncludeInactive bool
 	// ForRegisterID, when set, keeps only teams that may be picked as the
 	// assignment team for a risk in that source register: Managed Services
-	// registers take only Managed Services teams (the SRE teams), every other
+	// registers take only Managed Services teams, every other
 	// register takes every team but those.
 	ForRegisterID int
 }

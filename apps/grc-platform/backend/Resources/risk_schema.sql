@@ -64,7 +64,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 --                          + Customer/Product/Deployment Type/Environment and
 --                          no Security Compliance Reference)
 --   on an assignment team → which registers' pickers offer it: MANAGED_SERVICES
---                          teams (the SRE teams) only on Managed Services
+--                          teams only on Managed Services
 --                          registers, every other team only on the rest
 -- A BOTH row has one template meaning both, which is consistent: a register
 -- assigns to itself. Fixed once the register has risks — enforced by the

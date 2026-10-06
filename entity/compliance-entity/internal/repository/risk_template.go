@@ -103,7 +103,7 @@ func checkTemplateFields(template string, req domain.CreateRiskRequest) error {
 
 // assignmentTeamFits reports whether an assignment team on teamTemplate may
 // be picked on a register on registerTemplate: Managed Services registers
-// take only Managed Services teams (the SRE teams), and every other register
+// take only Managed Services teams, and every other register
 // takes every team except those.
 func assignmentTeamFits(registerTemplate, teamTemplate string) bool {
 	return (registerTemplate == TemplateManagedServices) == (teamTemplate == TemplateManagedServices)

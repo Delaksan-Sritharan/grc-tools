@@ -152,7 +152,7 @@ func TestDeleteRiskLookup_NotFound(t *testing.T) {
 // TestRiskTeamUpdate_TemplateLockedOnceTeamHasRisks: changing a team's
 // template once any risk uses it — as the source register OR as the assignment
 // team — is a 409 and nothing is written. The single query covers both uses;
-// an SRE team with risks routed to it must not be re-tagged under them.
+// a Managed Services team with risks routed to it must not be re-tagged under them.
 func TestRiskTeamUpdate_TemplateLockedOnceTeamHasRisks(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
