@@ -154,24 +154,6 @@ func TestParseDate(t *testing.T) {
 	}
 }
 
-func TestNormalizeComplianceToken(t *testing.T) {
-	for in, want := range map[string]string{
-		"iso":       "ISO",
-		"ISO 27001": "ISO",
-		"ISO27001":  "ISO",
-		"hippa":     "HIPAA",
-		"SOC 2":     "SOC2",
-		"soc2":      "SOC2",
-		"pci":       "PCI DSS",
-		"PCI-DSS":   "PCI DSS",
-		"security":  "SECURITY",
-	} {
-		if got := normalizeComplianceToken(in); got != want {
-			t.Errorf("normalizeComplianceToken(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 func TestScrubHTTPURL(t *testing.T) {
 	for _, in := range []string{"https://github.com/o/r/issues/1", " http://x.test/a ", "HTTPS://X"} {
 		if got, ok := scrubHTTPURL(in); !ok || got == "" {

@@ -64,7 +64,7 @@ func verifyMigration(ctx context.Context, log *slog.Logger, ec *EntityClient, rd
 	}
 	risksByKey := map[string][]Risk{}
 	for _, r := range existing {
-		k := naturalKey(r.RiskTitle, r.SourceRegID, r.RiskYear, r.RiskQuarter)
+		k := naturalKey(r.RiskTitle, r.SourceRegID, deref(r.CustomerName), r.RiskYear, r.RiskQuarter)
 		risksByKey[k] = append(risksByKey[k], r)
 	}
 
@@ -92,7 +92,7 @@ func verifyMigration(ctx context.Context, log *slog.Logger, ec *EntityClient, rd
 	grantCache := map[int][]Grant{}
 
 	for _, row := range allRows {
-		key := naturalKey(row.RiskTitle, row.SourceRegisterID, row.RiskYear, row.RiskQuarter)
+		key := naturalKey(row.RiskTitle, row.SourceRegisterID, row.Customer, row.RiskYear, row.RiskQuarter)
 		matches := risksByKey[key]
 
 		if _, bad := rejected[row.MigrationID]; bad {
@@ -322,8 +322,8 @@ func verifyRow(ctx context.Context, ec *EntityClient, rd RefData, migrationDate 
 		}
 	}
 
-	if diff := diffIntSets(row.ComplianceRefIDs, complianceRefIDs(detail.ComplianceReferences)); diff != "" {
-		out = append(out, fieldMismatch{"Security Compliance Reference", fmt.Sprint(row.ComplianceRefIDs), diff})
+	if diff := diffIntSets(nil, complianceRefIDs(detail.ComplianceReferences)); diff != "" {
+		out = append(out, fieldMismatch{"Security Compliance Reference", "none", diff})
 	}
 	if diff := diffIntSets(row.RiskCategoryIDs, riskCategoryIDs(detail.RiskCategories)); diff != "" {
 		out = append(out, fieldMismatch{"Risk Category", fmt.Sprint(row.RiskCategoryIDs), diff})

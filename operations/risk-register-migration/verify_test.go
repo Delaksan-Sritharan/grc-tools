@@ -35,13 +35,13 @@ func verifyBaseRow() Row {
 	return Row{
 		MigrationID: 1, CSVLine: 2,
 		RiskYear: 2025, RiskQuarter: "Q3",
-		SourceRegisterID: 1, // Asgardeo (fixtureRefData)
-		AssignmentTeamID: 4, // Business
+		SourceRegisterID: 1, // Managed Services (fixtureRefData)
+		AssignmentTeamID: 4, // SRE One
 		RiskTitle:        "Verify test risk",
 		RiskDescription:  "a description",
-		ComplianceRefIDs: []int{40}, // ISO
-		RiskCategoryIDs:  []int{30}, // Access Control & Credentials
-		GrossLikelihood:  2, GrossImpact: 2, ResidualLikelihood: 2, ResidualImpact: 2,
+		Customer:         "BankOne", CustomerID: 20, DeploymentTypeID: 60, ProductIDs: []int{50, 51}, Environments: []string{"PRODUCTION"},
+		RiskCategoryIDs: []int{30}, // Access Control & Credentials
+		GrossLikelihood: 2, GrossImpact: 2, ResidualLikelihood: 2, ResidualImpact: 2,
 		ImpactDescription:  "impact desc",
 		ImplementationDate: "2025-06-30", // overdue vs migrationDate 2026-09-15
 		ReassessmentDate:   "2025-12-01",
@@ -210,16 +210,6 @@ func TestVerifyRow_DetectsFieldMismatches(t *testing.T) {
 				fe.createReqByRisk[riskID] = req
 			},
 			wantField: "Risk Category",
-		},
-		{
-			name: "compliance reference set diverged",
-			row:  verifyBaseRow(),
-			tamper: func(fe *fakeEntity, riskID int) {
-				req := fe.createReqByRisk[riskID]
-				req.ComplianceReferenceIDs = []int{41} // fixture has row created with 40
-				fe.createReqByRisk[riskID] = req
-			},
-			wantField: "Security Compliance Reference",
 		},
 		{
 			name: "action steps diverged",

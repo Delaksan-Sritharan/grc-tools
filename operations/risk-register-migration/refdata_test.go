@@ -36,38 +36,32 @@ func goodRoles() []Role {
 	}
 }
 
-func goodRefInputs() (teams []RiskTeam, cats []RiskCategory, refs []ComplianceRef, scores []RiskScore) {
-	teams = []RiskTeam{
-		{ID: 1, Name: "Asgardeo", Code: strptr("ASG"), Status: "ACTIVE"},
-		{ID: 8, Name: "Legal", Code: nil, Status: "ACTIVE"},
-	}
+func goodRefInputs() (teams []RiskTeam, cats []RiskCategory, scores []RiskScore, lk TemplateLookups) {
+	teams = msTeams()
 	cats = []RiskCategory{{ID: 3, Name: "Access Control & Credentials"}}
-	refs = []ComplianceRef{{ID: 2, Name: "ISO"}, {ID: 5, Name: "SOC2"}}
 	scores = []RiskScore{{ID: 7, Likelihood: 3, Impact: 3}, {ID: 4, Likelihood: 1, Impact: 2}}
+	lk = msLookups()
 	return
 }
 
 func TestBuildRefData_HappyPath(t *testing.T) {
-	teams, cats, refs, scores := goodRefInputs()
+	teams, cats, scores, lk := goodRefInputs()
 
-	rd, err := buildRefData(teams, cats, refs, scores, goodRoles())
+	rd, err := buildRefData(teams, cats, scores, goodRoles(), lk)
 	if err != nil {
 		t.Fatalf("buildRefData: %v", err)
 	}
-	if rd.TeamIDByKey["asgardeo"] != 1 || rd.TeamIDByKey["asg"] != 1 {
+	if rd.TeamIDByKey["managed services"] != idRegMS || rd.TeamIDByKey["ms"] != idRegMS {
 		t.Errorf("team keyed by name and code -> id: %+v", rd.TeamIDByKey)
 	}
-	if rd.TeamIDByKey["legal"] != 8 {
+	if rd.TeamIDByKey["sre one"] != idTeamSRE {
 		t.Errorf("codeless team still keyed by name: %+v", rd.TeamIDByKey)
 	}
-	if rd.TeamCodeByID[1] != "ASG" || rd.TeamCodeByID[8] != "" {
+	if rd.TeamCodeByID[idRegMS] != "MS" || rd.TeamCodeByID[idTeamSRE] != "" {
 		t.Errorf("TeamCodeByID: %+v", rd.TeamCodeByID)
 	}
 	if rd.CategoryIDByName["access control & credentials"] != 3 {
 		t.Errorf("category keyed by lowercased name: %+v", rd.CategoryIDByName)
-	}
-	if rd.ComplianceIDByName["ISO"] != 2 || rd.ComplianceIDByName["SOC2"] != 5 {
-		t.Errorf("compliance ref keyed by uppercased name: %+v", rd.ComplianceIDByName)
 	}
 	if rd.RoleIDByName[roleRiskOwner] != 10 || rd.RoleIDByName[roleRiskAssigner] != 11 || rd.RoleIDByName[roleRiskManagement] != 12 {
 		t.Errorf("RoleIDByName: %+v", rd.RoleIDByName)
@@ -77,22 +71,22 @@ func TestBuildRefData_HappyPath(t *testing.T) {
 func TestBuildRefData_Rejections(t *testing.T) {
 	tests := []struct {
 		name string
-		mut  func(*[]RiskTeam, *[]RiskCategory, *[]ComplianceRef, *[]RiskScore, *[]Role)
+		mut  func(*[]RiskTeam, *[]RiskCategory, *[]RiskScore, *[]Role)
 		want string
 	}{
 		{
 			name: "empty categories",
-			mut:  func(_ *[]RiskTeam, c *[]RiskCategory, _ *[]ComplianceRef, _ *[]RiskScore, _ *[]Role) { *c = nil },
+			mut:  func(_ *[]RiskTeam, c *[]RiskCategory, _ *[]RiskScore, _ *[]Role) { *c = nil },
 			want: "reference data incomplete",
 		},
 		{
 			name: "empty scores",
-			mut:  func(_ *[]RiskTeam, _ *[]RiskCategory, _ *[]ComplianceRef, s *[]RiskScore, _ *[]Role) { *s = nil },
+			mut:  func(_ *[]RiskTeam, _ *[]RiskCategory, s *[]RiskScore, _ *[]Role) { *s = nil },
 			want: "reference data incomplete",
 		},
 		{
 			name: "no team has a code",
-			mut: func(tm *[]RiskTeam, _ *[]RiskCategory, _ *[]ComplianceRef, _ *[]RiskScore, _ *[]Role) {
+			mut: func(tm *[]RiskTeam, _ *[]RiskCategory, _ *[]RiskScore, _ *[]Role) {
 				for i := range *tm {
 					(*tm)[i].Code = nil
 				}
@@ -101,21 +95,21 @@ func TestBuildRefData_Rejections(t *testing.T) {
 		},
 		{
 			name: "risk role missing",
-			mut: func(_ *[]RiskTeam, _ *[]RiskCategory, _ *[]ComplianceRef, _ *[]RiskScore, r *[]Role) {
+			mut: func(_ *[]RiskTeam, _ *[]RiskCategory, _ *[]RiskScore, r *[]Role) {
 				*r = (*r)[1:] // drop grc-platform-risk-owner
 			},
 			want: `risk role "grc-platform-risk-owner" not found`,
 		},
 		{
 			name: "risk role inactive",
-			mut: func(_ *[]RiskTeam, _ *[]RiskCategory, _ *[]ComplianceRef, _ *[]RiskScore, r *[]Role) {
+			mut: func(_ *[]RiskTeam, _ *[]RiskCategory, _ *[]RiskScore, r *[]Role) {
 				(*r)[2].Status = "INACTIVE" // grc-platform-risk-management
 			},
 			want: `risk role "grc-platform-risk-management" has status "INACTIVE"`,
 		},
 		{
 			name: "team key collision",
-			mut: func(tm *[]RiskTeam, _ *[]RiskCategory, _ *[]ComplianceRef, _ *[]RiskScore, _ *[]Role) {
+			mut: func(tm *[]RiskTeam, _ *[]RiskCategory, _ *[]RiskScore, _ *[]Role) {
 				*tm = append(*tm, RiskTeam{ID: 42, Name: "asgardeo", Code: strptr("X"), Status: "ACTIVE"})
 			},
 			want: "maps to both id",
@@ -124,11 +118,11 @@ func TestBuildRefData_Rejections(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			teams, cats, refs, scores := goodRefInputs()
+			teams, cats, scores, lk := goodRefInputs()
 			roles := goodRoles()
-			tc.mut(&teams, &cats, &refs, &scores, &roles)
+			tc.mut(&teams, &cats, &scores, &roles)
 
-			_, err := buildRefData(teams, cats, refs, scores, roles)
+			_, err := buildRefData(teams, cats, scores, roles, lk)
 			if err == nil {
 				t.Fatalf("want an error containing %q, got nil", tc.want)
 			}
@@ -139,7 +133,7 @@ func TestBuildRefData_Rejections(t *testing.T) {
 	}
 }
 
-// entityRefStub answers the six preflight calls with canned reference data.
+// entityRefStub answers the preflight calls with canned reference data.
 func entityRefStub(t *testing.T) http.HandlerFunc {
 	t.Helper()
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -154,11 +148,18 @@ func entityRefStub(t *testing.T) http.HandlerFunc {
 				{"id":12,"roleName":"grc-platform-risk-management","module":"RISK","status":"ACTIVE"}
 			]}`))
 		case "POST /risk/teams/search":
-			_, _ = w.Write([]byte(`{"total":1,"teams":[{"id":1,"name":"Asgardeo","code":"ASG","status":"ACTIVE"}]}`))
+			_, _ = w.Write([]byte(`{"total":2,"teams":[
+				{"id":1,"name":"Asgardeo","code":"ASG","status":"ACTIVE","registerTemplate":"STANDARD"},
+				{"id":10,"name":"Managed Services","code":"MS","status":"ACTIVE","registerTemplate":"MANAGED_SERVICES"}
+			]}`))
 		case "GET /risk/categories":
 			_, _ = w.Write([]byte(`{"categories":[{"id":3,"name":"Access Control & Credentials"}]}`))
-		case "POST /risk/compliance-references/search":
-			_, _ = w.Write([]byte(`{"total":1,"references":[{"id":2,"name":"ISO"}]}`))
+		case "GET /risk/customers":
+			_, _ = w.Write([]byte(`{"values":[{"id":21,"name":"BankOne","code":"BO","status":"ACTIVE"}]}`))
+		case "GET /risk/products":
+			_, _ = w.Write([]byte(`{"values":[{"id":31,"name":"APIM","status":"ACTIVE"}]}`))
+		case "GET /risk/deployment-types":
+			_, _ = w.Write([]byte(`{"values":[{"id":41,"name":"Private Cloud","status":"ACTIVE"}]}`))
 		case "GET /risk/scores":
 			_, _ = w.Write([]byte(`{"scores":[{"id":7,"likelihood":3,"impact":3}]}`))
 		default:
@@ -188,7 +189,7 @@ func TestPreflight_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("preflight: %v", err)
 	}
-	if rd.TeamIDByKey["asg"] != 1 || rd.RoleIDByName[roleRiskManagement] != 12 || rd.ComplianceIDByName["ISO"] != 2 {
+	if rd.TeamIDByKey["asg"] != 1 || rd.RoleIDByName[roleRiskManagement] != 12 || rd.CustomerIDByName["bankone"] != 21 || rd.TeamTemplateByID[10] != "MANAGED_SERVICES" {
 		t.Fatalf("RefData not fully populated: %+v", rd)
 	}
 	if len(users) != 1 || users[0].Email != "user1@wso2.com" {

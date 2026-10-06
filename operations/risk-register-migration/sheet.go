@@ -32,14 +32,20 @@ type Row struct {
 	MigrationID int // added "Migration ID" column — errors.csv correlation only
 	CSVLine     int // 1-based line in the source file, for findings
 
-	RiskYear           int
-	RiskQuarter        string // Q1..Q4
-	SourceRegister     string // raw name/code from the sheet
-	AssignmentTeam     string // raw name/code from the sheet
-	RiskTitle          string
-	RiskDescription    string
-	ComplianceRefs     []string // raw tokens, pre-lookup
-	RiskCategory       string   // raw name, pre-lookup
+	RiskYear        int
+	RiskQuarter     string // Q1..Q4
+	SourceRegister  string // raw name/code from the sheet
+	AssignmentTeam  string // raw name/code from the sheet
+	RiskTitle       string
+	RiskDescription string
+	RiskCategory    string // raw name, pre-lookup
+
+	// Managed Services template fields (RISK_MODULE_DESIGN.md §14): the raw
+	// names as written in the sheet, and the entity values they map to.
+	Customer           string
+	DeploymentType     string
+	Products           []string
+	Environments       []string // PRODUCTION | NON_PRODUCTION | DR
 	IdentifiedByType   string   // EMPLOYEE | EXTERNAL_PERSON | TOOL | ""
 	IdentifiedByName   string
 	RiskIdentifiedDate string // YYYY-MM-DD | ""
@@ -75,7 +81,9 @@ type Row struct {
 	// ── filled by resolve.go ────────────────────────────────────────────────
 	SourceRegisterID     int
 	AssignmentTeamID     int
-	ComplianceRefIDs     []int
+	CustomerID           int
+	DeploymentTypeID     int
+	ProductIDs           []int
 	RiskCategoryIDs      []int
 	AssignerID           int
 	OwnerID              int
@@ -88,10 +96,13 @@ type Row struct {
 const actionStepPlaceholder = "Migrated from the historical risk register; original action steps were not recorded."
 
 // expectedHeaders are matched case- and space-insensitively (plan §4). The two
-// trailing entries are the operator-added columns.
+// trailing entries are the operator-added columns. "Security Compliance
+// Reference" is deliberately absent: Managed Services risks carry none, so the
+// column is optional, and a left-in one must be blank on every row (mapRow).
 var expectedHeaders = []string{
-	"Year", "Quarter", "Source Register", "Risk Title", "Risk Description",
-	"Security Compliance Reference", "Risk Category", "Risk Identified By",
+	"Year", "Quarter", "Source Register", "Customer", "Deployment Type",
+	"Product", "Environment", "Risk Title", "Risk Description",
+	"Risk Category", "Risk Identified By",
 	"Select Employee/ Name of External Person/ Tool", "Risk Identified Date",
 	"Risk Assigned To", "Gross Likelihood", "Gross Impact",
 	"Residual Likelihood", "Residual Impact", "Impact Description",
@@ -342,13 +353,9 @@ func mapRow(rec []string, idx map[string]int, line int, refs RefData) (Row, []Fi
 	}
 
 	// ── reference-data lookups (RefData from preflight, T3) ──────────────
-	row.ComplianceRefs = splitTokens(get(rec, idx, "Security Compliance Reference"))
-	for _, tok := range row.ComplianceRefs {
-		if id, ok := refs.ComplianceIDByName[normalizeComplianceToken(tok)]; ok {
-			row.ComplianceRefIDs = append(row.ComplianceRefIDs, id)
-		} else {
-			reject("Security Compliance Reference", fmt.Sprintf("unknown reference %q", tok))
-		}
+	if v := strings.TrimSpace(get(rec, idx, "Security Compliance Reference")); v != "" {
+		reject("Security Compliance Reference", fmt.Sprintf(
+			"%q: Managed Services risks carry no compliance references — clear this cell", v))
 	}
 
 	if cat := strings.TrimSpace(get(rec, idx, "Risk Category")); cat == "" {
@@ -368,8 +375,15 @@ func mapRow(rec []string, idx map[string]int, line int, refs RefData) (Row, []Fi
 		row.SourceRegister = sr
 		if id, ok := refs.TeamIDByKey[strings.ToLower(sr)]; ok {
 			row.SourceRegisterID = id
-			if refs.TeamCodeByID[id] == "" {
-				reject("Source Register", fmt.Sprintf("team %q has no code and cannot be a source register", sr))
+			switch refs.TeamTemplateByID[id] {
+			case templateManagedServices:
+				if refs.TeamCodeByID[id] == "" {
+					reject("Source Register", fmt.Sprintf("team %q has no code and cannot be a source register", sr))
+				}
+			case templateAggregated:
+				reject("Source Register", fmt.Sprintf("%q is on the AGGREGATED template, which is not supported — this tool imports Managed Services only", sr))
+			default:
+				reject("Source Register", fmt.Sprintf("%q is not the Managed Services register — this tool imports Managed Services only", sr))
 			}
 		} else {
 			reject("Source Register", fmt.Sprintf("unknown team %q", sr))
@@ -382,15 +396,100 @@ func mapRow(rec []string, idx map[string]int, line int, refs RefData) (Row, []Fi
 		row.AssignmentTeam = at
 		if id, ok := refs.TeamIDByKey[strings.ToLower(at)]; ok {
 			row.AssignmentTeamID = id
+			if refs.TeamTemplateByID[id] != templateManagedServices {
+				reject("Assignment Team", fmt.Sprintf("%q is not an SRE (Managed Services) team", at))
+			}
 		} else {
 			reject("Assignment Team", fmt.Sprintf("unknown team %q", at))
+		}
+	}
+
+	// ── Managed Services template fields (all four mandatory) ────────────
+	row.Customer = strings.TrimSpace(get(rec, idx, "Customer"))
+	if row.Customer == "" {
+		reject("Customer", "empty")
+	} else if id, bad := lookupID(refs.CustomerIDByName, refs, lookupCustomer, row.Customer); bad != "" {
+		reject("Customer", bad)
+	} else {
+		row.CustomerID = id
+	}
+
+	row.DeploymentType = strings.TrimSpace(get(rec, idx, "Deployment Type"))
+	if row.DeploymentType == "" {
+		reject("Deployment Type", "empty")
+	} else if id, bad := lookupID(refs.DeploymentTypeIDByName, refs, lookupDeploymentType, row.DeploymentType); bad != "" {
+		reject("Deployment Type", bad)
+	} else {
+		row.DeploymentTypeID = id
+	}
+
+	row.Products = dedupeFold(splitTokens(get(rec, idx, "Product")))
+	if len(row.Products) == 0 {
+		reject("Product", "empty — at least one product is required")
+	}
+	for _, p := range row.Products {
+		if id, bad := lookupID(refs.ProductIDByName, refs, lookupProduct, p); bad != "" {
+			reject("Product", bad)
+		} else {
+			row.ProductIDs = append(row.ProductIDs, id)
+		}
+	}
+
+	envTokens := dedupeFold(splitTokens(get(rec, idx, "Environment")))
+	if len(envTokens) == 0 {
+		reject("Environment", "empty — at least one environment is required")
+	}
+	for _, e := range envTokens {
+		if env, ok := environmentByName[normHeader(e)]; ok {
+			row.Environments = append(row.Environments, env)
+		} else {
+			reject("Environment", fmt.Sprintf("%q is not one of Production, Non-Production, DR", e))
 		}
 	}
 
 	return row, fs
 }
 
-// splitTokens splits a compliance-reference cell on comma / semicolon / newline.
+// environmentByName maps the three accepted spellings (normHeader form) onto
+// the entity's fixed environment enum. Anything else — "Prod", "UAT",
+// "Pre-production" — is rejected, not guessed at.
+var environmentByName = map[string]string{
+	"production":     "PRODUCTION",
+	"non-production": "NON_PRODUCTION",
+	"dr":             "DR",
+}
+
+// lookupID resolves one value against a lookup map keyed by normHeader(name).
+// It returns a human-readable problem (never both an id and a problem) so the
+// REJECT names the exact value the admins need to add or the sheet owner fix.
+func lookupID(m map[string]int, refs RefData, kind, name string) (int, string) {
+	key := normHeader(name)
+	if id, ok := m[key]; ok {
+		return id, ""
+	}
+	if refs.InactiveLookup[kind+":"+key] {
+		return 0, fmt.Sprintf("%s %q is inactive — reactivate it in the Admin Console", kind, name)
+	}
+	return 0, fmt.Sprintf("unknown %s %q", kind, name)
+}
+
+// dedupeFold drops repeats, ignoring case and inner spacing, keeping first-seen
+// order.
+func dedupeFold(in []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range in {
+		k := normHeader(s)
+		if !seen[k] {
+			seen[k] = true
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// splitTokens splits a multi-value cell on comma / semicolon / newline (the handoff doc asks for
+// semicolons; the other two are tolerated).
 func splitTokens(s string) []string {
 	f := strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == ';' || r == '\n' })
 	out := make([]string, 0, len(f))

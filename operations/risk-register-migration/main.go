@@ -312,16 +312,27 @@ func preflight(ctx context.Context, cfg Config, ec *EntityClient, sc *SCIMClient
 	if err != nil {
 		return RefData{}, nil, fmt.Errorf("list risk categories: %w", err)
 	}
-	refs, err := ec.ListComplianceRefs(ctx)
-	if err != nil {
-		return RefData{}, nil, fmt.Errorf("list compliance references: %w", err)
+	var lk TemplateLookups
+	for _, l := range []struct {
+		kind string
+		into *[]RiskLookup
+	}{
+		{"customers", &lk.Customers},
+		{"products", &lk.Products},
+		{"deployment-types", &lk.DeploymentTypes},
+	} {
+		vals, err := ec.ListRiskLookups(ctx, l.kind)
+		if err != nil {
+			return RefData{}, nil, fmt.Errorf("list %s: %w", l.kind, err)
+		}
+		*l.into = vals
 	}
 	scores, err := ec.ListRiskScores(ctx)
 	if err != nil {
 		return RefData{}, nil, fmt.Errorf("list risk scores: %w", err)
 	}
 
-	rd, err := buildRefData(teams, cats, refs, scores, roles)
+	rd, err := buildRefData(teams, cats, scores, roles, lk)
 	if err != nil {
 		return RefData{}, nil, err
 	}

@@ -132,11 +132,21 @@ func (e *EntityClient) do(ctx context.Context, method, path string, body, out an
 // RefData holds the reference-data lookups every row needs, loaded once in
 // preflight (plan §7).
 type RefData struct {
-	TeamIDByKey        map[string]int // lower(name) and lower(code) -> risk_team.id
-	TeamCodeByID       map[int]string // id -> code ("" when the team has none)
-	CategoryIDByName   map[string]int // lower(name) -> risk_category.id
-	ComplianceIDByName map[string]int // upper(name) -> risk_security_compliance_reference.id
-	RoleIDByName       map[string]int // role_name -> role.id (the three risk roles)
+	TeamIDByKey      map[string]int // lower(name) and lower(code) -> risk_team.id
+	TeamCodeByID     map[int]string // id -> code ("" when the team has none)
+	TeamTemplateByID map[int]string // id -> register_template (STANDARD | AGGREGATED | MANAGED_SERVICES)
+	CategoryIDByName map[string]int // lower(name) -> risk_category.id
+	RoleIDByName     map[string]int // role_name -> role.id (the three risk roles)
+
+	// Managed Services lookups, keyed by normHeader(name) (trimmed, lower-case,
+	// inner spaces collapsed). Only ACTIVE values are selectable: the entity
+	// rejects a newly chosen INACTIVE one, so the tool treats it as unusable and
+	// says why (InactiveLookup, keyed "<kind>:<normalised name>").
+	CustomerIDByName       map[string]int
+	CustomerCodeByID       map[int]string
+	ProductIDByName        map[string]int
+	DeploymentTypeIDByName map[string]int
+	InactiveLookup         map[string]bool
 }
 
 // ── Request / response shapes (subset of the entity's domain we use) ─────────
@@ -146,34 +156,39 @@ type RefData struct {
 // trimmed views: JSON decoding ignores the entity fields we don't list.
 
 type CreateRiskRequest struct {
-	RiskTitle              string            `json:"riskTitle"`
-	RiskDescription        *string           `json:"riskDescription,omitempty"`
-	SourceRegisterID       int               `json:"sourceRegisterId"`
-	AssignmentTeamID       int               `json:"assignmentTeamId"`
-	AssignerID             int               `json:"assignerId"`
-	OwnerID                int               `json:"ownerId"`
-	ManagementApproverID   int               `json:"managementApproverId"`
-	RiskYear               int               `json:"riskYear"`
-	RiskQuarter            string            `json:"riskQuarter"`
-	Likelihood             int               `json:"likelihood"`
-	Impact                 int               `json:"impact"`
-	TreatmentStrategy      *string           `json:"treatmentStrategy,omitempty"`
-	ImplementationDate     *string           `json:"implementationDate,omitempty"`
-	ReassessmentDate       *string           `json:"reassessmentDate,omitempty"`
-	ImpactDescription      *string           `json:"impactDescription,omitempty"`
-	RiskIdentifiedDate     *string           `json:"riskIdentifiedDate,omitempty"`
-	IdentifiedByType       *string           `json:"identifiedByType,omitempty"`
-	IdentifiedByName       *string           `json:"identifiedByName,omitempty"`
-	GitIssueURL            *string           `json:"gitIssueUrl,omitempty"`
-	EmailSubject           *string           `json:"emailSubject,omitempty"`
-	Remarks                *string           `json:"remarks,omitempty"`
-	Progress               *string           `json:"progress,omitempty"`
-	ActionOwnerID          *int              `json:"actionOwnerId,omitempty"`
-	ActionPlanDescription  *string           `json:"actionPlanDescription,omitempty"`
-	ActionSteps            []ActionStepInput `json:"actionSteps,omitempty"`
-	ComplianceReferenceIDs []int             `json:"complianceReferenceIds,omitempty"`
-	RiskCategoryIDs        []int             `json:"riskCategoryIds,omitempty"`
-	CreatedBy              string            `json:"createdBy"`
+	RiskTitle             string            `json:"riskTitle"`
+	RiskDescription       *string           `json:"riskDescription,omitempty"`
+	SourceRegisterID      int               `json:"sourceRegisterId"`
+	AssignmentTeamID      int               `json:"assignmentTeamId"`
+	AssignerID            int               `json:"assignerId"`
+	OwnerID               int               `json:"ownerId"`
+	ManagementApproverID  int               `json:"managementApproverId"`
+	RiskYear              int               `json:"riskYear"`
+	RiskQuarter           string            `json:"riskQuarter"`
+	Likelihood            int               `json:"likelihood"`
+	Impact                int               `json:"impact"`
+	TreatmentStrategy     *string           `json:"treatmentStrategy,omitempty"`
+	ImplementationDate    *string           `json:"implementationDate,omitempty"`
+	ReassessmentDate      *string           `json:"reassessmentDate,omitempty"`
+	ImpactDescription     *string           `json:"impactDescription,omitempty"`
+	RiskIdentifiedDate    *string           `json:"riskIdentifiedDate,omitempty"`
+	IdentifiedByType      *string           `json:"identifiedByType,omitempty"`
+	IdentifiedByName      *string           `json:"identifiedByName,omitempty"`
+	GitIssueURL           *string           `json:"gitIssueUrl,omitempty"`
+	EmailSubject          *string           `json:"emailSubject,omitempty"`
+	Remarks               *string           `json:"remarks,omitempty"`
+	Progress              *string           `json:"progress,omitempty"`
+	ActionOwnerID         *int              `json:"actionOwnerId,omitempty"`
+	ActionPlanDescription *string           `json:"actionPlanDescription,omitempty"`
+	ActionSteps           []ActionStepInput `json:"actionSteps,omitempty"`
+	RiskCategoryIDs       []int             `json:"riskCategoryIds,omitempty"`
+	// Managed Services template fields: the entity requires all four on a
+	// MANAGED_SERVICES register, and refuses compliance references there.
+	CustomerID       *int     `json:"customerId,omitempty"`
+	DeploymentTypeID *int     `json:"deploymentTypeId,omitempty"`
+	ProductIDs       []int    `json:"productIds,omitempty"`
+	Environments     []string `json:"environments,omitempty"` // PRODUCTION | NON_PRODUCTION | DR
+	CreatedBy        string   `json:"createdBy"`
 }
 
 type ActionStepInput struct {
@@ -277,6 +292,10 @@ type Risk struct {
 	WorkflowStatus string `json:"workflowStatus"`
 	ActionPlanID   *int   `json:"actionPlanId"`
 	CreatedBy      string `json:"createdBy"`
+	// CustomerName is the Managed Services customer (the search response carries
+	// the name, not the id). It is part of a risk's natural key: two customers
+	// may carry the same title in one register, year and quarter.
+	CustomerName *string `json:"customerName"`
 }
 
 type Role struct {
@@ -294,6 +313,17 @@ const (
 	roleRiskManagement = "grc-platform-risk-management"
 )
 
+// Register templates (risk_team.register_template) and lookup kinds (the keys
+// of RefData.InactiveLookup).
+const (
+	templateManagedServices = "MANAGED_SERVICES"
+	templateAggregated      = "AGGREGATED"
+
+	lookupCustomer       = "customer"
+	lookupProduct        = "product"
+	lookupDeploymentType = "deployment type"
+)
+
 // Trimmed reference-data views. Field tags verified against
 // entity/compliance-entity/internal/domain/entity.go.
 
@@ -302,6 +332,27 @@ type RiskTeam struct {
 	Name   string  `json:"name"`
 	Code   *string `json:"code"` // NULL for Legal / HR — cannot be a source register
 	Status string  `json:"status"`
+	// RegisterTemplate is STANDARD | AGGREGATED | MANAGED_SERVICES. This tool
+	// imports the MANAGED_SERVICES register only, and an assignment team must be
+	// on the same template (the entity enforces both).
+	RegisterTemplate string `json:"registerTemplate"`
+}
+
+// RiskLookup is one value of GET /risk/{customers|products|deployment-types}.
+// Code is set for customers only.
+type RiskLookup struct {
+	ID     int     `json:"id"`
+	Name   string  `json:"name"`
+	Code   *string `json:"code"`
+	Status string  `json:"status"` // ACTIVE | INACTIVE
+}
+
+// TemplateLookups are the three Managed Services lookup lists, loaded once in
+// preflight.
+type TemplateLookups struct {
+	Customers       []RiskLookup
+	Products        []RiskLookup
+	DeploymentTypes []RiskLookup
 }
 
 type RiskCategory struct {
@@ -393,24 +444,16 @@ func (e *EntityClient) ListRiskCategories(ctx context.Context) ([]RiskCategory, 
 	return resp.Categories, nil
 }
 
-// ListComplianceRefs unwraps POST /risk/compliance-references/search
-// ({"references":[...],"total":N}).
-func (e *EntityClient) ListComplianceRefs(ctx context.Context) ([]ComplianceRef, error) {
-	body := struct {
-		Pagination Pagination `json:"pagination"`
-	}{Pagination: Pagination{Limit: refDataPageLimit}}
-
+// ListRiskLookups unwraps GET /risk/{customers|products|deployment-types}
+// ({"values":[...]}). kind is the path segment.
+func (e *EntityClient) ListRiskLookups(ctx context.Context, kind string) ([]RiskLookup, error) {
 	var resp struct {
-		References []ComplianceRef `json:"references"`
-		Total      int             `json:"total"`
+		Values []RiskLookup `json:"values"`
 	}
-	if err := e.do(ctx, http.MethodPost, "/risk/compliance-references/search", body, &resp); err != nil {
+	if err := e.do(ctx, http.MethodGet, "/risk/"+kind, nil, &resp); err != nil {
 		return nil, err
 	}
-	if resp.Total > len(resp.References) {
-		return nil, fmt.Errorf("risk_security_compliance_reference has %d rows but only %d returned; raise refDataPageLimit", resp.Total, len(resp.References))
-	}
-	return resp.References, nil
+	return resp.Values, nil
 }
 
 // ListRiskScores unwraps GET /risk/scores ({"scores":[...]}).
@@ -447,16 +490,22 @@ func (e *EntityClient) ListActionPlans(ctx context.Context, riskID int) ([]Actio
 }
 
 // buildRefData assembles the lookup maps every row needs and resolves the three
-// risk role ids. It errors if any reference table is empty, if no team carries
-// a code (a source register needs one for the risk_code), if two team keys
-// collide on different ids, or if a risk role is missing or not ACTIVE.
-func buildRefData(teams []RiskTeam, cats []RiskCategory, refs []ComplianceRef, scores []RiskScore, roles []Role) (RefData, error) {
+// risk role ids. It errors if a reference table is empty, if no team carries a
+// code (a source register needs one for the risk_code), if no register is on
+// the MANAGED_SERVICES template, if two team keys collide on different ids, or
+// if a risk role is missing or not ACTIVE.
+func buildRefData(teams []RiskTeam, cats []RiskCategory, scores []RiskScore, roles []Role, lk TemplateLookups) (RefData, error) {
 	rd := RefData{
-		TeamIDByKey:        map[string]int{},
-		TeamCodeByID:       map[int]string{},
-		CategoryIDByName:   map[string]int{},
-		ComplianceIDByName: map[string]int{},
-		RoleIDByName:       map[string]int{},
+		TeamIDByKey:            map[string]int{},
+		TeamCodeByID:           map[int]string{},
+		TeamTemplateByID:       map[int]string{},
+		CategoryIDByName:       map[string]int{},
+		RoleIDByName:           map[string]int{},
+		CustomerIDByName:       map[string]int{},
+		CustomerCodeByID:       map[int]string{},
+		ProductIDByName:        map[string]int{},
+		DeploymentTypeIDByName: map[string]int{},
+		InactiveLookup:         map[string]bool{},
 	}
 
 	putTeamKey := func(key string, id int) error {
@@ -470,12 +519,17 @@ func buildRefData(teams []RiskTeam, cats []RiskCategory, refs []ComplianceRef, s
 		rd.TeamIDByKey[key] = id
 		return nil
 	}
+	hasMSRegister := false
 	for _, t := range teams {
 		code := ""
 		if t.Code != nil {
 			code = strings.TrimSpace(*t.Code)
 		}
 		rd.TeamCodeByID[t.ID] = code
+		rd.TeamTemplateByID[t.ID] = t.RegisterTemplate
+		if t.RegisterTemplate == templateManagedServices && code != "" {
+			hasMSRegister = true
+		}
 		if err := putTeamKey(strings.ToLower(t.Name), t.ID); err != nil {
 			return RefData{}, err
 		}
@@ -486,18 +540,15 @@ func buildRefData(teams []RiskTeam, cats []RiskCategory, refs []ComplianceRef, s
 	for _, c := range cats {
 		rd.CategoryIDByName[strings.ToLower(strings.TrimSpace(c.Name))] = c.ID
 	}
-	for _, r := range refs {
-		rd.ComplianceIDByName[strings.ToUpper(strings.TrimSpace(r.Name))] = r.ID
-	}
 
 	// scores itself isn't indexed into RefData — POST /risks resolves
 	// gross_score_id server-side from (likelihood, impact) — but its presence
 	// is still a preflight precondition (plan §7): an empty risk_score table
 	// means every create would fail regardless of what the CSV says.
-	if len(teams) == 0 || len(cats) == 0 || len(refs) == 0 || len(scores) == 0 {
+	if len(teams) == 0 || len(cats) == 0 || len(scores) == 0 {
 		return RefData{}, fmt.Errorf(
-			"reference data incomplete: teams=%d categories=%d complianceRefs=%d scores=%d (all must be non-empty)",
-			len(teams), len(cats), len(refs), len(scores))
+			"reference data incomplete: teams=%d categories=%d scores=%d (all must be non-empty)",
+			len(teams), len(cats), len(scores))
 	}
 	hasCode := false
 	for _, code := range rd.TeamCodeByID {
@@ -509,6 +560,30 @@ func buildRefData(teams []RiskTeam, cats []RiskCategory, refs []ComplianceRef, s
 	if !hasCode {
 		return RefData{}, fmt.Errorf("no risk_team carries a code; a source register needs one for the risk_code format")
 	}
+	if !hasMSRegister {
+		return RefData{}, fmt.Errorf("no register with a code is on the %s template; set it in the Admin Console before running", templateManagedServices)
+	}
+	if len(lk.Customers) == 0 || len(lk.Products) == 0 || len(lk.DeploymentTypes) == 0 {
+		return RefData{}, fmt.Errorf(
+			"reference data incomplete: customers=%d products=%d deployment types=%d (admins must add them in the Admin Console first)",
+			len(lk.Customers), len(lk.Products), len(lk.DeploymentTypes))
+	}
+	index := func(kind string, values []RiskLookup, into map[string]int) {
+		for _, v := range values {
+			key := normHeader(v.Name)
+			if !strings.EqualFold(v.Status, "ACTIVE") {
+				rd.InactiveLookup[kind+":"+key] = true
+				continue
+			}
+			into[key] = v.ID
+			if kind == lookupCustomer && v.Code != nil {
+				rd.CustomerCodeByID[v.ID] = strings.TrimSpace(*v.Code)
+			}
+		}
+	}
+	index(lookupCustomer, lk.Customers, rd.CustomerIDByName)
+	index(lookupProduct, lk.Products, rd.ProductIDByName)
+	index(lookupDeploymentType, lk.DeploymentTypes, rd.DeploymentTypeIDByName)
 
 	byName := make(map[string]Role, len(roles))
 	for _, r := range roles {
