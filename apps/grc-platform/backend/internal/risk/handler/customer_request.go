@@ -21,6 +21,8 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/response"
@@ -39,7 +41,57 @@ var customerCodePattern = regexp.MustCompile(`^[A-Z0-9]{1,12}$`)
 const (
 	maxCustomerNameLen = 255
 	maxCustomerNoteLen = 1000
+
+	customerRequestWindow  = time.Hour
+	customerRequestPerUser = 5 // all names combined, so varying the name can't dodge the per-name rule
 )
+
+// customerRequestLimiter caps how often one requester can email the platform
+// admins: the same customer name once per window, and customerRequestPerUser
+// requests of any name per window. In memory, so each backend replica keeps its
+// own count (the real cap is up to the replica count times these numbers); that
+// still bounds a script or a double-click loop, which is all it is for. A nil
+// limiter allows everything (Deps built without RegisterRoutes, i.e. tests).
+type customerRequestLimiter struct {
+	mu   sync.Mutex
+	sent map[string][]customerRequestEntry // requester uuid -> sends in the window
+}
+
+type customerRequestEntry struct {
+	name string // lowercased customer name
+	at   time.Time
+}
+
+// allow records the request and returns true, or returns false without
+// recording when the requester is over either limit.
+func (l *customerRequestLimiter) allow(requester, customerName string, now time.Time) bool {
+	if l == nil {
+		return true
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.sent == nil {
+		l.sent = make(map[string][]customerRequestEntry)
+	}
+	name := strings.ToLower(customerName)
+	recent := l.sent[requester][:0]
+	for _, e := range l.sent[requester] {
+		if now.Sub(e.at) < customerRequestWindow {
+			recent = append(recent, e)
+		}
+	}
+	l.sent[requester] = recent
+	if len(recent) >= customerRequestPerUser {
+		return false
+	}
+	for _, e := range recent {
+		if e.name == name {
+			return false
+		}
+	}
+	l.sent[requester] = append(recent, customerRequestEntry{name: name, at: now})
+	return true
+}
 
 // handleRequestCustomer serves POST /api/v1/risks/customer-requests.
 //
@@ -89,6 +141,12 @@ func (d *Deps) handleRequestCustomer(w http.ResponseWriter, r *http.Request) {
 	}
 	if !canRaise {
 		response.WriteError(w, http.StatusForbidden, "only someone who can raise Managed Services risks can request a customer")
+		return
+	}
+
+	if !d.customerRequests.allow(requester, req.CustomerName, time.Now()) {
+		response.WriteError(w, http.StatusTooManyRequests,
+			"you have already sent this request recently; the platform admins have it")
 		return
 	}
 

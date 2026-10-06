@@ -16,10 +16,12 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/model"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/privilege"
@@ -70,5 +72,49 @@ func TestHandleRequestCustomer(t *testing.T) {
 				t.Errorf("status = %d, want %d (body %s)", rec.Code, tc.want, rec.Body.String())
 			}
 		})
+	}
+}
+
+func TestCustomerRequestLimiter(t *testing.T) {
+	now := time.Date(2026, 10, 6, 9, 0, 0, 0, time.UTC)
+	l := &customerRequestLimiter{}
+
+	if !l.allow("u1", "Acme Corp", now) {
+		t.Fatal("first request should be allowed")
+	}
+	if l.allow("u1", "acme corp", now.Add(time.Minute)) {
+		t.Error("same name (any case) within the window should be refused")
+	}
+	if !l.allow("u2", "Acme Corp", now.Add(time.Minute)) {
+		t.Error("another requester must not share u1's limit")
+	}
+	if !l.allow("u1", "Acme Corp", now.Add(customerRequestWindow)) {
+		t.Error("same name after the window should be allowed again")
+	}
+
+	l2 := &customerRequestLimiter{}
+	for i := 0; i < customerRequestPerUser; i++ {
+		if !l2.allow("u1", fmt.Sprintf("Customer %d", i), now) {
+			t.Fatalf("request %d should be allowed", i)
+		}
+	}
+	if l2.allow("u1", "One More", now) {
+		t.Error("request over the per-user ceiling should be refused")
+	}
+	if !l2.allow("u1", "One More", now.Add(customerRequestWindow)) {
+		t.Error("ceiling should clear once the window passes")
+	}
+}
+
+func TestHandleRequestCustomerRateLimited(t *testing.T) {
+	d := customerRequestDeps()
+	d.customerRequests = &customerRequestLimiter{}
+	grants := map[int]map[string]bool{7: {privilege.CreateRisk: true}}
+	body := `{"customer_name":"Acme Corp"}`
+	if rec := postCustomerRequest(t, d, grants, body); rec.Code != http.StatusAccepted {
+		t.Fatalf("first request status = %d, want 202", rec.Code)
+	}
+	if rec := postCustomerRequest(t, d, grants, body); rec.Code != http.StatusTooManyRequests {
+		t.Errorf("repeat request status = %d, want 429", rec.Code)
 	}
 }
