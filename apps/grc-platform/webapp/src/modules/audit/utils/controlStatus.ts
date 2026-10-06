@@ -142,8 +142,8 @@ export const CONTROL_STATUS_COLORS: Record<ControlStatus, string> = {
   COMPLETE:                      "#10B981", // emerald — approved & closed
 };
 
-// Same rule the reminder sweep uses for population overdue emails: past due
-// and not yet approved. Separate from isOverdue, which tracks the evidence due date.
+// Past due and not yet approved. Separate from isOverdue, which tracks the
+// evidence due date.
 export function isPopulationOverdue(
   control: Pick<AuditControl, "populationDueDate" | "populationStatus">,
 ): boolean {

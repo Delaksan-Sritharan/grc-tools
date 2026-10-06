@@ -232,7 +232,7 @@ func (d *Deps) auditName(ctx context.Context, auditID int) string {
 	return a.Name
 }
 
-// SendReminderDigestSync sends one owner's full daily due-date reminder
+// SendReminderDigestSync sends one recipient's full daily due-date reminder
 // digest — one combined email covering every control/population item due
 // across all three tiers. Used only by the reminder job (internal/audit/job),
 // which needs to know per-recipient success to count a run's totals, and to
@@ -257,6 +257,7 @@ func (d *Deps) SendReminderDigestSync(ctx context.Context, ownerUserID int, item
 			Tier:            it.Tier,
 			RequirementType: it.RequirementType,
 			Audit:           it.AuditName,
+			Note:            it.UnassignedNote,
 		})
 	}
 
@@ -286,7 +287,7 @@ func (d *Deps) SendReminderDigestSync(ctx context.Context, ownerUserID int, item
 	info := emailer.AuditEventInfo{
 		DetailURL: applink.DashboardPath,
 		Items:     emailItems,
-		// Only this digest mixes tiers in one email (an owner's due-in-10,
+		// Only this digest mixes tiers in one email (a recipient's due-in-10,
 		// due-in-5, and overdue items all together) — Status is the only
 		// place that distinguishes them, so only here is it worth showing.
 		ShowStatus: true,
@@ -346,16 +347,17 @@ func (d *Deps) SendOverdueAdminDigestSync(ctx context.Context, adminUserID int, 
 			DueDate:         it.DueDate,
 			RequirementType: it.RequirementType,
 			DetailURL:       applink.ControlPath(it.AuditID, it.LinkControlID),
-			// Pre-resolved by the job (once per sweep, not per item) — see
-			// ResolveOwnerNames.
-			Owner: it.OwnerName,
+			// A person's name is pre-resolved by the job, once per sweep —
+			// see ResolveUserNames.
+			WaitingOn: it.WaitingOn,
+			Note:      it.Status,
 		})
 	}
 	info := emailer.AuditEventInfo{
-		AuditName: items[0].AuditName,
-		DetailURL: applink.AuditPath(items[0].AuditID),
-		Items:     emailItems,
-		ShowOwner: true,
+		AuditName:     items[0].AuditName,
+		DetailURL:     applink.AuditPath(items[0].AuditID),
+		Items:         emailItems,
+		ShowWaitingOn: true,
 	}
 	return d.sendAuditEventSync(ctx, emailer.AuditEventReminderOverdueAdmin, adminUserID, info, nil, true)
 }
@@ -393,12 +395,12 @@ func (d *Deps) userNames(ctx context.Context, userID int) (string, string) {
 	return name, fmt.Sprintf("%s (%s)", name, person.Email)
 }
 
-// ResolveOwnerNames batches describeUser across a deduped set of owner ids —
+// ResolveUserNames batches describeUser across a deduped set of user ids —
 // wired to job.ReminderJob.WithAdminAlerts so the overdue escalation looks
-// each owner up once per sweep instead of once per (admin, item) email.
-func (d *Deps) ResolveOwnerNames(ctx context.Context, ownerIDs []int) map[int]string {
-	names := make(map[int]string, len(ownerIDs))
-	for _, id := range ownerIDs {
+// each person up once per sweep instead of once per (admin, item) email.
+func (d *Deps) ResolveUserNames(ctx context.Context, userIDs []int) map[int]string {
+	names := make(map[int]string, len(userIDs))
+	for _, id := range userIDs {
 		names[id] = d.describeUser(ctx, id)
 	}
 	return names

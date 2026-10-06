@@ -319,8 +319,8 @@ func (r *dashboardRepo) queryDueSoonItems(ctx context.Context, baseWhere string,
 
 // workDueDate is the due date of whatever a control currently owes: its
 // population's while the latest population round is not yet approved, else its
-// evidence due date. Same rule as the reminder sweep's population branch, so the
-// dashboard's dates, due-soon and overdue views agree with the emails.
+// evidence due date. One expression, so the dashboard's dates, sort, due-soon
+// and overdue views cannot disagree with each other.
 const workDueDate = `COALESCE((SELECT p.due_date FROM audit_population p
 	WHERE p.id = (SELECT MAX(id) FROM audit_population WHERE control_id = c.id)
 	AND p.status != 'APPROVED'), c.due_date)`

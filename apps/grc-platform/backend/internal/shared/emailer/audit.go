@@ -50,7 +50,7 @@ const (
 	// AuditEventReminderOverdueAdmin escalates every overdue item in one audit
 	// to its Audit Compliance Admins, one digest per (admin, audit) per day —
 	// alongside the owner's own AuditEventReminderOverdue digest entry. Each
-	// row names its own owner (ShowOwner) and links straight to its control.
+	// row names who it is waiting on (ShowWaitingOn) and links straight to its control.
 	AuditEventReminderOverdueAdmin AuditEvent = "AUDIT_REMINDER_OVERDUE_ADMIN"
 
 	// AuditEventReminderOverdueLead escalates one owner's overdue items to
@@ -98,9 +98,12 @@ type AuditEventItem struct {
 	// to that control — used by the overdue admin digest, which covers many
 	// controls in one email.
 	DetailURL string
-	// Owner is this item's owner display name, shown when Info.ShowOwner is
-	// set — the overdue admin digest's per-row "who owns this" column.
-	Owner string
+	// WaitingOn names who this item is waiting on, shown when
+	// Info.ShowWaitingOn is set — the overdue admin digest's per-row "who to
+	// chase" column.
+	WaitingOn string
+	// Note is a second, smaller line under the Status or Waiting on cell.
+	Note string
 	// Audit names this row's audit, shown under the control number when
 	// Info.ShowAudit is set.
 	Audit string
@@ -141,11 +144,11 @@ type AuditEventInfo struct {
 	// would just be dead width — see the "Status column only used in overdue
 	// ones" note.
 	ShowStatus bool
-	// ShowOwner renders the table's Owner column instead of Status — the
-	// overdue admin digest's items can each have a different owner, so it's
-	// per-row rather than the single Actor field. Never true alongside
-	// ShowStatus; both share the same column width budget.
-	ShowOwner bool
+	// ShowWaitingOn renders the table's Waiting on column instead of Status —
+	// the overdue admin digest's items can each be waiting on someone
+	// different. Never true alongside ShowStatus; both share the same column
+	// width budget.
+	ShowWaitingOn bool
 	// ShowAudit renders each item's Audit under its control number, for a
 	// digest spanning audits. Widens the control column at Description's
 	// expense rather than adding a sixth one.
@@ -177,7 +180,7 @@ func (i AuditEventInfo) tableGroups() []AuditEventGroup {
 // columns, so they are computed here rather than in the template.
 const optionalColumnWidth = 19
 
-// OptionalColumnWidth exposes that budget to the template, so a Status, Owner or
+// OptionalColumnWidth exposes that budget to the template, so a Status, Waiting on or
 // Role column cannot drift from what DescriptionWidth subtracted for it.
 func (i AuditEventInfo) OptionalColumnWidth() int { return optionalColumnWidth }
 
@@ -203,7 +206,7 @@ func (i AuditEventInfo) ControlWidth() int {
 func (i AuditEventInfo) DescriptionWidth() int {
 	const dueDateWidth = 15
 	optional := 0
-	for _, on := range []bool{i.ShowStatus, i.ShowOwner, i.ShowRole} {
+	for _, on := range []bool{i.ShowStatus, i.ShowWaitingOn, i.ShowRole} {
 		if on {
 			optional += optionalColumnWidth
 		}
@@ -301,22 +304,22 @@ var auditEventTemplates = map[AuditEvent]auditEventTemplate{
 	},
 	AuditEventReminderDue10: {
 		subject:    reminderSubject("Due in 10 days"),
-		lead:       "The following item(s) you own are due in 10 days.",
+		lead:       "The following item(s) are waiting on you and are due in 10 days.",
 		actorLabel: "",
 	},
 	AuditEventReminderDue5: {
 		subject:    reminderSubject("Due in 5 days"),
-		lead:       "The following item(s) you own are due in 5 days.",
+		lead:       "The following item(s) are waiting on you and are due in 5 days.",
 		actorLabel: "",
 	},
 	AuditEventReminderDueToday: {
 		subject:    reminderSubject("Due today"),
-		lead:       "The following item(s) you own are due today.",
+		lead:       "The following item(s) are waiting on you and are due today.",
 		actorLabel: "",
 	},
 	AuditEventReminderOverdue: {
 		subject:    reminderSubject("Overdue"),
-		lead:       "The following item(s) you own are overdue.",
+		lead:       "The following item(s) are waiting on you and are overdue.",
 		actorLabel: "",
 	},
 	AuditEventReminderOverdueAdmin: {
@@ -385,47 +388,47 @@ var auditEventTemplates = map[AuditEvent]auditEventTemplate{
 }
 
 // auditBodyTemplate renders the shared body for every audit event. Same
-// old-fashioned Outlook-safe table layout as bodyTemplate (see its comment),
+// Outlook-safe table layout as bodyTemplate (see its comment),
 // and html/template for the same reason: several fields (Description,
 // Comment) are user-supplied free text.
 var auditBodyTemplate = template.Must(template.New("auditEvent").Parse(`<html>
-<body style="margin:0; padding:0; background-color:#f4f5f7;">
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f5f7; padding:24px 12px;">
+` + responsiveHead + `<body style="margin:0; padding:0; background-color:#f4f5f7;">
+<table class="em-outer" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f5f7; padding:24px 12px;">
 <tr><td align="center">
-<table width="900" cellpadding="0" cellspacing="0" border="0" style="width:100%; max-width:900px; background-color:#ffffff; border:1px solid #e1e4e8; border-radius:6px; font-family:Arial,Helvetica,sans-serif; font-size:14px; color:#1a1a1a;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%; max-width:900px; background-color:#ffffff; border:1px solid #e1e4e8; border-radius:6px; font-family:Arial,Helvetica,sans-serif; font-size:14px; color:#1a1a1a;">
 
-<tr><td style="padding:20px 24px 8px 24px; font-size:15px; line-height:1.5;">{{.Lead}}</td></tr>
+<tr><td class="em-pad" style="padding:20px 24px 8px 24px; font-size:15px; line-height:1.5;">{{.Lead}}</td></tr>
 
-{{if .Info.AuditName}}<tr><td style="padding:0 24px 8px 24px; color:#57606a; font-size:13px;">Audit: {{.Info.AuditName}}</td></tr>{{end}}
+{{if .Info.AuditName}}<tr><td class="em-pad" style="padding:0 24px 8px 24px; color:#57606a; font-size:13px;">Audit: {{.Info.AuditName}}</td></tr>{{end}}
 
-{{if .Info.Actor}}<tr><td style="padding:0 24px 8px 24px; font-size:13px;"><span style="color:#57606a;">{{.ActorLabel}}</span> {{.Info.Actor}}</td></tr>{{end}}
+{{if .Info.Actor}}<tr><td class="em-pad" style="padding:0 24px 8px 24px; font-size:13px;"><span style="color:#57606a;">{{.ActorLabel}}</span> {{.Info.Actor}}</td></tr>{{end}}
 
 {{range .Groups}}
-{{if .Person}}<tr><td style="padding:16px 24px 0 24px; font-size:14px; font-weight:bold;">{{.Person}}</td></tr>{{end}}
-<tr><td style="padding:8px 24px 4px 24px;">
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="table-layout:fixed; font-size:13px; border-collapse:collapse;">
-<tr style="color:#57606a; text-align:left;">
+{{if .Person}}<tr><td class="em-pad" style="padding:16px 24px 0 24px; font-size:14px; font-weight:bold;">{{.Person}}</td></tr>{{end}}
+<tr><td class="em-pad" style="padding:8px 24px 4px 24px;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" class="em-rows" style="table-layout:fixed; font-size:13px; border-collapse:collapse;">
+<tr class="em-hdr" style="color:#57606a; text-align:left;">
 <td width="{{$.Info.RequirementWidth}}%" style="padding:6px 8px; border-bottom:1px solid #e1e4e8; white-space:nowrap;">Requirement Type</td>
 <td width="{{$.Info.ControlWidth}}%" style="padding:6px 8px; border-bottom:1px solid #e1e4e8; white-space:nowrap;">Control No</td>
 <td width="{{$.Info.DescriptionWidth}}%" style="padding:6px 8px; border-bottom:1px solid #e1e4e8;">Description</td>
 <td width="15%" style="padding:6px 8px; border-bottom:1px solid #e1e4e8; white-space:nowrap;">Due Date</td>
 {{if $.Info.ShowStatus}}<td width="{{$.Info.OptionalColumnWidth}}%" style="padding:6px 8px; border-bottom:1px solid #e1e4e8; white-space:nowrap;">Status</td>{{end}}
-{{if $.Info.ShowOwner}}<td width="{{$.Info.OptionalColumnWidth}}%" style="padding:6px 8px; border-bottom:1px solid #e1e4e8; white-space:nowrap;">Owner</td>{{end}}
+{{if $.Info.ShowWaitingOn}}<td width="{{$.Info.OptionalColumnWidth}}%" style="padding:6px 8px; border-bottom:1px solid #e1e4e8; white-space:nowrap;">Waiting on</td>{{end}}
 {{if $.Info.ShowRole}}<td width="{{$.Info.OptionalColumnWidth}}%" style="padding:6px 8px; border-bottom:1px solid #e1e4e8; white-space:nowrap;">Role</td>{{end}}
 </tr>
 {{range .Items}}<tr>
-<td style="padding:6px 8px; border-bottom:1px solid #f0f0f0; word-break:break-word;">{{.RequirementType}}</td>
-<td style="padding:6px 8px; border-bottom:1px solid #f0f0f0; font-weight:bold; word-break:break-word;">{{if .DetailURL}}<a href="{{.DetailURL}}" style="color:#ff7300; text-decoration:none;">{{.ControlNumber}}</a>{{else}}{{.ControlNumber}}{{end}}{{if $.Info.ShowAudit}}<br><span style="font-weight:normal; color:#57606a; font-size:12px;">{{.Audit}}</span>{{end}}</td>
-<td style="padding:6px 8px; border-bottom:1px solid #f0f0f0; word-break:break-word; overflow-wrap:break-word;">{{.Description}}</td>
-<td style="padding:6px 8px; border-bottom:1px solid #f0f0f0; white-space:nowrap;">{{.DueDate}}</td>
-{{if $.Info.ShowStatus}}<td style="padding:6px 8px; border-bottom:1px solid #f0f0f0; white-space:nowrap;">{{.Tier}}</td>{{end}}
-{{if $.Info.ShowOwner}}<td style="padding:6px 8px; border-bottom:1px solid #f0f0f0; word-break:break-word;">{{.Owner}}</td>{{end}}
-{{if $.Info.ShowRole}}<td style="padding:6px 8px; border-bottom:1px solid #f0f0f0; word-break:break-word;">{{.Role}}</td>{{end}}
+<td style="padding:6px 8px; border-bottom:1px solid #f0f0f0; word-break:break-word;"><span class="em-lbl" style="display:none; mso-hide:all;">Requirement Type: </span>{{.RequirementType}}</td>
+<td style="padding:6px 8px; border-bottom:1px solid #f0f0f0; font-weight:bold; word-break:break-word;"><span class="em-lbl" style="display:none; mso-hide:all;">Control No: </span>{{if .DetailURL}}<a href="{{.DetailURL}}" style="color:#ff7300; text-decoration:none;">{{.ControlNumber}}</a>{{else}}{{.ControlNumber}}{{end}}{{if $.Info.ShowAudit}}<br><span style="font-weight:normal; color:#57606a; font-size:12px;">{{.Audit}}</span>{{end}}</td>
+<td style="padding:6px 8px; border-bottom:1px solid #f0f0f0; word-break:break-word; overflow-wrap:break-word;"><span class="em-lbl" style="display:none; mso-hide:all;">Description: </span>{{.Description}}</td>
+<td style="padding:6px 8px; border-bottom:1px solid #f0f0f0; white-space:nowrap;"><span class="em-lbl" style="display:none; mso-hide:all;">Due Date: </span>{{.DueDate}}</td>
+{{if $.Info.ShowStatus}}<td style="padding:6px 8px; border-bottom:1px solid #f0f0f0; white-space:nowrap;"><span class="em-lbl" style="display:none; mso-hide:all;">Status: </span>{{.Tier}}{{if .Note}}<br><span style="color:#57606a; font-size:12px;">{{.Note}}</span>{{end}}</td>{{end}}
+{{if $.Info.ShowWaitingOn}}<td style="padding:6px 8px; border-bottom:1px solid #f0f0f0; word-break:break-word;"><span class="em-lbl" style="display:none; mso-hide:all;">Waiting on: </span>{{.WaitingOn}}{{if .Note}}<br><span style="color:#57606a; font-size:12px;">{{.Note}}</span>{{end}}</td>{{end}}
+{{if $.Info.ShowRole}}<td style="padding:6px 8px; border-bottom:1px solid #f0f0f0; word-break:break-word;"><span class="em-lbl" style="display:none; mso-hide:all;">Role: </span>{{.Role}}</td>{{end}}
 </tr>{{end}}
 </table>
 </td></tr>{{end}}
 
-{{if .Info.Comment}}<tr><td style="padding:12px 24px 4px 24px;">
+{{if .Info.Comment}}<tr><td class="em-pad" style="padding:12px 24px 4px 24px;">
 <table width="100%" cellpadding="0" cellspacing="0" border="0">
 <tr><td style="padding:12px 14px; background-color:#fff8e1; border-left:3px solid #f0ad4e; font-size:14px; line-height:1.5;">
 <span style="color:#57606a;">Comment</span><br>{{.Info.Comment}}
@@ -433,7 +436,7 @@ var auditBodyTemplate = template.Must(template.New("auditEvent").Parse(`<html>
 </table>
 </td></tr>{{end}}
 
-{{if .Info.DetailURL}}<tr><td style="padding:20px 24px 24px 24px;">
+{{if .Info.DetailURL}}<tr><td class="em-pad" style="padding:20px 24px 24px 24px;">
 <a href="{{.Info.DetailURL}}" style="display:inline-block; padding:10px 20px; background-color:#ff7300; color:#ffffff; text-decoration:none; border-radius:4px; font-weight:bold; font-size:14px;">View in Audit Hub</a>
 </td></tr>{{end}}
 

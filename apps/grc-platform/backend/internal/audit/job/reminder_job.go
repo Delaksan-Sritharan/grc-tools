@@ -57,26 +57,26 @@ const (
 	releaseTimeout = 10 * time.Second
 )
 
-// ReminderJob sweeps every control/population item daily and emails each
-// owner one combined digest of everything due in 10 days, due in 5 days, or
-// overdue.
+// ReminderJob sweeps every control daily and emails whoever each one is
+// waiting on — owner, admins or auditor, by status — one combined digest of
+// everything due in 10 days, due in 5 days, due today or overdue.
 type ReminderJob struct {
 	audits   auditLister
 	controls controlLister
 	claim    claimer
-	// notify delivers one owner's full daily digest synchronously — a plain
+	// notify delivers one recipient's full daily digest synchronously — a plain
 	// function, not a handler dependency, to avoid an import cycle. Wired to
 	// handler.Deps.SendReminderDigestSync; doesn't log on success since Claim already did.
-	notify func(ctx context.Context, ownerUserID int, items []model.ReminderItem) error
+	notify func(ctx context.Context, recipientUserID int, items []model.ReminderItem) error
 	// admins resolves the admin recipient set once per sweep; notifyAdmin
 	// sends one admin's digest of overdue items in one audit. Both nil unless
 	// WithAdminAlerts wired them — wired to ReminderAdminIDs / SendOverdueAdminDigestSync.
 	admins      func(ctx context.Context) ([]int, error)
 	notifyAdmin func(ctx context.Context, adminUserID int, items []model.ReminderItem) error
-	// resolveOwnerNames looks up a batch of owner ids in one call, so the
-	// escalation resolves each owner once per sweep instead of once per
-	// (admin, item) email — wired to handler.Deps.ResolveOwnerNames.
-	resolveOwnerNames func(ctx context.Context, ownerIDs []int) map[int]string
+	// resolveUserNames looks up a batch of user ids in one call, so the
+	// escalation resolves each person an item is waiting on once per sweep instead of once per
+	// (admin, item) email — wired to handler.Deps.ResolveUserNames.
+	resolveUserNames func(ctx context.Context, userIDs []int) map[int]string
 	// leads resolves each overdue owner's line-manager email once per sweep;
 	// notifyLead sends that owner's overdue items to them. Both nil unless
 	// WithLeadAlerts wired them.
@@ -95,22 +95,22 @@ func NewReminderJob(
 	audits auditLister,
 	controls controlLister,
 	claim claimer,
-	notify func(ctx context.Context, ownerUserID int, items []model.ReminderItem) error,
+	notify func(ctx context.Context, recipientUserID int, items []model.ReminderItem) error,
 ) *ReminderJob {
 	return &ReminderJob{audits: audits, controls: controls, claim: claim, notify: notify}
 }
 
-// WithAdminAlerts turns on the overdue admin escalation: every admin
-// `admins` returns gets one digest email per audit with overdue items.
-// Opt-in setter (nil functions skip it) so existing callers stay unchanged.
+// WithAdminAlerts wires the admin recipient set: every admin `admins` returns
+// gets one escalation digest per audit with overdue items, and the reminders
+// for items waiting on the admins. Without it those items reach nobody.
 func (j *ReminderJob) WithAdminAlerts(
 	admins func(ctx context.Context) ([]int, error),
 	notifyAdmin func(ctx context.Context, adminUserID int, items []model.ReminderItem) error,
-	resolveOwnerNames func(ctx context.Context, ownerIDs []int) map[int]string,
+	resolveUserNames func(ctx context.Context, userIDs []int) map[int]string,
 ) *ReminderJob {
 	j.admins = admins
 	j.notifyAdmin = notifyAdmin
-	j.resolveOwnerNames = resolveOwnerNames
+	j.resolveUserNames = resolveUserNames
 	return j
 }
 
@@ -126,12 +126,12 @@ func (j *ReminderJob) WithLeadAlerts(
 	return j
 }
 
-// overdueOnly returns just the overdue entries of an owner's digest — the only
-// tier that escalates to a lead.
+// overdueOnly returns the entries of a digest that escalate to a lead: overdue
+// and still waiting on an owner's submission.
 func overdueOnly(items []model.ReminderItem) []model.ReminderItem {
 	out := make([]model.ReminderItem, 0, len(items))
 	for _, it := range items {
-		if it.Type == "REMINDER_OVERDUE" {
+		if it.Type == "REMINDER_OVERDUE" && it.EscalatesToLead {
 			out = append(out, it)
 		}
 	}
@@ -142,11 +142,74 @@ func overdueOnly(items []model.ReminderItem) []model.ReminderItem {
 // the pre-pass that decides which owners are worth an HR lookup.
 func hasOverdue(items []model.ReminderItem) bool {
 	for _, it := range items {
-		if it.Type == "REMINDER_OVERDUE" {
+		if it.Type == "REMINDER_OVERDUE" && it.EscalatesToLead {
 			return true
 		}
 	}
 	return false
+}
+
+type actorKind int
+
+const (
+	actorOwner actorKind = iota
+	actorAdmins
+	actorAuditor
+)
+
+const (
+	waitingOnAdmins     = "Compliance Admins"
+	waitingOnUnassigned = "Unassigned"
+	// waitingOnUnresolved stands in when an assigned person's name can't be looked up.
+	waitingOnUnresolved = "Name unavailable"
+)
+
+var unassignedNotes = map[actorKind]string{
+	actorOwner:   "No owner assigned",
+	actorAuditor: "No auditor assigned",
+}
+
+// statusRoute is everything the sweep reads off a control's status: who it is
+// waiting on, which due date it is measured against, and its label. One table,
+// so the recipient and the date can never describe different phases.
+type statusRoute struct {
+	waitsOn actorKind
+	// population: measured against the population's due date and owner
+	// rather than the control's own.
+	population bool
+	label      string
+}
+
+// statusRoutes mirrors the dashboard's action queue split. A status absent
+// here (COMPLETE) reminds nobody.
+var statusRoutes = map[string]statusRoute{
+	"POPULATION_PENDING":            {actorOwner, true, "Population Pending"},
+	"POPULATION_NEED_CLARIFICATION": {actorOwner, true, "Population Need Clarification"},
+	"POPULATION_INTERNAL_REVIEW":    {actorAdmins, true, "Population Internal Review"},
+	"POPULATION_UNDER_VALIDATION":   {actorAuditor, true, "Population Under Validation"},
+	"POPULATION_COMPLETE":           {actorAuditor, false, "Population Complete"},
+	"AWAITING_SAMPLE":               {actorAuditor, false, "Awaiting Sample"},
+	"SUBMITTED_SAMPLE":              {actorOwner, false, "Submitted Sample"},
+	"EVIDENCE_PENDING":              {actorOwner, false, "Evidence Pending"},
+	"EVIDENCE_NEED_CLARIFICATION":   {actorOwner, false, "Evidence Need Clarification"},
+	"EVIDENCE_INTERNAL_REVIEW":      {actorAdmins, false, "Evidence Internal Review"},
+	"EVIDENCE_UNDER_VALIDATION":     {actorAuditor, false, "Evidence Under Validation"},
+}
+
+// assignee is the person the control is waiting on, nil when that role is the
+// admins as a group or nobody holds it.
+func (r statusRoute) assignee(c *model.AuditControl) *int {
+	switch r.waitsOn {
+	case actorOwner:
+		if r.population {
+			return c.PopulationOwnerID
+		}
+		return c.OwnerID
+	case actorAuditor:
+		return c.AuditorID
+	default:
+		return nil
+	}
 }
 
 // adminAuditKey groups escalated items by (admin, audit) — one digest email
@@ -248,14 +311,16 @@ func (j *ReminderJob) runOnce(parent context.Context) (runErr error) {
 	}
 
 	// Resolved once per sweep, not per control. A failure here is logged and
-	// treated as "no admins": the owner reminders below are the primary
-	// delivery and must not be lost to a failed grant lookup.
+	// treated as "no admins": the reminders to owners and auditors below must
+	// not be lost to a failed grant lookup.
 	var adminIDs []int
 	if j.admins != nil && j.notifyAdmin != nil {
 		adminIDs, err = j.admins(ctx)
 		if err != nil {
-			slog.Warn("reminder job: failed to resolve admin recipients, skipping overdue escalation this run", "err", err)
+			slog.Warn("reminder job: failed to resolve admin recipients, skipping escalations and admin reminders this run", "err", err)
 			adminIDs = nil
+		} else if len(adminIDs) == 0 {
+			slog.Warn("reminder job: no admin recipients, escalations and admin reminders reach nobody this run")
 		}
 	}
 
@@ -267,7 +332,7 @@ func (j *ReminderJob) runOnce(parent context.Context) (runErr error) {
 
 	today := time.Now().UTC()
 	todayStr := today.Format("2006-01-02")
-	byOwner := map[int][]model.ReminderItem{}
+	byRecipient := map[int][]model.ReminderItem{}
 	byAdmin := map[adminAuditKey][]model.ReminderItem{}
 	queued, skippedDup, skippedErr := 0, 0, 0
 
@@ -286,12 +351,12 @@ func (j *ReminderJob) runOnce(parent context.Context) (runErr error) {
 	}
 	// Releases every still-pending claim before a panic reaches the top-level
 	// recover, so nothing stays claimed forever with nothing sent. Whatever
-	// remains in byOwner/byAdmin here is exactly the unresolved set.
+	// remains in byRecipient/byAdmin here is exactly the unresolved set.
 	defer func() {
 		if r := recover(); r != nil {
-			for ownerID, items := range byOwner {
+			for recipientID, items := range byRecipient {
 				for _, it := range items {
-					release(it.NotificationID, ownerID, it.Type, "panic")
+					release(it.NotificationID, recipientID, it.Type, "panic")
 				}
 			}
 			for key, items := range byAdmin {
@@ -303,12 +368,12 @@ func (j *ReminderJob) runOnce(parent context.Context) (runErr error) {
 		}
 	}()
 
-	queue := func(ownerID int, item model.ReminderItem, controlID, populationID *int) {
-		claimed, notificationID, err := j.claim.Claim(ctx, ownerID, item.AuditID, item.Type, controlID, populationID, &item.DedupSnapshot)
+	queue := func(recipientID int, item model.ReminderItem, controlID, populationID *int) {
+		claimed, notificationID, err := j.claim.Claim(ctx, recipientID, item.AuditID, item.Type, controlID, populationID, &item.DedupSnapshot)
 		if err != nil {
 			// Fail CLOSED: a claim error means we can't tell if we hold it, so
 			// sending anyway risks a duplicate. Skipping costs one day's delay.
-			slog.Warn("reminder job: claim failed, skipping this run (fail closed)", "ownerId", ownerID, "type", item.Type, "err", err)
+			slog.Warn("reminder job: claim failed, skipping this run (fail closed)", "recipientId", recipientID, "type", item.Type, "err", err)
 			skippedErr++
 			return
 		}
@@ -317,16 +382,16 @@ func (j *ReminderJob) runOnce(parent context.Context) (runErr error) {
 			return
 		}
 		item.NotificationID = notificationID
-		byOwner[ownerID] = append(byOwner[ownerID], item)
+		byRecipient[recipientID] = append(byRecipient[recipientID], item)
 		queued++
 	}
 
 	// queueAdmins escalates one overdue item to every admin (grouped into
 	// that admin's digest per audit), claiming per admin per item. An admin
-	// who owns the item is skipped — they already hear about it in their own digest.
+	// the item is waiting on is skipped — they already hear about it in their own digest.
 	queueAdmins := func(item model.ReminderItem, controlID, populationID *int) {
 		for _, adminID := range adminIDs {
-			if adminID == item.OwnerUserID {
+			if adminID == item.WaitingOnUserID {
 				continue
 			}
 			claimed, notificationID, err := j.claim.Claim(ctx, adminID, item.AuditID, item.Type, controlID, populationID, &item.DedupSnapshot)
@@ -351,57 +416,76 @@ func (j *ReminderJob) runOnce(parent context.Context) (runErr error) {
 		if c == nil || !activeAuditIDs[c.AuditID] {
 			continue
 		}
-		if c.OwnerID != nil && c.Status != "COMPLETE" && c.DueDate != nil {
-			if tier := reminderTier(*c.DueDate, today); tier != "" {
-				dedupSnapshot := *c.DueDate
-				if tier == "REMINDER_OVERDUE" {
-					dedupSnapshot = todayStr // re-fires daily — see model.ReminderItem.DedupSnapshot
-				}
-				item := model.ReminderItem{
-					AuditID:         c.AuditID,
-					ControlID:       &c.ID,
-					Type:            tier,
-					ControlNumber:   c.ControlNumber,
-					Description:     c.Description,
-					DueDate:         *c.DueDate,
-					Tier:            tierLabel(tier),
-					RequirementType: "Evidence Requirement",
-					DedupSnapshot:   dedupSnapshot,
-					AuditName:       auditNames[c.AuditID],
-					LinkControlID:   c.ID,
-					OwnerUserID:     *c.OwnerID,
-				}
-				queue(*c.OwnerID, item, &c.ID, nil)
-				if tier == "REMINDER_OVERDUE" {
-					queueAdmins(item, &c.ID, nil)
-				}
-			}
+		route, ok := statusRoutes[c.Status]
+		if !ok {
+			continue
 		}
-		if c.PopulationOwnerID != nil && (c.PopulationStatus == nil || *c.PopulationStatus != "APPROVED") && c.PopulationDueDate != nil {
-			if tier := reminderTier(*c.PopulationDueDate, today); tier != "" {
-				dedupSnapshot := *c.PopulationDueDate
-				if tier == "REMINDER_OVERDUE" {
-					dedupSnapshot = todayStr
-				}
-				item := model.ReminderItem{
-					AuditID:         c.AuditID,
-					PopulationID:    c.PopulationID,
-					Type:            tier,
-					ControlNumber:   c.ControlNumber,
-					Description:     c.Description,
-					DueDate:         *c.PopulationDueDate,
-					Tier:            tierLabel(tier),
-					RequirementType: "Population Requirement",
-					DedupSnapshot:   dedupSnapshot,
-					AuditName:       auditNames[c.AuditID],
-					LinkControlID:   c.ID,
-					OwnerUserID:     *c.PopulationOwnerID,
-				}
-				queue(*c.PopulationOwnerID, item, nil, c.PopulationID)
-				if tier == "REMINDER_OVERDUE" {
-					queueAdmins(item, nil, c.PopulationID)
-				}
+		populationPhase := route.population && c.PopulationID != nil
+		dueDate := c.DueDate
+		if populationPhase && c.PopulationDueDate != nil {
+			dueDate = c.PopulationDueDate
+		}
+		if dueDate == nil {
+			continue
+		}
+		due := *dueDate
+		tier := reminderTier(due, today)
+		if tier == "" {
+			continue
+		}
+		actorID := route.assignee(c)
+		overdue := tier == "REMINDER_OVERDUE"
+		dedupSnapshot := due
+		if overdue {
+			dedupSnapshot = todayStr // re-fires daily — see model.ReminderItem.DedupSnapshot
+		}
+		// audit_notification treats control_id/population_id as mutually exclusive.
+		controlID, populationID := &c.ID, (*int)(nil)
+		requirementType := "Evidence Requirement"
+		if populationPhase {
+			controlID, populationID = nil, c.PopulationID
+			requirementType = "Population Requirement"
+		}
+		item := model.ReminderItem{
+			AuditID:         c.AuditID,
+			ControlID:       controlID,
+			PopulationID:    populationID,
+			Type:            tier,
+			ControlNumber:   c.ControlNumber,
+			Description:     c.Description,
+			DueDate:         due,
+			Tier:            tierLabel(tier),
+			RequirementType: requirementType,
+			DedupSnapshot:   dedupSnapshot,
+			AuditName:       auditNames[c.AuditID],
+			LinkControlID:   c.ID,
+			Status:          route.label,
+		}
+
+		if actorID != nil {
+			item.WaitingOnUserID = *actorID
+			item.EscalatesToLead = route.waitsOn == actorOwner
+			queue(*actorID, item, controlID, populationID)
+			if overdue {
+				queueAdmins(item, controlID, populationID)
 			}
+			continue
+		}
+
+		// Nobody to remind: the admins are the reviewers, or stand in for a
+		// missing owner/auditor since only they can assign one.
+		if route.waitsOn == actorAdmins {
+			item.WaitingOn = waitingOnAdmins
+		} else {
+			item.WaitingOn, item.UnassignedNote = waitingOnUnassigned, unassignedNotes[route.waitsOn]
+		}
+		if overdue {
+			// Only the escalation digest, never both emails for one item.
+			queueAdmins(item, controlID, populationID)
+			continue
+		}
+		for _, adminID := range adminIDs {
+			queue(adminID, item, controlID, populationID)
 		}
 	}
 
@@ -410,10 +494,10 @@ func (j *ReminderJob) runOnce(parent context.Context) (runErr error) {
 	// and a nil map reads as "no lead" for every owner below.
 	var ownerLeads map[int]string
 	if j.leads != nil && j.notifyLead != nil {
-		overdueOwners := make([]int, 0, len(byOwner))
-		for ownerID, items := range byOwner {
+		overdueOwners := make([]int, 0, len(byRecipient))
+		for recipientID, items := range byRecipient {
 			if hasOverdue(items) {
-				overdueOwners = append(overdueOwners, ownerID)
+				overdueOwners = append(overdueOwners, recipientID)
 			}
 		}
 		if len(overdueOwners) > 0 {
@@ -423,28 +507,28 @@ func (j *ReminderJob) runOnce(parent context.Context) (runErr error) {
 
 	sent, notifyFailed := 0, 0
 	leadSent, leadFailed := 0, 0
-	for ownerID, items := range byOwner {
-		if err := j.notify(ctx, ownerID, items); err != nil {
-			slog.Warn("reminder job: notification failed", "ownerId", ownerID, "items", len(items), "err", err)
+	for recipientID, items := range byRecipient {
+		if err := j.notify(ctx, recipientID, items); err != nil {
+			slog.Warn("reminder job: notification failed", "recipientId", recipientID, "items", len(items), "err", err)
 			// The digest failed, so every item it covered must give up its
 			// claim — otherwise it stays claimed forever with nothing sent.
 			for _, it := range items {
-				release(it.NotificationID, ownerID, it.Type, "failed send")
+				release(it.NotificationID, recipientID, it.Type, "failed send")
 			}
 			notifyFailed++
-			delete(byOwner, ownerID) // resolved (failed+released) — the panic-recovery defer above must not also release it
+			delete(byRecipient, recipientID) // resolved (failed+released) — the panic-recovery defer above must not also release it
 			continue
 		}
 		sent++
-		delete(byOwner, ownerID) // resolved (sent) — must never be released, even if a later owner's notify panics
+		delete(byRecipient, recipientID) // resolved (sent) — must never be released, even if a later owner's notify panics
 		// Strictly after the delete above: the digest is out and its claims are
 		// spent, so neither a failure nor a panic here may release them —
 		// doing so would re-send the owner's own digest tomorrow for an item
 		// they were already told about.
-		if leadEmail := ownerLeads[ownerID]; leadEmail != "" {
+		if leadEmail := ownerLeads[recipientID]; leadEmail != "" {
 			if overdue := overdueOnly(items); len(overdue) > 0 {
-				if err := j.notifyLead(ctx, ownerID, leadEmail, overdue); err != nil {
-					slog.Warn("reminder job: lead escalation failed", "ownerId", ownerID, "items", len(overdue), "err", err)
+				if err := j.notifyLead(ctx, recipientID, leadEmail, overdue); err != nil {
+					slog.Warn("reminder job: lead escalation failed", "recipientId", recipientID, "items", len(overdue), "err", err)
 					leadFailed++
 				} else {
 					leadSent++
@@ -456,21 +540,28 @@ func (j *ReminderJob) runOnce(parent context.Context) (runErr error) {
 	// Resolved once per sweep, deduped across every escalated item, so an
 	// owner with several overdue items (or several admins) is looked up once
 	// instead of once per email.
-	if len(byAdmin) > 0 && j.resolveOwnerNames != nil {
-		ownerIDSet := map[int]bool{}
+	if len(byAdmin) > 0 && j.resolveUserNames != nil {
+		userIDSet := map[int]bool{}
 		for _, items := range byAdmin {
 			for _, it := range items {
-				ownerIDSet[it.OwnerUserID] = true
+				if it.WaitingOnUserID > 0 {
+					userIDSet[it.WaitingOnUserID] = true
+				}
 			}
 		}
-		ownerIDs := make([]int, 0, len(ownerIDSet))
-		for id := range ownerIDSet {
-			ownerIDs = append(ownerIDs, id)
+		userIDs := make([]int, 0, len(userIDSet))
+		for id := range userIDSet {
+			userIDs = append(userIDs, id)
 		}
-		ownerNames := j.resolveOwnerNames(ctx, ownerIDs)
+		userNames := j.resolveUserNames(ctx, userIDs)
 		for _, items := range byAdmin {
 			for i := range items {
-				items[i].OwnerName = ownerNames[items[i].OwnerUserID]
+				if id := items[i].WaitingOnUserID; id > 0 {
+					items[i].WaitingOn = userNames[id]
+					if items[i].WaitingOn == "" {
+						items[i].WaitingOn = waitingOnUnresolved
+					}
+				}
 			}
 		}
 	}
