@@ -32,12 +32,18 @@ import { useAuthApiClient } from "@hooks/useAuthApiClient";
 import { BACKEND_BASE_URL } from "@config/apiConfig";
 import { useGetTrail, type TrailEntry, type TrailDetails } from "@modules/audit/api/useGetTrail";
 import { useGetEvidence } from "@modules/audit/api/useGetEvidence";
+import { useGetPopulation } from "@modules/audit/api/useGetPopulation";
 import { useGetComments, type AuditComment } from "@modules/audit/api/useComments";
-import { aiValidationQueryKey, type AIValidationLog } from "@modules/audit/api/useGetAIValidation";
+import {
+  aiValidationQueryKey,
+  populationAIValidationQueryKey,
+  populationAIValidationRefetchInterval,
+  type AIValidationLog,
+} from "@modules/audit/api/useGetAIValidation";
 import ControlStatusChip from "@modules/audit/components/ControlStatusChip";
 import { CONTROL_STATUS_LABELS } from "@modules/audit/utils/controlStatus";
 import { formatTimestamp } from "@modules/audit/utils/format";
-import type { ControlStatus } from "@modules/audit/types/audit";
+import type { ControlStatus, RequirementType } from "@modules/audit/types/audit";
 
 // ─── Event model ──────────────────────────────────────────────────────────────
 
@@ -193,6 +199,7 @@ const AI_TITLE: Record<AIValidationLog["result"], string | null> = {
   FAIL: "AI validation flagged gaps",
   UNCERTAIN: "AI validation inconclusive",
   ERROR: "AI validation could not complete",
+  SKIPPED: "AI validation skipped by submitter",
   PENDING: null, // in-progress, not a historical event
 };
 
@@ -200,6 +207,7 @@ const AI_BADGE: Partial<Record<AIValidationLog["result"], { label: string; color
   PASS: { label: "Pass", color: "#10B981" },
   FAIL: { label: "Gaps", color: "#EF4444" },
   UNCERTAIN: { label: "Uncertain", color: "#F59E0B" },
+  SKIPPED: { label: "Skipped", color: "#6B7280" },
 };
 
 function aiToEvent(a: AIValidationLog): TimelineEvent | null {
@@ -209,8 +217,10 @@ function aiToEvent(a: AIValidationLog): TimelineEvent | null {
     id: `a-${a.id}`,
     tone: "ai",
     at: a.createdOn,
-    actor: "AI reviewer",
-    title,
+    // SKIPPED is the submitter's opt-out; createdBy is the system sentinel, not them.
+    actor: a.result === "SKIPPED" ? "Submitter" : "AI reviewer",
+    // Evidence and population runs share this timeline; name the population ones.
+    title: a.populationId != null ? `Population ${title}` : title,
     body: a.summary ?? undefined,
     badge: AI_BADGE[a.result],
   };
@@ -222,10 +232,12 @@ export default function ControlHistoryTimeline({
   auditId,
   controlId,
   currentStatus,
+  requirementType,
 }: {
   auditId: number;
   controlId: number;
   currentStatus: ControlStatus;
+  requirementType: RequirementType;
 }): JSX.Element {
   const authFetch = useAuthApiClient();
   const trail = useGetTrail(auditId, controlId, true);
@@ -242,9 +254,20 @@ export default function ControlHistoryTimeline({
     [evidence.data],
   );
 
+  // Only OE controls have a population phase. Every round — the current one
+  // and the earlier (rejected) ones — carries its own AI runs.
+  const population = useGetPopulation(auditId, controlId, requirementType === "OE");
+  const populationIds = useMemo(() => {
+    const view = population.data;
+    if (!view) return [];
+    const ids = (view.earlierRounds ?? []).map((e) => e.round.id);
+    if (view.round) ids.push(view.round.id);
+    return ids;
+  }, [population.data]);
+
   // Comments are control-scoped (one thread spanning population + evidence
   // phases), so a single fetch covers the whole timeline — unlike AI
-  // validations below, which are still per-evidence-round.
+  // validations below, which are still per evidence / population round.
   const comments = useGetComments(auditId, controlId);
 
   const aiResults = useQueries({
@@ -260,6 +283,26 @@ export default function ControlHistoryTimeline({
     })),
   });
 
+  // Only the current round can still have a run in progress, so only it
+  // polls (same bounded rule as the AI card); earlier rounds are settled.
+  const currentRound = population.data?.round ?? null;
+  const populationAiResults = useQueries({
+    queries: populationIds.map((id) => ({
+      queryKey: populationAIValidationQueryKey(id),
+      refetchInterval: (query: { state: { data: AIValidationLog[] | undefined } }) =>
+        id === currentRound?.id
+          ? populationAIValidationRefetchInterval(query.state.data, currentRound.updatedAt)
+          : false,
+      queryFn: async (): Promise<AIValidationLog[]> => {
+        const res = await authFetch(
+          `${BACKEND_BASE_URL}/api/v1/audits/${auditId}/controls/${controlId}/population/${id}/ai-validations`,
+        );
+        if (!res.ok) throw new Error(String(res.status));
+        return ((await res.json()) as { validations?: AIValidationLog[] }).validations ?? [];
+      },
+    })),
+  });
+
   const events = useMemo<TimelineEvent[]>(() => {
     const out: TimelineEvent[] = [];
     for (const e of trail.data ?? []) {
@@ -267,7 +310,7 @@ export default function ControlHistoryTimeline({
       if (ev) out.push(ev);
     }
     for (const c of comments.data ?? []) out.push(commentToEvent(c));
-    for (const r of aiResults) {
+    for (const r of [...aiResults, ...populationAiResults]) {
       for (const a of r.data ?? []) {
         const ev = aiToEvent(a);
         if (ev) out.push(ev);
@@ -275,7 +318,7 @@ export default function ControlHistoryTimeline({
     }
     // Oldest first: the tab reads as the control's journey from creation onward.
     return out.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
-  }, [trail.data, comments.data, aiResults, fileNamesByEvidenceId]);
+  }, [trail.data, comments.data, aiResults, populationAiResults, fileNamesByEvidenceId]);
 
   if (trail.isLoading) {
     return (
@@ -294,8 +337,20 @@ export default function ControlHistoryTimeline({
     return <Alert severity="error" sx={{ fontSize: "0.8rem" }}>Couldn’t load this control’s history.</Alert>;
   }
 
+  // The population rounds, or a round's AI runs, failed to load: whatever did
+  // load is still shown, but say the timeline may be missing entries.
+  const populationAiIncomplete =
+    (population.isError && !population.data) || populationAiResults.some((r) => r.isError);
+  const partialWarning = populationAiIncomplete ? (
+    <Alert severity="warning" sx={{ fontSize: "0.8rem" }}>
+      Couldn’t load the population AI validation results, so this history may be incomplete.
+    </Alert>
+  ) : null;
+
   if (events.length === 0) {
     return (
+      <>
+      {partialWarning}
       <Box sx={{ py: 6, display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 1.25 }}>
         <Box sx={{ width: 52, height: 52, borderRadius: "50%", bgcolor: "action.hover", display: "flex", alignItems: "center", justifyContent: "center", color: "text.secondary" }}>
           <History size={24} />
@@ -305,6 +360,7 @@ export default function ControlHistoryTimeline({
           Events appear here as the control moves through submission, internal review, and auditor validation.
         </Typography>
       </Box>
+      </>
     );
   }
 
@@ -312,6 +368,7 @@ export default function ControlHistoryTimeline({
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      {partialWarning}
       {/* Journey summary */}
       <Box
         sx={{
