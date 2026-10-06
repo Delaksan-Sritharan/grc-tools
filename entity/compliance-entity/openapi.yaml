@@ -6135,14 +6135,14 @@ components:
         effectiveColorCode: &id044
           type: string
           nullable: true
-        registerTemplate:
+        registerTemplate: &id045
           type: string
           description: The source register's template. Empty if the register row is missing.
-        customerName:
+        customerName: &id046
           type: string
           nullable: true
           description: MANAGED_SERVICES risks only.
-        environments:
+        environments: &id047
           type: array
           items:
             type: string
@@ -6151,7 +6151,7 @@ components:
             - NON_PRODUCTION
             - DR
           description: MANAGED_SERVICES risks only, in PRODUCTION, NON_PRODUCTION, DR order; empty otherwise.
-        platformNames:
+        platformNames: &id048
           type: array
           items:
             type: string
@@ -7458,6 +7458,10 @@ components:
         updatedBy: *id042
         effectiveRiskLevel: *id043
         effectiveColorCode: *id044
+        registerTemplate: *id045
+        customerName: *id046
+        environments: *id047
+        platformNames: *id048
         complianceApproverName:
           type: string
           nullable: true
