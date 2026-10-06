@@ -904,11 +904,22 @@ var overridePopulationTarget = map[string]string{
 }
 
 // overrideEvidenceTarget is overridePopulationTarget's counterpart for the
-// control's latest audit_evidence round.
+// control's latest audit_evidence round. Every target below
+// EVIDENCE_INTERNAL_REVIEW expects a fresh submission, which always starts a
+// new round — so the round left behind is retired as COMPLIANCE_REJECTED
+// rather than staying SUBMITTED/approved next to the one that replaces it.
 var overrideEvidenceTarget = map[string]string{
-	"EVIDENCE_INTERNAL_REVIEW":    "SUBMITTED",
-	"EVIDENCE_UNDER_VALIDATION":   "COMPLIANCE_APPROVED",
-	"EVIDENCE_NEED_CLARIFICATION": "AUDITOR_REJECTED",
+	"POPULATION_PENDING":            "COMPLIANCE_REJECTED",
+	"POPULATION_INTERNAL_REVIEW":    "COMPLIANCE_REJECTED",
+	"POPULATION_NEED_CLARIFICATION": "COMPLIANCE_REJECTED",
+	"POPULATION_UNDER_VALIDATION":   "COMPLIANCE_REJECTED",
+	"POPULATION_COMPLETE":           "COMPLIANCE_REJECTED",
+	"AWAITING_SAMPLE":               "COMPLIANCE_REJECTED",
+	"SUBMITTED_SAMPLE":              "COMPLIANCE_REJECTED",
+	"EVIDENCE_PENDING":              "COMPLIANCE_REJECTED",
+	"EVIDENCE_INTERNAL_REVIEW":      "SUBMITTED",
+	"EVIDENCE_UNDER_VALIDATION":     "COMPLIANCE_APPROVED",
+	"EVIDENCE_NEED_CLARIFICATION":   "AUDITOR_REJECTED",
 }
 
 // populationStatusRank orders audit_population.status for the cascade: a

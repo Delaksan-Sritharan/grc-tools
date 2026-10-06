@@ -276,3 +276,89 @@ func TestFooterButtonStillRendersWhenDetailURLIsSet(t *testing.T) {
 		t.Error("footer button must still render when DetailURL is set")
 	}
 }
+
+func renderAuditEvent(t *testing.T, ev AuditEvent, info AuditEventInfo) string {
+	t.Helper()
+	var decoded string
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Template string `json:"template"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		raw, _ := base64.StdEncoding.DecodeString(body.Template)
+		decoded = string(raw)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"message":"ok"}`))
+	})
+	if err := c.SendAuditEvent(context.Background(), ev, "to@example.com", info); err != nil {
+		t.Fatalf("SendAuditEvent: %v", err)
+	}
+	return decoded
+}
+
+// The admin escalation names who each overdue row is waiting on, with the
+// control's status beneath — not the item's owner.
+func TestOverdueAdminDigestShowsWaitingOn(t *testing.T) {
+	body := renderAuditEvent(t, AuditEventReminderOverdueAdmin, AuditEventInfo{
+		AuditName:     "Q3 Audit",
+		ShowWaitingOn: true,
+		Items: []AuditEventItem{
+			{ControlNumber: "C-1", RequirementType: "Evidence Requirement", WaitingOn: "Compliance Admins", Note: "Evidence Internal Review"},
+		},
+	})
+	for _, want := range []string{"Waiting on", "Compliance Admins", "Evidence Internal Review"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("escalation digest missing %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, ">Owner<") {
+		t.Error("escalation digest must not render an Owner column")
+	}
+}
+
+// A reminder a recipient gets across audits names each row's audit, and flags
+// a row an admin holds only because nobody is assigned.
+func TestReminderDigestShowsAuditAndUnassignedNote(t *testing.T) {
+	body := renderAuditEvent(t, AuditEventReminderDue5, AuditEventInfo{
+		ShowStatus: true,
+		ShowAudit:  true,
+		Items: []AuditEventItem{
+			{ControlNumber: "C-1", RequirementType: "Population Requirement", Tier: "Due in 5 days", Audit: "Q3 Audit", Note: "No owner assigned"},
+		},
+	})
+	for _, want := range []string{"waiting on you", "Q3 Audit", "Due in 5 days", "No owner assigned"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("reminder digest missing %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestOverdueLeadSubjectSpacing(t *testing.T) {
+	got := overdueLeadSubject(AuditEventInfo{OwnerName: "Jane Doe"})
+	if want := "[GRC Platform] Overdue - Jane Doe"; got != want {
+		t.Errorf("subject = %q, want %q", got, want)
+	}
+}
+
+// The small-screen rules must reach the client unescaped, and every stacked
+// cell needs its label, since the header row is hidden on a narrow screen.
+func TestAuditEmailCarriesSmallScreenRules(t *testing.T) {
+	body := renderAuditEvent(t, AuditEventReminderOverdueAdmin, AuditEventInfo{
+		ShowWaitingOn: true,
+		Items:         []AuditEventItem{{ControlNumber: "C-1", RequirementType: "Evidence Requirement", DueDate: "2026-10-01", WaitingOn: "Jane"}},
+	})
+	for _, want := range []string{
+		`<meta name="viewport" content="width=device-width, initial-scale=1">`,
+		"@media only screen and (max-width:600px)",
+		`class="em-rows"`,
+		`<span class="em-lbl" style="display:none; mso-hide:all;">Due Date: </span>2026-10-01`,
+		`<span class="em-lbl" style="display:none; mso-hide:all;">Waiting on: </span>Jane`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("email body missing %q", want)
+		}
+	}
+	if strings.Contains(body, `width="900"`) {
+		t.Error("container must not be pinned to a fixed pixel width")
+	}
+}

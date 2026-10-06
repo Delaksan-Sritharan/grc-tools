@@ -200,7 +200,8 @@ func main() {
 		auditHRClient = hrClient
 	}
 	auditDeps := buildAuditDeps(fileSvc, entityCli, cfg.AIValidation, cfg.Email, grantRepo, dirSvc, auditHRClient, activityLog)
-	reminderJob := auditjob.NewReminderJob(auditDeps.Audit, auditDeps.Control, auditDeps.Notification, auditDeps.SendReminderDigestSync)
+	reminderJob := auditjob.NewReminderJob(auditDeps.Audit, auditDeps.Control, auditDeps.Notification, auditDeps.SendReminderDigestSync).
+		WithAdminAlerts(auditDeps.ReminderAdminIDs, auditDeps.SendOverdueAdminDigestSync, auditDeps.ResolveUserNames)
 	if cfg.LeadEscalationEmailsEnabled {
 		reminderJob = reminderJob.WithLeadAlerts(auditDeps.ResolveOwnerLeads, auditDeps.SendOverdueLeadDigestSync)
 		slog.Info("lead-escalation emails enabled (audit overdue digest + risk escalation notice)")

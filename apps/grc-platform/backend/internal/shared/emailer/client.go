@@ -443,23 +443,24 @@ var eventTemplates = map[RiskEvent]eventTemplate{
 // Comment are escaped for HTML/URL context — several of them are user-supplied.
 // bodyTemplate renders the shared body for every event.
 //
-// Deliberately old-fashioned HTML: tables for layout, inline styles, no
-// stylesheet. Email clients (Outlook especially) ignore <style> blocks, drop
-// flexbox and grid, and collapse margins unpredictably — tables with explicit
-// widths and valign are the only layout that renders consistently across them.
+// Deliberately old-fashioned HTML: tables for layout and inline styles for
+// everything that must render. Email clients (Outlook especially) ignore
+// <style> blocks, drop flexbox and grid, and collapse margins unpredictably —
+// tables with explicit widths and valign are the only layout that renders
+// consistently across them. responsiveHead only adds small-screen rules on top.
 //
 // html/template (not text/template) is used so free-text fields like RiskTitle
 // and Comment are escaped for HTML/URL context; several are user-supplied.
 var bodyTemplate = template.Must(template.New("riskEvent").Parse(`<html>
-<body style="margin:0; padding:0; background-color:#f4f5f7;">
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f5f7; padding:24px 12px;">
+` + responsiveHead + `<body style="margin:0; padding:0; background-color:#f4f5f7;">
+<table class="em-outer" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f5f7; padding:24px 12px;">
 <tr><td align="center">
-<table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px; background-color:#ffffff; border:1px solid #e1e4e8; border-radius:6px; font-family:Arial,Helvetica,sans-serif; font-size:14px; color:#1a1a1a;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%; max-width:600px; background-color:#ffffff; border:1px solid #e1e4e8; border-radius:6px; font-family:Arial,Helvetica,sans-serif; font-size:14px; color:#1a1a1a;">
 
-<tr><td style="padding:20px 24px 8px 24px; font-size:15px; line-height:1.5;">{{.Lead}}</td></tr>
+<tr><td class="em-pad" style="padding:20px 24px 8px 24px; font-size:15px; line-height:1.5;">{{.Lead}}</td></tr>
 
-<tr><td style="padding:8px 24px 4px 24px;">
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:14px;">
+<tr><td class="em-pad" style="padding:8px 24px 4px 24px;">
+<table class="em-kv" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:14px;">
 <tr>
 <td width="170" valign="top" style="padding:6px 12px 6px 0; color:#57606a;">Risk Code</td>
 <td valign="top" style="padding:6px 0; font-weight:bold;">{{.Info.RiskCode}}</td>
@@ -487,7 +488,7 @@ var bodyTemplate = template.Must(template.New("riskEvent").Parse(`<html>
 </table>
 </td></tr>
 
-{{if .Info.Comment}}<tr><td style="padding:12px 24px 4px 24px;">
+{{if .Info.Comment}}<tr><td class="em-pad" style="padding:12px 24px 4px 24px;">
 <table width="100%" cellpadding="0" cellspacing="0" border="0">
 <tr><td style="padding:12px 14px; background-color:#fff8e1; border-left:3px solid #f0ad4e; font-size:14px; line-height:1.5;">
 <span style="color:#57606a;">Comment</span><br>{{.Info.Comment}}
@@ -495,9 +496,9 @@ var bodyTemplate = template.Must(template.New("riskEvent").Parse(`<html>
 </table>
 </td></tr>{{end}}
 
-{{if .Actions}}<tr><td style="padding:16px 24px 4px 24px;">
+{{if .Actions}}<tr><td class="em-pad" style="padding:16px 24px 4px 24px;">
 <div style="font-weight:bold; font-size:14px; padding-bottom:8px; border-bottom:1px solid #e1e4e8;">Who needs to act</div>
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:14px;">
+<table class="em-kv" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:14px;">
 {{range .Actions}}<tr>
 <td width="170" valign="top" style="padding:10px 12px 10px 0; font-weight:bold;">{{.Role}}</td>
 <td valign="top" style="padding:10px 0;">
@@ -508,7 +509,7 @@ var bodyTemplate = template.Must(template.New("riskEvent").Parse(`<html>
 </table>
 </td></tr>{{end}}
 
-<tr><td style="padding:20px 24px 24px 24px;">
+<tr><td class="em-pad" style="padding:20px 24px 24px 24px;">
 <a href="{{.Info.DetailURL}}" style="display:inline-block; padding:10px 20px; background-color:#ff7300; color:#ffffff; text-decoration:none; border-radius:4px; font-weight:bold; font-size:14px;">View risk</a>
 </td></tr>
 

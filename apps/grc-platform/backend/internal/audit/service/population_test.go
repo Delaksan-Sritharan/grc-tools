@@ -226,6 +226,23 @@ func TestSubmitPopulationReusesOpenRound(t *testing.T) {
 	}
 }
 
+func TestSubmitPopulationIgnoresSampleFiles(t *testing.T) {
+	repo := newFakePopulationRepo(&model.AuditPopulation{ID: 1, Status: "PENDING"})
+	repo.addFile(1, "POPULATION", popFolder+"first.csv")
+	repo.addFile(1, "SAMPLE", popFolder+"sample/picked.csv")
+	svc := NewPopulationService(repo, blobStorage(t,
+		popFolder+"first.csv", popFolder+"sample/picked.csv", popFolder+"added.csv"))
+
+	got, err := svc.SubmitPopulation(context.Background(), 2, 7, 1, popFolder, "", "actor")
+	if err != nil {
+		t.Fatalf("SubmitPopulation: %v", err)
+	}
+	if got.FileCount != 2 || len(repo.files[1]) != 3 {
+		t.Errorf("FileCount = %d, round has %d files; want 2 population files and the sample left as it was",
+			got.FileCount, len(repo.files[1]))
+	}
+}
+
 func TestSubmitPopulationRejectsAnEarlierRound(t *testing.T) {
 	repo := newFakePopulationRepo(
 		&model.AuditPopulation{ID: 1, Status: "COMPLIANCE_REJECTED"},

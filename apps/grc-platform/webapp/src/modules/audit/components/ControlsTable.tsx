@@ -33,7 +33,7 @@ import { useState, type JSX, type ReactNode } from "react";
 import ControlStatusChip from "@modules/audit/components/ControlStatusChip";
 import UserAvatar from "@modules/audit/components/UserAvatar";
 import { formatAuditDate } from "@modules/audit/utils/format";
-import { CONTROL_STATUS_LABELS } from "@modules/audit/utils/controlStatus";
+import { CONTROL_STATUS_LABELS, isPopulationOverdue } from "@modules/audit/utils/controlStatus";
 import type { AuditControl, ControlStatus } from "@modules/audit/types/audit";
 
 // ── Column filter dropdown ──────────────────────────────────────────────────
@@ -331,9 +331,18 @@ function textCell(value: string | null | undefined): JSX.Element {
   return <Typography variant="body2" noWrap>{value ?? "—"}</Typography>;
 }
 
-function dateCell(date: string | null | undefined): JSX.Element {
+function dateCell(date: string | null | undefined, overdue = false): JSX.Element {
   return date ? (
-    <Typography variant="body2" noWrap>{formatAuditDate(date)}</Typography>
+    <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+      <Typography variant="body2" noWrap color={overdue ? "error.main" : "text.primary"} fontWeight={overdue ? 600 : 400}>
+        {formatAuditDate(date)}
+      </Typography>
+      {overdue && (
+        <Tooltip title="Overdue">
+          <AlertCircle size={14} color="var(--mui-palette-error-main, #d32f2f)" />
+        </Tooltip>
+      )}
+    </Box>
   ) : (
     <Typography variant="body2" color="text.secondary">—</Typography>
   );
@@ -448,23 +457,10 @@ export default function ControlsTable({
       filterKey: "scope", filterOptions: SCOPE_OPTIONS,
       render: (c) => <Typography variant="body2" noWrap>{SCOPE_LABELS[c.scope]}</Typography> },
     { id: "dueDate", label: "Due Date", minWidth: 110, sortField: "dueDate",
-      render: (c) => c.dueDate ? (
-        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-          <Typography variant="body2" noWrap color={c.isOverdue ? "error.main" : "text.primary"} fontWeight={c.isOverdue ? 600 : 400}>
-            {formatAuditDate(c.dueDate)}
-          </Typography>
-          {c.isOverdue && (
-            <Tooltip title="Overdue">
-              <AlertCircle size={14} color="var(--mui-palette-error-main, #d32f2f)" />
-            </Tooltip>
-          )}
-        </Box>
-      ) : (
-        <Typography variant="body2" color="text.secondary">—</Typography>
-      ) },
+      render: (c) => dateCell(c.dueDate, c.isOverdue) },
     // ── New population-phase columns (hidden by default) ──
     { id: "populationDueDate", label: "Population Due Date", minWidth: 150, sortField: "populationDueDate", defaultHidden: true,
-      render: (c) => dateCell(c.populationDueDate) },
+      render: (c) => dateCell(c.populationDueDate, isPopulationOverdue(c)) },
     { id: "populationOwnerName", label: "Population Owner", minWidth: 160, sortField: "populationOwnerName", defaultHidden: true,
       render: (c) => userCell(c.populationOwnerName) },
     { id: "populationTeamName", label: "Population Team", minWidth: 150, sortField: "populationTeamName", defaultHidden: true,

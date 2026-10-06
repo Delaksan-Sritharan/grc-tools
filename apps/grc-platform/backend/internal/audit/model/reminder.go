@@ -16,7 +16,7 @@
 
 package model
 
-// ReminderItem is one control or population line queued into an owner's
+// ReminderItem is one control or population line queued into a recipient's
 // daily due-date reminder digest — both what the email should display and
 // what the send-log needs to record it (for de-dup on future runs). Lives in
 // this package (not internal/audit/job or internal/audit/handler) so both
@@ -40,9 +40,8 @@ type ReminderItem struct {
 	DueDate         string
 	Tier            string
 	RequirementType string // "Evidence Requirement" | "Population Requirement"
-	// AuditName is the item's audit, for the "Audit: ..." line on the overdue
-	// admin alert (the owner digest can span audits, so it shows no such line
-	// and leaves this unused). Filled by the reminder job from the audit list
+	// AuditName is the item's audit: the "Audit: ..." line on the overdue
+	// admin alert, and each row's audit on a digest that spans audits. Filled by the reminder job from the audit list
 	// it already fetches to decide which audits are in scope, so naming the
 	// audit on every alert costs no extra lookups.
 	AuditName string
@@ -52,14 +51,21 @@ type ReminderItem struct {
 	// item (the table treats control_id/population_id as mutually exclusive) —
 	// this is always set, for both item kinds.
 	LinkControlID int
-	// OwnerUserID is the platform user id of whoever owns this item — the
-	// control's owner, or the population's. Carried so the overdue admin alert
-	// can name them; the owner digest doesn't need it (it IS their email).
-	OwnerUserID int
-	// OwnerName is OwnerUserID's resolved "Display Name (email)", filled in by
-	// the job once per sweep (deduped across every escalated item) rather than
-	// once per (admin, item) email — see ReminderJob.resolveOwnerNames.
-	OwnerName string
+	// WaitingOnUserID is the platform user id of the person this item is
+	// waiting on — an owner or the auditor. Zero when it is waiting on the
+	// admins as a group, or nobody is assigned.
+	WaitingOnUserID int
+	// WaitingOn names who the item is waiting on, for the admin escalation's
+	// per-row column: the person's "Display Name (email)" (filled in once per
+	// sweep, see ReminderJob.resolveUserNames), "Compliance Admins" or "Unassigned".
+	WaitingOn string
+	// Status is the control's status label, shown under WaitingOn.
+	Status string
+	// UnassignedNote flags a row an admin receives in place of a missing owner/auditor.
+	UnassignedNote string
+	// EscalatesToLead is true while the item is waiting on an owner's
+	// submission — the only items an owner's lead is told about.
+	EscalatesToLead bool
 	// DedupSnapshot is the date written to audit_notification.due_date_snapshot
 	// for this item's log row — distinct from DueDate (which is always the
 	// item's real due date, for display). For the DUE_10/DUE_5/DUE_TODAY tiers

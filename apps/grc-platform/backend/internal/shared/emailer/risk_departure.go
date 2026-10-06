@@ -64,36 +64,36 @@ type RiskDepartureInfo struct {
 // statuses.
 const blockingLabel = "Blocked — awaiting this person"
 
-// Deliberately old-fashioned HTML for the same reason bodyTemplate is: email
-// clients drop stylesheets and modern layout.
+// Table layout with inline styles for the same reason bodyTemplate is: many
+// email clients drop stylesheets and modern layout.
 var riskDepartureBody = template.Must(template.New("riskDeparture").Parse(`<html>
-<body style="margin:0; padding:0; background-color:#f4f5f7;">
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f5f7; padding:24px 12px;">
+` + responsiveHead + `<body style="margin:0; padding:0; background-color:#f4f5f7;">
+<table class="em-outer" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f5f7; padding:24px 12px;">
 <tr><td align="center">
-<table width="900" cellpadding="0" cellspacing="0" border="0" style="width:100%; max-width:900px; background-color:#ffffff; border:1px solid #e1e4e8; border-radius:6px; font-family:Arial,Helvetica,sans-serif; font-size:14px; color:#1a1a1a;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%; max-width:900px; background-color:#ffffff; border:1px solid #e1e4e8; border-radius:6px; font-family:Arial,Helvetica,sans-serif; font-size:14px; color:#1a1a1a;">
 
-<tr><td style="padding:20px 24px 8px 24px; font-size:15px; line-height:1.5;">The following people are no longer available in the identity directory. The risk work listed under each of them needs reassigning.</td></tr>
+<tr><td class="em-pad" style="padding:20px 24px 8px 24px; font-size:15px; line-height:1.5;">The following people are no longer available in the identity directory. The risk work listed under each of them needs reassigning.</td></tr>
 
 {{range .Groups}}
-<tr><td style="padding:16px 24px 0 24px; font-size:14px; font-weight:bold;">{{.Person}}</td></tr>
-<tr><td style="padding:8px 24px 4px 24px;">
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="table-layout:fixed; font-size:13px; border-collapse:collapse;">
-<tr style="color:#57606a; text-align:left;">
+<tr><td class="em-pad" style="padding:16px 24px 0 24px; font-size:14px; font-weight:bold;">{{.Person}}</td></tr>
+<tr><td class="em-pad" style="padding:8px 24px 4px 24px;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" class="em-rows" style="table-layout:fixed; font-size:13px; border-collapse:collapse;">
+<tr class="em-hdr" style="color:#57606a; text-align:left;">
 <td width="16%" style="padding:6px 8px; border-bottom:1px solid #e1e4e8; white-space:nowrap;">Risk</td>
 <td width="34%" style="padding:6px 8px; border-bottom:1px solid #e1e4e8;">Title</td>
 <td width="19%" style="padding:6px 8px; border-bottom:1px solid #e1e4e8;">Role</td>
 <td width="31%" style="padding:6px 8px; border-bottom:1px solid #e1e4e8;">Status</td>
 </tr>
 {{range .Items}}<tr>
-<td style="padding:6px 8px; border-bottom:1px solid #f0f0f0; font-weight:bold; word-break:break-word;">{{if .DetailURL}}<a href="{{.DetailURL}}" style="color:#ff7300; text-decoration:none;">{{.RiskCode}}</a>{{else}}{{.RiskCode}}{{end}}<br><span style="font-weight:normal; color:#57606a; font-size:12px;">{{.Register}}</span></td>
-<td style="padding:6px 8px; border-bottom:1px solid #f0f0f0; word-break:break-word; overflow-wrap:break-word;">{{.RiskTitle}}</td>
-<td style="padding:6px 8px; border-bottom:1px solid #f0f0f0; word-break:break-word;">{{.Role}}</td>
-<td style="padding:6px 8px; border-bottom:1px solid #f0f0f0; word-break:break-word;">{{.Status}}{{if .Blocking}}<br><span style="color:#b42318; font-weight:bold;">{{$.BlockingLabel}}</span>{{end}}</td>
+<td style="padding:6px 8px; border-bottom:1px solid #f0f0f0; font-weight:bold; word-break:break-word;"><span class="em-lbl" style="display:none; mso-hide:all;">Risk: </span>{{if .DetailURL}}<a href="{{.DetailURL}}" style="color:#ff7300; text-decoration:none;">{{.RiskCode}}</a>{{else}}{{.RiskCode}}{{end}}<br><span style="font-weight:normal; color:#57606a; font-size:12px;">{{.Register}}</span></td>
+<td style="padding:6px 8px; border-bottom:1px solid #f0f0f0; word-break:break-word; overflow-wrap:break-word;"><span class="em-lbl" style="display:none; mso-hide:all;">Title: </span>{{.RiskTitle}}</td>
+<td style="padding:6px 8px; border-bottom:1px solid #f0f0f0; word-break:break-word;"><span class="em-lbl" style="display:none; mso-hide:all;">Role: </span>{{.Role}}</td>
+<td style="padding:6px 8px; border-bottom:1px solid #f0f0f0; word-break:break-word;"><span class="em-lbl" style="display:none; mso-hide:all;">Status: </span>{{.Status}}{{if .Blocking}}<br><span style="color:#b42318; font-weight:bold;">{{$.BlockingLabel}}</span>{{end}}</td>
 </tr>{{end}}
 </table>
 </td></tr>{{end}}
 
-{{if .Info.DetailURL}}<tr><td style="padding:20px 24px 24px 24px;">
+{{if .Info.DetailURL}}<tr><td class="em-pad" style="padding:20px 24px 24px 24px;">
 <a href="{{.Info.DetailURL}}" style="display:inline-block; padding:10px 20px; background-color:#ff7300; color:#ffffff; text-decoration:none; border-radius:4px; font-weight:bold; font-size:14px;">View in Risk Hub</a>
 </td></tr>{{end}}
 

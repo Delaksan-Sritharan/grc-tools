@@ -240,9 +240,10 @@ func TestRunOnceBatchesControlAndPopulationIntoOneDigestPerOwner(t *testing.T) {
 
 	audits := &fakeAudits{audits: []*model.Audit{{ID: 1, Status: "ACTIVE"}}}
 	controls := &fakeControls{controls: []*model.AuditControl{
+		{ID: 10, AuditID: 1, ControlNumber: "C-10", OwnerID: intPtr(300), Status: "EVIDENCE_PENDING", DueDate: strPtr(dueSoon)},
 		{
-			ID: 10, AuditID: 1, ControlNumber: "C-10",
-			OwnerID: intPtr(300), Status: "EVIDENCE_PENDING", DueDate: strPtr(dueSoon),
+			ID: 11, AuditID: 1, ControlNumber: "C-11",
+			OwnerID: intPtr(999), Status: "POPULATION_PENDING", DueDate: strPtr(dueSoon),
 			PopulationID: intPtr(900), PopulationOwnerID: intPtr(300), PopulationStatus: strPtr("PENDING"), PopulationDueDate: strPtr(overdue),
 		},
 	}}
@@ -266,7 +267,7 @@ func TestRunOnceBatchesControlAndPopulationIntoOneDigestPerOwner(t *testing.T) {
 		t.Fatalf("notify called %d times, want exactly 1 (one combined digest per owner)", calls)
 	}
 	if len(gotItems) != 2 {
-		t.Fatalf("digest has %d items, want 2 (one control, one population)", len(gotItems))
+		t.Fatalf("digest has %d items, want 2 (one evidence item, one population item)", len(gotItems))
 	}
 	kinds := map[string]bool{}
 	for _, it := range gotItems {
@@ -332,9 +333,10 @@ func TestRunOnceOverdueItemHasCorrectFields(t *testing.T) {
 
 	audits := &fakeAudits{audits: []*model.Audit{{ID: 1, Status: "ACTIVE"}}}
 	controls := &fakeControls{controls: []*model.AuditControl{
+		{ID: 11, AuditID: 1, ControlNumber: "C-11", Description: "Control desc", OwnerID: intPtr(500), Status: "EVIDENCE_PENDING", DueDate: strPtr(controlOverdue)},
 		{
-			ID: 11, AuditID: 1, ControlNumber: "C-11", Description: "Control desc",
-			OwnerID: intPtr(500), Status: "EVIDENCE_PENDING", DueDate: strPtr(controlOverdue),
+			ID: 12, AuditID: 1, ControlNumber: "C-12", Description: "Control desc",
+			OwnerID: intPtr(500), Status: "POPULATION_PENDING", DueDate: strPtr(controlOverdue),
 			PopulationID: intPtr(950), PopulationOwnerID: intPtr(501), PopulationStatus: strPtr("PENDING"), PopulationDueDate: strPtr(popOverdue),
 		},
 	}}
@@ -567,10 +569,10 @@ func adminsFn(ids ...int) func(context.Context) ([]int, error) {
 	return func(context.Context) ([]int, error) { return ids, nil }
 }
 
-// ownerNamesFn returns a resolveOwnerNames stub that also records every call
+// userNamesFn returns a resolveUserNames stub that also records every call
 // (and the ids it was asked to resolve), so tests can assert the escalation
 // resolves owners once per sweep rather than once per email.
-func ownerNamesFn(names map[int]string, calls *[][]int) func(context.Context, []int) map[int]string {
+func userNamesFn(names map[int]string, calls *[][]int) func(context.Context, []int) map[int]string {
 	return func(_ context.Context, ownerIDs []int) map[int]string {
 		*calls = append(*calls, append([]int(nil), ownerIDs...))
 		return names
@@ -586,16 +588,17 @@ func TestRunOnceEscalatesOverdueToEveryAdmin(t *testing.T) {
 
 	audits := &fakeAudits{audits: []*model.Audit{{ID: 1, Status: "ACTIVE", Name: "SOC2 Asgardeo 2026"}}}
 	controls := &fakeControls{controls: []*model.AuditControl{
+		{ID: 30, AuditID: 1, ControlNumber: "C-30", Description: "Access reviews", OwnerID: intPtr(700), Status: "EVIDENCE_PENDING", DueDate: strPtr(overdue)},
 		{
-			ID: 30, AuditID: 1, ControlNumber: "C-30", Description: "Access reviews",
-			OwnerID: intPtr(700), Status: "EVIDENCE_PENDING", DueDate: strPtr(overdue),
+			ID: 31, AuditID: 1, ControlNumber: "C-31", Description: "Access reviews",
+			OwnerID: intPtr(700), Status: "POPULATION_PENDING", DueDate: strPtr(overdue),
 			PopulationID: intPtr(970), PopulationOwnerID: intPtr(701), PopulationStatus: strPtr("PENDING"), PopulationDueDate: strPtr(overdue),
 		},
 	}}
 	dedup := &fakeClaimer{claimed: map[string]bool{}}
 	sink := &adminSink{}
 	var resolveCalls [][]int
-	resolve := ownerNamesFn(map[int]string{700: "Owner 700 (o700@x.com)", 701: "Owner 701 (o701@x.com)"}, &resolveCalls)
+	resolve := userNamesFn(map[int]string{700: "Owner 700 (o700@x.com)", 701: "Owner 701 (o701@x.com)"}, &resolveCalls)
 
 	j := NewReminderJob(audits, controls, dedup, func(context.Context, int, []model.ReminderItem) error { return nil }).
 		WithAdminAlerts(adminsFn(900, 901), sink.notify, resolve)
@@ -603,7 +606,7 @@ func TestRunOnceEscalatesOverdueToEveryAdmin(t *testing.T) {
 		t.Fatalf("runOnce: %v", err)
 	}
 
-	// Both overdue items (control + population) share audit 1, so each of the
+	// Both overdue items (one evidence, one population) share audit 1, so each of the
 	// 2 admins gets exactly one digest, not one email per item.
 	if len(sink.alerts) != 2 {
 		t.Fatalf("admin digests = %d, want 2 (1 per admin)", len(sink.alerts))
@@ -614,7 +617,7 @@ func TestRunOnceEscalatesOverdueToEveryAdmin(t *testing.T) {
 	for _, a := range sink.alerts {
 		perAdmin[a.adminID] = len(a.items)
 		if len(a.items) != 2 {
-			t.Errorf("admin %d digest items = %d, want 2 (the control and its population)", a.adminID, len(a.items))
+			t.Errorf("admin %d digest items = %d, want 2 (the evidence item and the population item)", a.adminID, len(a.items))
 		}
 		for _, it := range a.items {
 			if it.Type != "REMINDER_OVERDUE" {
@@ -626,12 +629,16 @@ func TestRunOnceEscalatesOverdueToEveryAdmin(t *testing.T) {
 			// LinkControlID must be set for BOTH kinds — a population item's
 			// ControlID stays nil (it's the log row's mutually-exclusive
 			// column), but the email still deep-links to the owning control.
-			if it.LinkControlID != 30 {
-				t.Errorf("item LinkControlID = %d, want 30", it.LinkControlID)
+			wantLink := 30
+			if it.PopulationID != nil {
+				wantLink = 31
 			}
-			owners[it.OwnerUserID] = true
-			if it.OwnerName != wantOwnerNames[it.OwnerUserID] {
-				t.Errorf("item OwnerName for owner %d = %q, want %q", it.OwnerUserID, it.OwnerName, wantOwnerNames[it.OwnerUserID])
+			if it.LinkControlID != wantLink {
+				t.Errorf("item LinkControlID = %d, want %d", it.LinkControlID, wantLink)
+			}
+			owners[it.WaitingOnUserID] = true
+			if it.WaitingOn != wantOwnerNames[it.WaitingOnUserID] {
+				t.Errorf("item WaitingOn for user %d = %q, want %q", it.WaitingOnUserID, it.WaitingOn, wantOwnerNames[it.WaitingOnUserID])
 			}
 		}
 	}
@@ -639,21 +646,21 @@ func TestRunOnceEscalatesOverdueToEveryAdmin(t *testing.T) {
 		t.Errorf("items per admin digest = %v, want 2 each", perAdmin)
 	}
 	if !owners[700] || !owners[701] {
-		t.Errorf("item OwnerUserIDs = %v, want both the control owner (700) and the population owner (701)", owners)
+		t.Errorf("item WaitingOnUserIDs = %v, want both the control owner (700) and the population owner (701)", owners)
 	}
 
 	// 2 digests x 2 items each must still resolve owner names in exactly one
 	// deduped call — the bug this test guards against re-resolved the owner
 	// once per admin per item.
 	if len(resolveCalls) != 1 {
-		t.Fatalf("resolveOwnerNames calls = %d, want 1 (resolved once per sweep, not per digest)", len(resolveCalls))
+		t.Fatalf("resolveUserNames calls = %d, want 1 (resolved once per sweep, not per digest)", len(resolveCalls))
 	}
 	gotIDs := map[int]bool{}
 	for _, id := range resolveCalls[0] {
 		gotIDs[id] = true
 	}
 	if len(resolveCalls[0]) != 2 || !gotIDs[700] || !gotIDs[701] {
-		t.Errorf("resolveOwnerNames called with ids %v, want exactly [700 701] (deduped)", resolveCalls[0])
+		t.Errorf("resolveUserNames called with ids %v, want exactly [700 701] (deduped)", resolveCalls[0])
 	}
 }
 
@@ -1027,7 +1034,7 @@ func TestRunOnceFailedLeadEscalationDoesNotReleaseOwnerClaims(t *testing.T) {
 // A panicking lead escalation must not undo the owner's digest. The owner's
 // email is already sent by the time the lead is notified, so releasing their
 // claims would re-send that digest tomorrow for items they were already told
-// about — the delete from byOwner has to happen before the lead send, not after.
+// about — the delete from byRecipient has to happen before the lead send, not after.
 func TestRunOncePanickingLeadEscalationDoesNotReleaseOwnerClaims(t *testing.T) {
 	today := time.Now().UTC()
 	overdue := today.AddDate(0, 0, -1).Format("2006-01-02")

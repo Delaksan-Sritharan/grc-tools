@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/apierror"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
@@ -278,8 +279,35 @@ func (s *controlService) BulkAdd(ctx context.Context, auditID int, reqs []model.
 	if err != nil {
 		return nil, err
 	}
+	s.recordCreatedTrails(ctx, auditID, created, createdBy)
 	s.enrichNames(ctx, created)
 	return created, nil
+}
+
+// bulkTrailConcurrency caps the parallel trail writes after a bulk add: the
+// trail API appends one entry per call, and a full batch is maxBulkControls.
+const bulkTrailConcurrency = 8
+
+// recordCreatedTrails writes the same CREATED entry Add records, for every
+// control of a bulk add, so each control's history starts with its creation.
+func (s *controlService) recordCreatedTrails(ctx context.Context, auditID int, controls []*model.AuditControl, createdBy string) {
+	if s.trail == nil {
+		return
+	}
+	sem := make(chan struct{}, bulkTrailConcurrency)
+	var wg sync.WaitGroup
+	for _, c := range controls {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(c *model.AuditControl) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			s.recordTrail(ctx, auditID, c.ID, "CREATED", createdBy, map[string]any{
+				"controlNumber": c.ControlNumber,
+			})
+		}(c)
+	}
+	wg.Wait()
 }
 
 // ControlUpdateResult reports what Update changed, so the caller (the

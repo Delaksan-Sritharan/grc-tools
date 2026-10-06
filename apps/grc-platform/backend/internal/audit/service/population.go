@@ -123,6 +123,21 @@ func (s *populationService) recordedPaths(ctx context.Context, rounds []*model.A
 	return recorded, onCurrent, nil
 }
 
+// directBlobs keeps only the blobs sitting directly in folderPath. The listing
+// is a flat prefix match, and the sample folder is nested inside the population
+// folder, so without this a population submit would record the control's sample
+// files as population files too.
+func directBlobs(blobs []file.BlobItem, folderPath string) []file.BlobItem {
+	prefix := strings.TrimSuffix(folderPath, "/") + "/"
+	out := make([]file.BlobItem, 0, len(blobs))
+	for _, blob := range blobs {
+		if rest, ok := strings.CutPrefix(blob.Name, prefix); ok && !strings.Contains(rest, "/") {
+			out = append(out, blob)
+		}
+	}
+	return out
+}
+
 // unrecordedBlobs drops the blobs already in recorded.
 func unrecordedBlobs(blobs []file.BlobItem, recorded map[string]bool) []file.BlobItem {
 	out := make([]file.BlobItem, 0, len(blobs))
@@ -167,7 +182,7 @@ func (s *populationService) SubmitPopulation(ctx context.Context, auditID, contr
 	if err != nil {
 		return nil, err
 	}
-	newBlobs := unrecordedBlobs(blobs, recorded)
+	newBlobs := unrecordedBlobs(directBlobs(blobs, folderPath), recorded)
 
 	rejected := model.IsRejectedPopulationStatus(current.Status)
 	if rejected {
