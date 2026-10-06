@@ -215,6 +215,17 @@ func run(ctx context.Context, cfg Config) int {
 
 	if cfg.DryRun {
 		log.Info("dry run — no writes", "migratable", len(pending), "rejected", len(rows)-len(pending))
+		// Which migratable rows already have a risk, so the summary does not
+		// hand their numbers out again. Search only; a dry run reads grants for
+		// nobody.
+		existing, err := existingRisks(ctx, ec, pending)
+		if err != nil {
+			log.Error("could not look up existing risks — aborting", "err", err)
+			return exitStructural
+		}
+		if err := summarizeCustomers(ctx, log, ec, refs, pending, existing, rep); err != nil {
+			return exitStructural
+		}
 		rep.Emit(os.Stdout)
 		if rep.HasFindings() {
 			return exitFindings
@@ -231,6 +242,16 @@ func run(ctx context.Context, cfg Config) int {
 
 	// reconstructState may reject rows that collide on the natural key.
 	rejected := rep.RejectedMigrationIDs()
+
+	toWrite := make([]Row, 0, len(pending))
+	for _, row := range pending {
+		if _, bad := rejected[row.MigrationID]; !bad {
+			toWrite = append(toWrite, row)
+		}
+	}
+	if err := summarizeCustomers(ctx, log, ec, refs, toWrite, progress, rep); err != nil {
+		return exitStructural
+	}
 
 	// ── Write, in Migration ID order (§9) ───────────────────────────────────
 	for _, row := range pending {
@@ -337,6 +358,20 @@ func preflight(ctx context.Context, cfg Config, ec *EntityClient, sc *SCIMClient
 		return RefData{}, nil, err
 	}
 	return rd, users, nil
+}
+
+// summarizeCustomers fills the report's per-customer block: how many risks each
+// customer gets and the first and last risk code the run would assign. Read-only,
+// so it runs on a dry run too; the numbers are read once, before anything is
+// written.
+func summarizeCustomers(ctx context.Context, log *slog.Logger, ec *EntityClient, rd RefData, rows []Row, progress map[int]ResumeState, rep *Report) error {
+	summaries, err := computeCustomerSummaries(ctx, ec, rd, rows, progress)
+	if err != nil {
+		log.Error("could not compute the per-customer summary — aborting", "err", err)
+		return err
+	}
+	rep.SetCustomerSummaries(summaries)
+	return nil
 }
 
 // selectMigratable returns the rows with no REJECT finding, in Migration ID order.

@@ -237,6 +237,12 @@ func mapRow(rec []string, idx map[string]int, line int, refs RefData) (Row, []Fi
 		fs = append(fs, Finding{MigrationID: row.MigrationID, CSVRow: line, RiskTitle: title,
 			Severity: SevReject, Failure: field, Detail: detail})
 	}
+	// rejectLookup is reject plus the offending value and why it was refused, so
+	// the report can group them (Finding.Problem).
+	rejectLookup := func(field, detail, value, problem string) {
+		fs = append(fs, Finding{MigrationID: row.MigrationID, CSVRow: line, RiskTitle: title,
+			Severity: SevReject, Failure: field, Detail: detail, Value: value, Problem: problem})
+	}
 	warn := func(field, detail string) {
 		fs = append(fs, Finding{MigrationID: row.MigrationID, CSVRow: line, RiskTitle: title,
 			Severity: SevWarn, Failure: field, Detail: detail})
@@ -408,8 +414,8 @@ func mapRow(rec []string, idx map[string]int, line int, refs RefData) (Row, []Fi
 	row.Customer = strings.TrimSpace(get(rec, idx, "Customer"))
 	if row.Customer == "" {
 		reject("Customer", "empty")
-	} else if id, bad := lookupID(refs.CustomerIDByName, refs, lookupCustomer, row.Customer); bad != "" {
-		reject("Customer", bad)
+	} else if id, problem, detail := lookupID(refs.CustomerIDByName, refs, lookupCustomer, row.Customer); problem != "" {
+		rejectLookup("Customer", detail, row.Customer, problem)
 	} else {
 		row.CustomerID = id
 	}
@@ -417,8 +423,8 @@ func mapRow(rec []string, idx map[string]int, line int, refs RefData) (Row, []Fi
 	row.DeploymentType = strings.TrimSpace(get(rec, idx, "Deployment Type"))
 	if row.DeploymentType == "" {
 		reject("Deployment Type", "empty")
-	} else if id, bad := lookupID(refs.DeploymentTypeIDByName, refs, lookupDeploymentType, row.DeploymentType); bad != "" {
-		reject("Deployment Type", bad)
+	} else if id, problem, detail := lookupID(refs.DeploymentTypeIDByName, refs, lookupDeploymentType, row.DeploymentType); problem != "" {
+		rejectLookup("Deployment Type", detail, row.DeploymentType, problem)
 	} else {
 		row.DeploymentTypeID = id
 	}
@@ -428,8 +434,8 @@ func mapRow(rec []string, idx map[string]int, line int, refs RefData) (Row, []Fi
 		reject("Product", "empty — at least one product is required")
 	}
 	for _, p := range row.Products {
-		if id, bad := lookupID(refs.ProductIDByName, refs, lookupProduct, p); bad != "" {
-			reject("Product", bad)
+		if id, problem, detail := lookupID(refs.ProductIDByName, refs, lookupProduct, p); problem != "" {
+			rejectLookup("Product", detail, p, problem)
 		} else {
 			row.ProductIDs = append(row.ProductIDs, id)
 		}
@@ -443,7 +449,7 @@ func mapRow(rec []string, idx map[string]int, line int, refs RefData) (Row, []Fi
 		if env, ok := environmentByName[normHeader(e)]; ok {
 			row.Environments = append(row.Environments, env)
 		} else {
-			reject("Environment", fmt.Sprintf("%q is not one of Production, Non-Production, DR", e))
+			rejectLookup("Environment", fmt.Sprintf("%q is not one of Production, Non-Production, DR", e), e, ProblemUnknown)
 		}
 	}
 
@@ -460,17 +466,18 @@ var environmentByName = map[string]string{
 }
 
 // lookupID resolves one value against a lookup map keyed by normHeader(name).
-// It returns a human-readable problem (never both an id and a problem) so the
-// REJECT names the exact value the admins need to add or the sheet owner fix.
-func lookupID(m map[string]int, refs RefData, kind, name string) (int, string) {
+// A failure returns the problem (ProblemUnknown | ProblemInactive) and a
+// human-readable detail, never an id, so the REJECT names the exact value the
+// admins need to add or the sheet owner fix.
+func lookupID(m map[string]int, refs RefData, kind, name string) (id int, problem, detail string) {
 	key := normHeader(name)
 	if id, ok := m[key]; ok {
-		return id, ""
+		return id, "", ""
 	}
 	if refs.InactiveLookup[kind+":"+key] {
-		return 0, fmt.Sprintf("%s %q is inactive — reactivate it in the Admin Console", kind, name)
+		return 0, ProblemInactive, fmt.Sprintf("%s %q is inactive - reactivate it in the Admin Console", kind, name)
 	}
-	return 0, fmt.Sprintf("unknown %s %q", kind, name)
+	return 0, ProblemUnknown, fmt.Sprintf("unknown %s %q", kind, name)
 }
 
 // dedupeFold drops repeats, ignoring case and inner spacing, keeping first-seen

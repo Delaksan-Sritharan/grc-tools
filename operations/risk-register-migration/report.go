@@ -47,7 +47,17 @@ type Finding struct {
 	// Value is the raw offending token when there is one — an unresolvable
 	// email, an unknown reference. Feeds the report's "unresolved people" list.
 	Value string
+	// Problem says why a lookup value was refused, so the report can group the
+	// values the admins must add (ProblemUnknown) apart from those they must
+	// reactivate (ProblemInactive). Empty for every other kind of finding.
+	Problem string
 }
+
+// Lookup problems (Finding.Problem).
+const (
+	ProblemUnknown  = "unknown"
+	ProblemInactive = "inactive"
+)
 
 // personColumns are the Failure codes whose Value is an unresolvable email.
 var personColumns = map[string]bool{
@@ -66,6 +76,8 @@ type Report struct {
 	grantsWritten          int
 	assessmentsWritten     int
 	suppressingEscalations []int // Migration IDs that got a D8 suppressing escalation
+
+	customerSummaries []CustomerSummary
 }
 
 func NewReport() *Report { return &Report{migratedByBucket: map[string]int{}} }
@@ -80,6 +92,10 @@ func (r *Report) Migrated(bucket string) {
 }
 
 func (r *Report) Skipped() { r.skipped++ }
+
+// SetCustomerSummaries stores the per-customer summary (summary.go) for the
+// report.txt block.
+func (r *Report) SetCustomerSummaries(s []CustomerSummary) { r.customerSummaries = s }
 
 func (r *Report) GrantWritten() { r.grantsWritten++ }
 
@@ -187,6 +203,9 @@ func (r *Report) emitNarrative(w io.Writer) {
 			fmt.Fprintf(w, "  %4d  %s\n", row.n, row.k)
 		}
 	}
+
+	r.emitLookupProblems(w)
+	r.emitCustomerSummaries(w)
 
 	// Distinct unresolved people.
 	emails := map[string]struct{}{}

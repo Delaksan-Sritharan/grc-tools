@@ -25,6 +25,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -600,6 +601,22 @@ func buildRefData(teams []RiskTeam, cats []RiskCategory, scores []RiskScore, rol
 		rd.RoleIDByName[want] = r.ID
 	}
 	return rd, nil
+}
+
+// NextSequenceNumber wraps GET /risks/next-sequence-number: the number the next
+// risk of this customer in this register will get (1 when there is none yet).
+// Read-only. The entity requires customerId for a Managed Services register.
+func (e *EntityClient) NextSequenceNumber(ctx context.Context, sourceRegisterID, customerID int) (int, error) {
+	q := url.Values{}
+	q.Set("sourceRegisterId", strconv.Itoa(sourceRegisterID))
+	q.Set("customerId", strconv.Itoa(customerID))
+	var resp struct {
+		NextSequenceNumber int `json:"nextSequenceNumber"`
+	}
+	if err := e.do(ctx, http.MethodGet, "/risks/next-sequence-number?"+q.Encode(), nil, &resp); err != nil {
+		return 0, err
+	}
+	return resp.NextSequenceNumber, nil
 }
 
 // SearchRisks is a faithful wrapper over POST /risks/search. Resume-state logic
