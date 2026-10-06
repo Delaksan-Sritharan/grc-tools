@@ -139,6 +139,13 @@ type fakeEntity struct {
 	// customerNames resolves CreateRiskRequest.CustomerID to the name /risks/search
 	// returns (domain.Risk.CustomerName). Matches fixtureRefData's customers.
 	customerNames map[int]string
+	// nextSeq is each customer's next risk number for GET
+	// /risks/next-sequence-number; nextSeqCalls counts the reads.
+	nextSeq      map[int]int
+	nextSeqCalls int
+	// complianceRefsByRisk lets a verify test plant a compliance reference the
+	// entity would never have accepted on a Managed Services risk.
+	complianceRefsByRisk map[int][]int
 
 	nextRiskID int
 	nextUserID int
@@ -154,9 +161,10 @@ func newFakeEntity(t *testing.T) *fakeEntity {
 		t: t, risks: map[int]*Risk{}, escalations: map[int][]Escalation{},
 		planStatus: map[int]string{}, grants: map[int][]Grant{}, assessments: map[int][]Assessment{}, users: map[string]int{},
 		createReqByRisk: map[int]CreateRiskRequest{}, complianceApprovalDate: map[int]string{},
-		planCompletedDate: map[int]string{},
-		customerNames:     map[int]string{20: "BankOne", 21: "Bank Of China"},
-		nextRiskID:        1000, nextUserID: 500,
+		planCompletedDate:    map[int]string{},
+		customerNames:        map[int]string{20: "BankOne", 21: "Bank Of China"},
+		complianceRefsByRisk: map[int][]int{},
+		nextRiskID:           1000, nextUserID: 500,
 	}
 }
 
@@ -196,6 +204,15 @@ func (fe *fakeEntity) handle(w http.ResponseWriter, r *http.Request) {
 			all = append(all, *rk)
 		}
 		_ = enc.Encode(map[string]any{"risks": all, "total": len(all), "limit": 100, "offset": 0})
+
+	case r.Method == http.MethodGet && p == "/risks/next-sequence-number":
+		fe.nextSeqCalls++
+		cust, _ := strconv.Atoi(r.URL.Query().Get("customerId"))
+		n, ok := fe.nextSeq[cust]
+		if !ok {
+			n = 1
+		}
+		_ = enc.Encode(map[string]int{"nextSequenceNumber": n})
 
 	case r.Method == http.MethodGet && strings.HasPrefix(p, "/users/by-uuid/"):
 		uuid := strings.TrimPrefix(p, "/users/by-uuid/")
@@ -271,7 +288,11 @@ func (fe *fakeEntity) handle(w http.ResponseWriter, r *http.Request) {
 			"gitIssueUrl": body.GitIssueURL, "emailSubject": body.EmailSubject, "remarks": body.Remarks,
 			"createdBy":            body.CreatedBy,
 			"grossScore":           map[string]any{"likelihood": body.Likelihood, "impact": body.Impact},
-			"complianceReferences": []any{},
+			"complianceReferences": fakeIDRefs(fe.complianceRefsByRisk[id]),
+			"customer":             fakeOptionalRef(body.CustomerID),
+			"deploymentType":       fakeOptionalRef(body.DeploymentTypeID),
+			"products":             fakeIDRefs(body.ProductIDs),
+			"environments":         body.Environments,
 			"riskCategories":       fakeIDRefs(body.RiskCategoryIDs),
 			"actionPlan": map[string]any{
 				"id": fe.planID(id), "actionOwnerId": body.ActionOwnerID,
@@ -375,6 +396,14 @@ func fakeIDRefs(ids []int) []map[string]any {
 		out[i] = map[string]any{"id": id}
 	}
 	return out
+}
+
+// fakeOptionalRef is a single lookup value as /detail shapes it, or null.
+func fakeOptionalRef(id *int) any {
+	if id == nil {
+		return nil
+	}
+	return map[string]any{"id": *id}
 }
 
 // fakeActionSteps mirrors the entity's step_no assignment: 1-based, by

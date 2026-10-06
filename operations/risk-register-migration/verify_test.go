@@ -212,6 +212,64 @@ func TestVerifyRow_DetectsFieldMismatches(t *testing.T) {
 			wantField: "Risk Category",
 		},
 		{
+			name: "customer diverged",
+			row:  verifyBaseRow(),
+			tamper: func(fe *fakeEntity, riskID int) {
+				req := fe.createReqByRisk[riskID]
+				req.CustomerID = intptr(21) // row was created for 20
+				fe.createReqByRisk[riskID] = req
+			},
+			wantField: "Customer",
+		},
+		{
+			name: "customer missing",
+			row:  verifyBaseRow(),
+			tamper: func(fe *fakeEntity, riskID int) {
+				req := fe.createReqByRisk[riskID]
+				req.CustomerID = nil
+				fe.createReqByRisk[riskID] = req
+			},
+			wantField: "Customer",
+		},
+		{
+			name: "deployment type diverged",
+			row:  verifyBaseRow(),
+			tamper: func(fe *fakeEntity, riskID int) {
+				req := fe.createReqByRisk[riskID]
+				req.DeploymentTypeID = intptr(61) // row was created with 60
+				fe.createReqByRisk[riskID] = req
+			},
+			wantField: "Deployment Type",
+		},
+		{
+			name: "product set diverged",
+			row:  verifyBaseRow(),
+			tamper: func(fe *fakeEntity, riskID int) {
+				req := fe.createReqByRisk[riskID]
+				req.ProductIDs = []int{50} // row has 50 and 51
+				fe.createReqByRisk[riskID] = req
+			},
+			wantField: "Product",
+		},
+		{
+			name: "environment set diverged",
+			row:  verifyBaseRow(),
+			tamper: func(fe *fakeEntity, riskID int) {
+				req := fe.createReqByRisk[riskID]
+				req.Environments = []string{"PRODUCTION", "DR"} // row has PRODUCTION only
+				fe.createReqByRisk[riskID] = req
+			},
+			wantField: "Environment",
+		},
+		{
+			name: "compliance reference unexpectedly present",
+			row:  verifyBaseRow(),
+			tamper: func(fe *fakeEntity, riskID int) {
+				fe.complianceRefsByRisk[riskID] = []int{40}
+			},
+			wantField: "Security Compliance Reference",
+		},
+		{
 			name: "action steps diverged",
 			row:  verifyBaseRow(),
 			tamper: func(fe *fakeEntity, riskID int) {
@@ -525,5 +583,28 @@ func TestVerifyMigration_ExtraGrantDetectedEvenWhenRowNowRejected(t *testing.T) 
 	}
 	if !found {
 		t.Errorf("findings = %+v, want a MISMATCH 'unexpected grant' for the now-orphaned owner grant", rep.findings)
+	}
+}
+
+// TestVerifyRow_EnvironmentAndProductOrderDoesNotMatter: the entity returns
+// the sets in its own order, so a different order is not a mismatch.
+func TestVerifyRow_EnvironmentAndProductOrderDoesNotMatter(t *testing.T) {
+	rd := fixtureRefData(t)
+	row := verifyBaseRow()
+	row.ProductIDs = []int{50, 51}
+	row.Environments = []string{"PRODUCTION", "DR"}
+	fe, ec, riskID := setupVerifyFixture(t, rd, row)
+
+	req := fe.createReqByRisk[riskID]
+	req.ProductIDs = []int{51, 50}
+	req.Environments = []string{"DR", "PRODUCTION"}
+	fe.createReqByRisk[riskID] = req
+
+	got, err := verifyRow(context.Background(), ec, rd, "2026-09-15", row, riskID, map[int][]Grant{})
+	if err != nil {
+		t.Fatalf("verifyRow: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("reordered sets must not mismatch: %+v", got)
 	}
 }

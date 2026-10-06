@@ -668,7 +668,14 @@ type RiskDetail struct {
 	Remarks                *string `json:"remarks"`
 	CreatedBy              string  `json:"createdBy"`
 
-	GrossScore           *RiskScore            `json:"grossScore"`
+	GrossScore *RiskScore `json:"grossScore"`
+	// Managed Services template values (domain.RiskDetail): Customer and
+	// DeploymentType are null and the lists empty on a template that lacks them.
+	Customer       *RiskLookup  `json:"customer"`
+	DeploymentType *RiskLookup  `json:"deploymentType"`
+	Products       []RiskLookup `json:"products"`
+	Environments   []string     `json:"environments"`
+
 	ComplianceReferences []ComplianceRef       `json:"complianceReferences"`
 	RiskCategories       []RiskCategory        `json:"riskCategories"`
 	ActionPlan           *RiskActionPlanDetail `json:"actionPlan"`

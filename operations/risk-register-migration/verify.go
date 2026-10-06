@@ -322,6 +322,17 @@ func verifyRow(ctx context.Context, ec *EntityClient, rd RefData, migrationDate 
 		}
 	}
 
+	// Managed Services template fields: single values compared by id (a renamed
+	// customer must not read as a mismatch), the two sets without regard to the
+	// order the entity returns them in.
+	add("Customer", strconv.Itoa(row.CustomerID), lookupRefID(detail.Customer))
+	add("Deployment Type", strconv.Itoa(row.DeploymentTypeID), lookupRefID(detail.DeploymentType))
+	if diff := diffIntSets(row.ProductIDs, lookupIDs(detail.Products)); diff != "" {
+		out = append(out, fieldMismatch{"Product", fmt.Sprint(row.ProductIDs), diff})
+	}
+	if diff := diffStringSets(row.Environments, detail.Environments); diff != "" {
+		out = append(out, fieldMismatch{"Environment", fmt.Sprint(row.Environments), diff})
+	}
 	if diff := diffIntSets(nil, complianceRefIDs(detail.ComplianceReferences)); diff != "" {
 		out = append(out, fieldMismatch{"Security Compliance Reference", "none", diff})
 	}
@@ -399,6 +410,51 @@ func standardPlanCompletedDate(plans []ActionPlanView) string {
 		}
 	}
 	return ""
+}
+
+// lookupRefID renders a single lookup value's id for comparison, or "none".
+func lookupRefID(l *RiskLookup) string {
+	if l == nil {
+		return "none"
+	}
+	return strconv.Itoa(l.ID)
+}
+
+func lookupIDs(ls []RiskLookup) []int {
+	ids := make([]int, len(ls))
+	for i, l := range ls {
+		ids[i] = l.ID
+	}
+	return ids
+}
+
+// diffStringSets is diffIntSets for strings.
+func diffStringSets(want, got []string) string {
+	ws := map[string]bool{}
+	for _, w := range want {
+		ws[w] = true
+	}
+	gs := map[string]bool{}
+	for _, g := range got {
+		gs[g] = true
+	}
+	var missing, extra []string
+	for w := range ws {
+		if !gs[w] {
+			missing = append(missing, w)
+		}
+	}
+	for g := range gs {
+		if !ws[g] {
+			extra = append(extra, g)
+		}
+	}
+	if len(missing) == 0 && len(extra) == 0 {
+		return ""
+	}
+	sort.Strings(missing)
+	sort.Strings(extra)
+	return fmt.Sprintf("missing=%v extra=%v", missing, extra)
 }
 
 func complianceRefIDs(refs []ComplianceRef) []int {
