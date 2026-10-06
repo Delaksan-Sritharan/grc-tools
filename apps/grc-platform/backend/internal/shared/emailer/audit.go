@@ -181,9 +181,11 @@ const optionalColumnWidth = 19
 // Role column cannot drift from what DescriptionWidth subtracted for it.
 func (i AuditEventInfo) OptionalColumnWidth() int { return optionalColumnWidth }
 
-// RequirementWidth narrows when a Role column shares the row.
+// RequirementWidth narrows when a Role column shares the row, or when the
+// widened audit-name control column and a Status column would otherwise
+// squeeze Description.
 func (i AuditEventInfo) RequirementWidth() int {
-	if i.ShowRole {
+	if i.ShowRole || (i.ShowAudit && i.ShowStatus) {
 		return 20
 	}
 	return 29

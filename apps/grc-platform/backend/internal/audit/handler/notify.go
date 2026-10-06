@@ -256,6 +256,7 @@ func (d *Deps) SendReminderDigestSync(ctx context.Context, ownerUserID int, item
 			DueDate:         it.DueDate,
 			Tier:            it.Tier,
 			RequirementType: it.RequirementType,
+			Audit:           it.AuditName,
 		})
 	}
 
@@ -289,6 +290,8 @@ func (d *Deps) SendReminderDigestSync(ctx context.Context, ownerUserID int, item
 		// due-in-5, and overdue items all together) — Status is the only
 		// place that distinguishes them, so only here is it worth showing.
 		ShowStatus: true,
+		// The digest spans audits, so the subject can't name one.
+		ShowAudit: true,
 	}
 	return d.sendAuditEventSync(ctx, ev, ownerUserID, info, nil, true)
 }
