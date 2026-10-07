@@ -42,9 +42,11 @@ const (
 	idProdAPIM = 31
 	idProdMI   = 32
 	idProdIS   = 33
+	idProdOld  = 34 // INACTIVE
 
 	idDeployPrivate = 41
 	idDeployOnPrem  = 42
+	idDeployOld     = 43 // INACTIVE
 )
 
 func msLookups() TemplateLookups {
@@ -58,10 +60,12 @@ func msLookups() TemplateLookups {
 			{ID: idProdAPIM, Name: "APIM", Status: "ACTIVE"},
 			{ID: idProdMI, Name: "MI", Status: "ACTIVE"},
 			{ID: idProdIS, Name: "IS", Status: "ACTIVE"},
+			{ID: idProdOld, Name: "OldProduct", Status: "INACTIVE"},
 		},
 		DeploymentTypes: []RiskLookup{
 			{ID: idDeployPrivate, Name: "Private Cloud", Status: "ACTIVE"},
 			{ID: idDeployOnPrem, Name: "Managed Services - Customer's On Prem", Status: "ACTIVE"},
+			{ID: idDeployOld, Name: "Old Cloud", Status: "INACTIVE"},
 		},
 	}
 }
@@ -159,6 +163,12 @@ func TestBuildRefData_TemplateLookups(t *testing.T) {
 	}
 	if _, ok := rd.CustomerIDByName["oldco"]; ok {
 		t.Error("an INACTIVE customer must not be selectable")
+	}
+	if _, ok := rd.ProductIDByName["oldproduct"]; ok {
+		t.Error("an INACTIVE product must not be selectable")
+	}
+	if _, ok := rd.DeploymentTypeIDByName["old cloud"]; ok {
+		t.Error("an INACTIVE deployment type must not be selectable")
 	}
 	if rd.TeamTemplateByID[idRegMS] != "MANAGED_SERVICES" || rd.TeamTemplateByID[idRegStandard] != "STANDARD" {
 		t.Errorf("TeamTemplateByID: %+v", rd.TeamTemplateByID)
@@ -313,6 +323,20 @@ func TestMapRow_MS_UnknownValuesReject(t *testing.T) {
 func TestMapRow_MS_InactiveLookupRejectsWithReason(t *testing.T) {
 	_, fs := parseOne(t, msRow(map[string]string{"Customer": "OldCo"}))
 	wantReject(t, fs, "Customer", "inactive")
+
+	// An inactive deployment type, and an inactive product among active ones.
+	_, fs = parseOne(t, msRow(map[string]string{"Deployment Type": "Old Cloud"}))
+	wantReject(t, fs, "Deployment Type", "inactive")
+
+	r, fs := parseOne(t, msRow(map[string]string{"Product": "APIM; OldProduct; MI"}))
+	wantReject(t, fs, "Product", "inactive")
+	if got := findingsFor(fs, "Product"); len(got) != 1 || got[0].Value != "OldProduct" || got[0].Problem != ProblemInactive {
+		t.Errorf("Product finding = %+v, want exactly one for OldProduct / inactive", got)
+	}
+	// The usable products are still resolved; the row is rejected on the bad one.
+	if !reflect.DeepEqual(r.ProductIDs, []int{idProdAPIM, idProdMI}) {
+		t.Errorf("ProductIDs = %v, want the two active ones", r.ProductIDs)
+	}
 }
 
 func TestMapRow_MS_EnvironmentMustBeExactlyTheFixedList(t *testing.T) {

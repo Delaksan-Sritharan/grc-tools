@@ -40,13 +40,14 @@ type Row struct {
 	RiskDescription string
 	RiskCategory    string // raw name, pre-lookup
 
-	// Managed Services template fields (RISK_MODULE_DESIGN.md §14): the raw
-	// names as written in the sheet, and the entity values they map to.
-	Customer           string
-	DeploymentType     string
-	Products           []string
-	Environments       []string // PRODUCTION | NON_PRODUCTION | DR
-	IdentifiedByType   string   // EMPLOYEE | EXTERNAL_PERSON | TOOL | ""
+	// Managed Services template fields (RISK_MODULE_DESIGN.md §14), as written in
+	// the sheet. Their entity ids are below, filled by mapRow.
+	Customer       string
+	DeploymentType string
+	Products       []string
+	Environments   []string // PRODUCTION | NON_PRODUCTION | DR (already the entity's values)
+
+	IdentifiedByType   string // EMPLOYEE | EXTERNAL_PERSON | TOOL | ""
 	IdentifiedByName   string
 	RiskIdentifiedDate string // YYYY-MM-DD | ""
 	// GrossLikelihood/GrossImpact identify the risk's original, immutable
@@ -495,8 +496,8 @@ func dedupeFold(in []string) []string {
 	return out
 }
 
-// splitTokens splits a multi-value cell on comma / semicolon / newline (the handoff doc asks for
-// semicolons; the other two are tolerated).
+// splitTokens splits a multi-value cell on semicolon, comma or newline. The
+// handoff doc asks for semicolons; the other two are tolerated.
 func splitTokens(s string) []string {
 	f := strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == ';' || r == '\n' })
 	out := make([]string, 0, len(f))

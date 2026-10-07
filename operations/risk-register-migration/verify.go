@@ -124,6 +124,10 @@ func verifyMigration(ctx context.Context, log *slog.Logger, ec *EntityClient, rd
 			mismatchCount++
 			rep.Add(mismatchFinding(row, "risk missing", "no matching risk found in the entity after a real run"))
 		case 1:
+			rep.AddRiskCode(RiskCodeEntry{
+				MigrationID: row.MigrationID, Customer: row.Customer,
+				RiskCode: matches[0].RiskCode, RiskTitle: row.RiskTitle,
+			})
 			mismatches, err := verifyRow(ctx, ec, rd, migrationDate, row, matches[0].ID, grantCache)
 			if err != nil {
 				// verifyRow only ever reads (GetRiskDetail/ListEscalations/

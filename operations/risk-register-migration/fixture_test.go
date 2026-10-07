@@ -762,4 +762,18 @@ func TestFixture_SameTitleTwoCustomers_ThenResumeIsNoOp(t *testing.T) {
 	for _, f := range vrep.findings {
 		t.Errorf("unexpected verification finding: %+v", f)
 	}
+
+	// The verification pass records each risk's code for the Migration ID -> code list.
+	if len(vrep.riskCodes) != 2 {
+		t.Fatalf("recorded %d risk codes, want 2: %+v", len(vrep.riskCodes), vrep.riskCodes)
+	}
+	want := map[int]string{1: "2025-MS-BO-Q3-0001", 2: "2025-MS-BOC-Q3-0001"}
+	for _, c := range vrep.riskCodes {
+		if c.RiskCode != want[c.MigrationID] {
+			t.Errorf("Migration ID %d recorded code %q, want %q", c.MigrationID, c.RiskCode, want[c.MigrationID])
+		}
+	}
+	if vrep.riskCodes[0].RiskTitle != "TLS 1.0 enabled on gateway" || vrep.riskCodes[0].Customer == "" {
+		t.Errorf("entry = %+v, want the title and customer too", vrep.riskCodes[0])
+	}
 }

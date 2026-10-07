@@ -428,3 +428,58 @@ func TestDryRunChecks_RejectsWhatTheRealRunRejects_AndSummarisesTheRest(t *testi
 		t.Errorf("first code = %q", got[0].FirstCode)
 	}
 }
+
+// Inactive products and deployment types are grouped for the admins like an
+// inactive customer: values to reactivate, not to add.
+func TestReportEmit_InactiveProductAndDeploymentTypeAreGrouped(t *testing.T) {
+	r := NewReport()
+	r.Add(
+		Finding{MigrationID: 3, CSVRow: 4, Severity: SevReject, Failure: "Product",
+			Detail: `product "OldProduct" is inactive`, Value: "OldProduct", Problem: ProblemInactive},
+		Finding{MigrationID: 6, CSVRow: 7, Severity: SevReject, Failure: "Deployment Type",
+			Detail: `deployment type "Old Cloud" is inactive`, Value: "Old Cloud", Problem: ProblemInactive},
+	)
+	var sb strings.Builder
+	r.Emit(&sb)
+	out := sectionOf(sb.String(), "inactive values to reactivate")
+	for _, want := range []string{"Product (1):", `"OldProduct" - 1 row (Migration ID 3)`, "Deployment Type (1):", `"Old Cloud" - 1 row (Migration ID 6)`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("inactive block missing %q:\n%s", want, sb.String())
+		}
+	}
+}
+
+// ── Migration ID -> risk code ───────────────────────────────────────────────
+
+// After a real run the sheet owner needs to match her rows to the numbers the
+// entity assigned: they are permanent and go out in emails and Git issues.
+func TestReportEmit_RiskCodesBlock(t *testing.T) {
+	r := NewReport()
+	// Out of order, and a title with a comma that must be CSV-quoted.
+	r.AddRiskCode(RiskCodeEntry{MigrationID: 12, Customer: "Bank Of China", RiskCode: "2025-MS-BOC-Q3-0002", RiskTitle: "Second, with a comma"})
+	r.AddRiskCode(RiskCodeEntry{MigrationID: 3, Customer: "BankOne", RiskCode: "2025-MS-BO-Q1-0001", RiskTitle: "First"})
+
+	var sb strings.Builder
+	r.Emit(&sb)
+	out := sb.String()
+
+	header := "migration_id,customer,risk_code,risk_title"
+	i := strings.Index(out, header)
+	if i < 0 {
+		t.Fatalf("report missing the risk codes CSV header:\n%s", out)
+	}
+	block := out[i:]
+	first := strings.Index(block, "3,BankOne,2025-MS-BO-Q1-0001,First")
+	second := strings.Index(block, `12,Bank Of China,2025-MS-BOC-Q3-0002,"Second, with a comma"`)
+	if first < 0 || second < 0 || first > second {
+		t.Errorf("rows missing, unquoted or not sorted by Migration ID:\n%s", block)
+	}
+}
+
+func TestReportEmit_NoRiskCodesNoBlock(t *testing.T) {
+	var sb strings.Builder
+	NewReport().Emit(&sb)
+	if strings.Contains(sb.String(), "risk_code") {
+		t.Errorf("a run that wrote nothing should print no risk code block:\n%s", sb.String())
+	}
+}

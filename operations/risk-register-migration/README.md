@@ -277,6 +277,13 @@ see the note in `report.go` on why it's one `Write` call, not several):
   the Migration IDs that got a suppressing escalation, the grant count, and
   (real run) per-bucket migrated counts.
 
+A real run also prints a third block, **`risk_codes.csv`** (`migration_id,
+customer, risk_code, risk_title`, sorted by Migration ID): the code the entity
+assigned to every risk the verification pass matched, including ones written by
+an earlier run. Send it to the sheet owner so she can match her rows to the
+numbers, which are permanent and go out in emails and Git issues. It is not
+printed on a dry run, because there are no codes yet.
+
 A real run additionally logs one `verifying` progress line every 10 rows and
 one `verification complete` summary line (verified-ok / mismatch / confirmed-
 absent-rejected counts) via `slog`, from the verification pass described next.

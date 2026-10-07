@@ -698,3 +698,19 @@ func TestVerifyRow_AnyRiskCodeNumberIsAccepted(t *testing.T) {
 		}
 	}
 }
+
+func TestVerifyMigration_RejectedRowRecordsNoRiskCode(t *testing.T) {
+	rd := fixtureRefData(t)
+	row := verifyBaseRow()
+	_, ec, _ := setupVerifyFixture(t, rd, row) // a risk exists for the row
+
+	rep := NewReport()
+	rep.Add(Finding{MigrationID: row.MigrationID, CSVRow: row.CSVLine, RiskTitle: row.RiskTitle,
+		Severity: SevReject, Failure: "test forced reject"})
+	if err := verifyMigration(context.Background(), discardLogger(), ec, rd, "2026-09-15", []Row{row}, rep); err != nil {
+		t.Fatalf("verifyMigration: %v", err)
+	}
+	if len(rep.riskCodes) != 0 {
+		t.Errorf("a rejected row is not part of the migration, got %+v", rep.riskCodes)
+	}
+}

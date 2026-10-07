@@ -78,7 +78,21 @@ type Report struct {
 	suppressingEscalations []int // Migration IDs that got a D8 suppressing escalation
 
 	customerSummaries []CustomerSummary
+	riskCodes         []RiskCodeEntry
 }
+
+// RiskCodeEntry is one line of the Migration ID -> risk code list printed after
+// a real run. The codes are assigned by the entity, are permanent, and go out in
+// emails and Git issues, so whoever owns the sheet needs to match them to rows.
+type RiskCodeEntry struct {
+	MigrationID int
+	Customer    string
+	RiskCode    string
+	RiskTitle   string
+}
+
+// AddRiskCode records a migrated risk's code for the risk_codes.csv block.
+func (r *Report) AddRiskCode(e RiskCodeEntry) { r.riskCodes = append(r.riskCodes, e) }
 
 func NewReport() *Report { return &Report{migratedByBucket: map[string]int{}} }
 
@@ -167,9 +181,29 @@ func (r *Report) Emit(w io.Writer) {
 	cw.Flush()
 
 	r.emitNarrative(&buf)
+	r.emitRiskCodes(&buf)
 	fmt.Fprintln(&buf, "----- end report -----")
 
 	_, _ = w.Write(buf.Bytes())
+}
+
+// emitRiskCodes prints the Migration ID -> risk code list as a CSV block, sorted
+// by Migration ID. Nothing is printed when no code was recorded (a dry run, or a
+// run that migrated nothing).
+func (r *Report) emitRiskCodes(w io.Writer) {
+	if len(r.riskCodes) == 0 {
+		return
+	}
+	entries := append([]RiskCodeEntry(nil), r.riskCodes...)
+	sort.Slice(entries, func(i, j int) bool { return entries[i].MigrationID < entries[j].MigrationID })
+
+	fmt.Fprintln(w, "\n----- risk_codes.csv -----")
+	cw := csv.NewWriter(w)
+	_ = cw.Write([]string{"migration_id", "customer", "risk_code", "risk_title"})
+	for _, e := range entries {
+		_ = cw.Write([]string{strconv.Itoa(e.MigrationID), e.Customer, e.RiskCode, e.RiskTitle})
+	}
+	cw.Flush()
 }
 
 // emitNarrative is the report.txt block (plan §9): a failure-code breakdown,
