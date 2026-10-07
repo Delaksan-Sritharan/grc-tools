@@ -66,8 +66,9 @@ allowed-values list). In short:
   new ones are mandatory on every row. The compliance column is optional: if it
   is left in, every cell must be blank.
 - **Register:** `Source Register` must be the Managed Services register (name or
-  code). `Assignment Team` must be an SRE team (a team on the
-  `MANAGED_SERVICES` template; the register itself also counts).
+  code). `Assignment Team` is any existing active team, as everywhere else (the
+  entity only checks that it exists); for this sheet it is always the Managed
+  Services team.
 - **Lookups:** `Customer`, `Product` and `Deployment Type` are matched by name
   (case and spacing ignored) against the entity's lists. An unknown or inactive
   value rejects the row; the tool never creates lookup values. `Product` and
@@ -92,7 +93,7 @@ allowed-values list). In short:
    template is locked once a risk uses it.
 3. The lookup seed script has run (customers with codes, deployment types,
    products). Customer codes are frozen once a risk uses them; check them first.
-4. The SRE teams exist, tagged `MANAGED_SERVICES`. The tool creates their Risk
+4. The assignment team (Managed Services) exists. The tool creates its Risk
    Owner grants itself for every `IN_REMEDIATION` row.
 
 ### What the dry run prints
@@ -184,7 +185,7 @@ mysql -uroot -p grc_platform < ../../apps/grc-platform/backend/Resources/shared_
 mysql -uroot -p grc_platform < <path-to>/staging_risk_seed_data.sql
 # Managed Services lookups (customers, deployment types, products, platforms).
 mysql -uroot -p grc_platform < <path-to>/managed_services_lookup_seed_data.sql
-# Then give the Managed Services register its template and add the SRE teams
+# Then give the Managed Services register its template
 # (risk_team.register_template = 'MANAGED_SERVICES'), as the Admin Console does;
 # preflight aborts when no register is on that template.
 
@@ -248,7 +249,7 @@ clean slate).
 
 A `testdata/risks.csv`-shaped register (5 data rows: 3 `IN_REMEDIATION`, 2
 `CLOSED`, one `ACCEPT`/high row that also gets the management grant, across two
-customers and three SRE teams) is a good size for a first local pass before
+customers and three assignment teams) is a good size for a first local pass before
 trying the real register export.
 
 ## Report

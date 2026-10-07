@@ -401,10 +401,10 @@ func mapRow(rec []string, idx map[string]int, line int, refs RefData) (Row, []Fi
 	} else {
 		row.AssignmentTeam = at
 		if id, ok := refs.TeamIDByKey[strings.ToLower(at)]; ok {
+			// Any active team may be the assignment team: the entity only checks it
+			// exists (checkAssignmentTeam), because a register's template decides
+			// which fields its risks carry, not who they can be assigned to.
 			row.AssignmentTeamID = id
-			if refs.TeamTemplateByID[id] != templateManagedServices {
-				reject("Assignment Team", fmt.Sprintf("%q is not an SRE (Managed Services) team", at))
-			}
 		} else {
 			reject("Assignment Team", fmt.Sprintf("unknown team %q", at))
 		}

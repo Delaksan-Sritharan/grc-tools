@@ -374,16 +374,31 @@ func TestMapRow_MS_OtherRegistersReject(t *testing.T) {
 	wantReject(t, fs, "Source Register", "unknown")
 }
 
-func TestMapRow_MS_AssignmentTeamMustBeAnSRETeam(t *testing.T) {
-	_, fs := parseOne(t, msRow(map[string]string{"Assignment Team": "Asgardeo"}))
-	wantReject(t, fs, "Assignment Team", "SRE")
-
-	// The Managed Services register itself is a valid assignment team: a
-	// register assigns to itself (§14).
-	r, fs := parseOne(t, msRow(map[string]string{"Assignment Team": "Managed Services"}))
-	if len(fs) != 0 || r.AssignmentTeamID != idRegMS {
-		t.Errorf("assignment to the MS register itself: at=%d, findings = %+v", r.AssignmentTeamID, fs)
+// Any active team may be the assignment team (RISK_MODULE_DESIGN.md §14, the
+// entity's checkAssignmentTeam): the template only decides which fields a
+// register's risks carry, not who they can be assigned to. For Managed Services
+// the sheet will simply name the Managed Services team.
+func TestMapRow_MS_AssignmentTeamIsAnyKnownTeam(t *testing.T) {
+	for _, tc := range []struct {
+		cell string
+		want int
+	}{
+		{"Managed Services", idRegMS},
+		{"MS", idRegMS},
+		{"SRE One", idTeamSRE},
+		{"Asgardeo", idRegStandard},
+		{"asgardeo", idRegStandard},
+	} {
+		r, fs := parseOne(t, msRow(map[string]string{"Assignment Team": tc.cell}))
+		if len(fs) != 0 || r.AssignmentTeamID != tc.want {
+			t.Errorf("%q: at=%d, findings = %+v", tc.cell, r.AssignmentTeamID, fs)
+		}
 	}
+
+	_, fs := parseOne(t, msRow(map[string]string{"Assignment Team": "Nowhere"}))
+	wantReject(t, fs, "Assignment Team", "unknown")
+	_, fs = parseOne(t, msRow(map[string]string{"Assignment Team": ""}))
+	wantReject(t, fs, "Assignment Team", "empty")
 }
 
 // buildCSVWithExtra renders expectedHeaders plus one extra trailing column, for

@@ -334,8 +334,9 @@ type RiskTeam struct {
 	Code   *string `json:"code"` // NULL for Legal / HR — cannot be a source register
 	Status string  `json:"status"`
 	// RegisterTemplate is STANDARD | AGGREGATED | MANAGED_SERVICES. This tool
-	// imports the MANAGED_SERVICES register only, and an assignment team must be
-	// on the same template (the entity enforces both).
+	// imports the MANAGED_SERVICES register only, so the template decides which
+	// register a row may name as its Source Register. It does not restrict the
+	// assignment team: any active team may be that.
 	RegisterTemplate string `json:"registerTemplate"`
 }
 
