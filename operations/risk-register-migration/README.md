@@ -322,20 +322,29 @@ The `risk-sheet-migration` marker is **not unique to this import**: the original
 register migration wrote its risks and grants under the same marker in the same
 database, so deleting by marker alone would delete those too. The script
 selects this import's risks as those with the marker **and** a
-`risk_managed_service_detail` row, and deletes their children by risk id. It
-deletes only RISK_TEAM grants (with the marker) on the teams those risks use.
-GLOBAL grants (the management-approver grant) cannot be attributed to one
-migration, so they are listed for review, never deleted. The preview also
-counts the marker risks it will leave alone.
+`risk_managed_service_detail` row, and deletes their children by risk id.
+
+Grants are handled more carefully, because a grant row can be shared. The entity
+creates grants with `ON DUPLICATE KEY`, which never changes `created_by`: when
+the original migration and this import grant the same person the same role on
+the same team there is one row, still carrying the marker. So the script deletes
+a marker RISK_TEAM grant only on a team that **no other risk uses** (as source
+register or assignment team). Grants on a team another risk also uses are never
+deleted: the preview lists them with a `used_by_other_risks` flag, and you decide
+by hand. If real Managed Services risks already exist on the Managed Services
+team, its grants therefore stay. GLOBAL grants (the management-approver grant)
+cannot be attributed to one migration, so they are listed, never deleted. The
+preview also counts the marker risks it will leave alone.
 
 The Managed Services template rows go with their risks (cascade). The
 per-customer counters have no marker, so the script records the affected
 customers first and afterwards resets each counter to the highest number still
 in use (0 when the customer has no risk left); without that, numbering would
 resume after the rolled-back risks. Tested against the real schema on MySQL with
-the original migration's data alongside: a customer with a pre-existing risk
-keeps its number, the original migration's risks, plans, history and grants
-survive, and an admin-created grant on the same team survives.
+the original migration's data alongside, including a team both migrations use: a
+customer with a pre-existing risk keeps its number, and the original
+migration's risks, plans, history and grants survive (the shared-team grant
+too), as does an admin-created grant on the same team.
 
 ## Status
 

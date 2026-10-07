@@ -13,11 +13,21 @@
 --   * risks that carry the marker AND a Managed Services detail row
 --     (risk_managed_service_detail) — i.e. this import's risks — and their
 --     children, selected by risk id;
---   * RISK_TEAM grants with the marker on the teams those risks use.
+--   * RISK_TEAM grants with the marker, only on teams that NO OTHER risk uses
+--     (neither as source register nor as assignment team).
 -- Marker risks without a detail row (the original migration's) are counted in
 -- the preview and never touched.
 --
+-- GRANTS ARE NOT OWNED BY ONE MIGRATION. The entity creates a grant with
+-- ON DUPLICATE KEY, which never changes created_by: when the original migration
+-- and this import grant the same person the same role on the same team, there is
+-- ONE row, still carrying the marker. Deleting it by team would take access away
+-- from the original migration's risks. So a grant on a team that any other risk
+-- uses is never deleted here; the preview lists it for you to decide.
+--
 -- NOT deleted, review by hand:
+--   * Marker RISK_TEAM grants on a team another risk also uses (listed, with a
+--     flag, in the second preview query).
 --   * GLOBAL grants with the marker. The management-approver grant is GLOBAL and
 --     nothing says which migration wrote it; the preview lists them.
 --   * `user` rows — other data may reference them and re-provisioning is a no-op.
@@ -62,14 +72,40 @@ UNION ALL SELECT 'risk_product_reference (cascade)',      COUNT(*) FROM risk_pro
           JOIN risk r ON r.id = ref.risk_id WHERE r.created_by = 'risk-sheet-migration'
 UNION ALL SELECT 'risk_environment_reference (cascade)',  COUNT(*) FROM risk_environment_reference ref
           JOIN risk r ON r.id = ref.risk_id WHERE r.created_by = 'risk-sheet-migration'
-UNION ALL SELECT 'user_role_grant (RISK_TEAM, on these risks'' teams)', COUNT(*) FROM user_role_grant g
+UNION ALL SELECT 'user_role_grant (RISK_TEAM, teams no other risk uses)', COUNT(*) FROM user_role_grant g
           WHERE g.created_by = 'risk-sheet-migration' AND g.scope_type = 'RISK_TEAM'
             AND g.scope_id IN (
               SELECT r.source_register_id FROM risk r WHERE r.created_by = 'risk-sheet-migration'
                 AND EXISTS (SELECT 1 FROM risk_managed_service_detail d WHERE d.risk_id = r.id)
               UNION
               SELECT r.assignment_team_id FROM risk r WHERE r.created_by = 'risk-sheet-migration'
-                AND EXISTS (SELECT 1 FROM risk_managed_service_detail d WHERE d.risk_id = r.id));
+                AND EXISTS (SELECT 1 FROM risk_managed_service_detail d WHERE d.risk_id = r.id))
+            AND NOT EXISTS (
+              SELECT 1 FROM risk o
+              WHERE (o.source_register_id = g.scope_id OR o.assignment_team_id = g.scope_id)
+                AND NOT (o.created_by = 'risk-sheet-migration'
+                         AND EXISTS (SELECT 1 FROM risk_managed_service_detail d2 WHERE d2.risk_id = o.id)));
+
+-- Marker RISK_TEAM grants on the teams this import's risks use, for review.
+-- used_by_other_risks = 1: another risk (e.g. one of the original migration's)
+-- also uses the team, so the grant may be shared and is NEVER deleted below.
+-- used_by_other_risks = 0: nothing else uses the team; the delete below removes it.
+SELECT g.user_id, g.role_id, g.scope_id AS team_id, g.status,
+       EXISTS (
+         SELECT 1 FROM risk o
+         WHERE (o.source_register_id = g.scope_id OR o.assignment_team_id = g.scope_id)
+           AND NOT (o.created_by = 'risk-sheet-migration'
+                    AND EXISTS (SELECT 1 FROM risk_managed_service_detail d2 WHERE d2.risk_id = o.id))
+       ) AS used_by_other_risks
+FROM user_role_grant g
+WHERE g.created_by = 'risk-sheet-migration' AND g.scope_type = 'RISK_TEAM'
+  AND g.scope_id IN (
+    SELECT r.source_register_id FROM risk r WHERE r.created_by = 'risk-sheet-migration'
+      AND EXISTS (SELECT 1 FROM risk_managed_service_detail d WHERE d.risk_id = r.id)
+    UNION
+    SELECT r.assignment_team_id FROM risk r WHERE r.created_by = 'risk-sheet-migration'
+      AND EXISTS (SELECT 1 FROM risk_managed_service_detail d WHERE d.risk_id = r.id))
+ORDER BY g.scope_id, g.user_id, g.role_id;
 
 -- Marker risks this script will NOT touch (the original migration's). Expect the
 -- count of the earlier migration's risks here; if it is unexpectedly 0 on a
@@ -127,11 +163,18 @@ WHERE (s.risk_team_id, s.customer_id) IN (
 -- DELETE FROM risk_action_plan WHERE risk_id IN (SELECT risk_id FROM rollback_ms_risks);
 -- DELETE FROM risk WHERE id IN (SELECT risk_id FROM rollback_ms_risks);
 --
--- -- RISK_TEAM grants on the teams this import's risks used. Grants on any other
--- -- team belong to the earlier migration and stay.
+-- -- RISK_TEAM marker grants, only on teams no OTHER risk uses. A team that
+-- -- another risk uses (e.g. the original migration's) may hold a shared grant row
+-- -- (see the header), so its grants stay; review them with the second preview
+-- -- query and delete by hand if you are sure. Run after the risk delete above:
+-- -- the NOT EXISTS ignores this import's own risks either way.
 -- DELETE FROM user_role_grant
 --   WHERE created_by = 'risk-sheet-migration' AND scope_type = 'RISK_TEAM'
---     AND scope_id IN (SELECT team_id FROM rollback_ms_teams);
+--     AND scope_id IN (SELECT team_id FROM rollback_ms_teams)
+--     AND NOT EXISTS (
+--       SELECT 1 FROM risk o
+--       WHERE (o.source_register_id = user_role_grant.scope_id OR o.assignment_team_id = user_role_grant.scope_id)
+--         AND o.id NOT IN (SELECT risk_id FROM rollback_ms_risks));
 --
 -- -- Reset each touched counter to the highest number still in use. A risk code
 -- -- ends in its number (YEAR-TEAM-CUSTOMER-QUARTER-NNNN), so the number is the
@@ -160,6 +203,11 @@ WHERE (s.risk_team_id, s.customer_id) IN (
 -- SELECT COUNT(*) AS marker_risks_left_alone FROM risk r
 --   WHERE r.created_by = 'risk-sheet-migration'
 --     AND NOT EXISTS (SELECT 1 FROM risk_managed_service_detail d WHERE d.risk_id = r.id);
+-- -- Marker RISK_TEAM grants still present. After the rollback these should be only
+-- -- the original migration's, or ones you chose to keep from the review list.
+-- SELECT user_id, role_id, scope_id AS team_id FROM user_role_grant
+--   WHERE created_by = 'risk-sheet-migration' AND scope_type = 'RISK_TEAM'
+--   ORDER BY scope_id, user_id, role_id;
 -- -- Every counter must equal the highest number still in use (compare the two
 -- -- columns; a customer with no risk left must show 0):
 -- SELECT s.risk_team_id, s.customer_id, s.last_sequence_number,
