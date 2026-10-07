@@ -14,8 +14,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Command risk-register-import loads the historical risk register into the
-// platform database exactly once, by driving the compliance-entity HTTP API.
+// Command risk-register-import loads the historical Managed Services risk
+// register into the platform database exactly once, by driving the
+// compliance-entity HTTP API.
 //
 // It is deployed as a Choreo Manual Task and run twice per environment: first
 // with dryRun=true (validate + resolve + report, write nothing), then with
@@ -286,8 +287,8 @@ func run(ctx context.Context, cfg Config) int {
 
 // preflight runs the structural checks in plan §7 in order — the first failure
 // returns an error and the run aborts before any write — and returns the
-// reference-data lookups every row needs (team codes, category names,
-// compliance-ref names, score cells, role ids).
+// reference-data lookups every row needs (team codes and templates, category
+// names, customers / products / deployment types, score cells, role ids).
 //
 // The AVOID-enum precondition (§7) is not checked here: it is a per-environment
 // checklist tick, with a write-time backstop in migrateRow (T7).
