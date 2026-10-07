@@ -270,6 +270,46 @@ func TestVerifyRow_DetectsFieldMismatches(t *testing.T) {
 			wantField: "Security Compliance Reference",
 		},
 		{
+			name: "risk code names another customer",
+			row:  verifyBaseRow(),
+			tamper: func(fe *fakeEntity, riskID int) {
+				fe.risks[riskID].RiskCode = "2025-MS-BOC-Q3-0001" // row is BankOne (BO)
+			},
+			wantField: "Risk Code",
+		},
+		{
+			name: "risk code names another register",
+			row:  verifyBaseRow(),
+			tamper: func(fe *fakeEntity, riskID int) {
+				fe.risks[riskID].RiskCode = "2025-ASG-BO-Q3-0001"
+			},
+			wantField: "Risk Code",
+		},
+		{
+			name: "risk code names another year or quarter",
+			row:  verifyBaseRow(),
+			tamper: func(fe *fakeEntity, riskID int) {
+				fe.risks[riskID].RiskCode = "2024-MS-BO-Q1-0001"
+			},
+			wantField: "Risk Code",
+		},
+		{
+			name: "risk code has no number",
+			row:  verifyBaseRow(),
+			tamper: func(fe *fakeEntity, riskID int) {
+				fe.risks[riskID].RiskCode = "2025-MS-BO-Q3-"
+			},
+			wantField: "Risk Code",
+		},
+		{
+			name: "risk code missing",
+			row:  verifyBaseRow(),
+			tamper: func(fe *fakeEntity, riskID int) {
+				fe.risks[riskID].RiskCode = ""
+			},
+			wantField: "Risk Code",
+		},
+		{
 			name: "action steps diverged",
 			row:  verifyBaseRow(),
 			tamper: func(fe *fakeEntity, riskID int) {
@@ -473,9 +513,11 @@ func TestVerifyMigration_UnexpectedGrantIsFlagged(t *testing.T) {
 	fe, ec, _ := setupVerifyFixture(t, rd, row)
 
 	// A marker-created grant on the owner (user 602) that no migratable row
-	// expects — e.g. left over from an edit that lowered the row's score.
+	// expects — e.g. left over from an earlier version of this sheet that named
+	// a different assignment team. Team 1 (the source register) is in this
+	// sheet's scope, and the row expects the owner grant on team 4, not here.
 	fe.grants[602] = append(fe.grants[602], Grant{
-		RoleID: rd.RoleIDByName[roleRiskManagement], ScopeType: "GLOBAL", ScopeID: 0, CreatedBy: marker,
+		RoleID: rd.RoleIDByName[roleRiskOwner], ScopeType: "RISK_TEAM", ScopeID: 1, CreatedBy: marker,
 	})
 
 	rep := NewReport()
@@ -490,6 +532,35 @@ func TestVerifyMigration_UnexpectedGrantIsFlagged(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("findings = %+v, want a MISMATCH 'unexpected grant'", rep.findings)
+	}
+}
+
+// TestVerifyMigration_OtherMigrationsGrantsAreIgnored: the original register
+// migration wrote its grants under the same created_by marker, and the same
+// people own risks in both. Their grants on teams outside this sheet, and their
+// GLOBAL management grants (which cannot be attributed to one migration), are
+// not this run's business and must not read as "unexpected".
+func TestVerifyMigration_OtherMigrationsGrantsAreIgnored(t *testing.T) {
+	rd := fixtureRefData(t)
+	row := verifyBaseRow()
+	fe, ec, _ := setupVerifyFixture(t, rd, row)
+
+	// Both on the owner (user 602), both marker-created, neither expected by this row.
+	fe.grants[602] = append(fe.grants[602],
+		// Risk Owner on Choreo (team 2): a team this sheet never mentions.
+		Grant{RoleID: rd.RoleIDByName[roleRiskOwner], ScopeType: "RISK_TEAM", ScopeID: 2, CreatedBy: marker},
+		// A GLOBAL management grant from the original migration's ACCEPT+HIGH rows.
+		Grant{RoleID: rd.RoleIDByName[roleRiskManagement], ScopeType: "GLOBAL", ScopeID: 0, CreatedBy: marker},
+	)
+
+	rep := NewReport()
+	if err := verifyMigration(context.Background(), discardLogger(), ec, rd, "2026-09-15", []Row{row}, rep); err != nil {
+		t.Fatalf("verifyMigration: %v", err)
+	}
+	for _, f := range rep.findings {
+		if f.Failure == "unexpected grant" {
+			t.Errorf("another migration's grant was flagged: %+v", f)
+		}
 	}
 }
 
@@ -606,5 +677,24 @@ func TestVerifyRow_EnvironmentAndProductOrderDoesNotMatter(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Errorf("reordered sets must not mismatch: %+v", got)
+	}
+}
+
+// The number part is the entity's to assign, and a rejected row earlier in the
+// run shifts it. Only the prefix is the tool's to vouch for, so any number passes.
+func TestVerifyRow_AnyRiskCodeNumberIsAccepted(t *testing.T) {
+	rd := fixtureRefData(t)
+	row := verifyBaseRow()
+	fe, ec, riskID := setupVerifyFixture(t, rd, row)
+	fe.risks[riskID].RiskCode = "2025-MS-BO-Q3-0042"
+
+	got, err := verifyRow(context.Background(), ec, rd, "2026-09-15", row, riskID, map[int][]Grant{})
+	if err != nil {
+		t.Fatalf("verifyRow: %v", err)
+	}
+	for _, m := range got {
+		if m.field == "Risk Code" {
+			t.Errorf("a different number must not mismatch: %+v", m)
+		}
 	}
 }

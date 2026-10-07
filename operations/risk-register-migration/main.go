@@ -215,18 +215,13 @@ func run(ctx context.Context, cfg Config) int {
 	pending := selectMigratable(rows, rep)
 
 	if cfg.DryRun {
-		log.Info("dry run — no writes", "migratable", len(pending), "rejected", len(rows)-len(pending))
-		// Which migratable rows already have a risk, so the summary does not
-		// hand their numbers out again. Search only; a dry run reads grants for
-		// nobody.
-		existing, err := existingRisks(ctx, ec, pending)
+		// The same row-level verdicts the real run reaches in reconstructState,
+		// plus the per-customer summary. Reads only; it reads grants for nobody.
+		migratable, err := dryRunChecks(ctx, log, ec, refs, pending, rep)
 		if err != nil {
-			log.Error("could not look up existing risks — aborting", "err", err)
 			return exitStructural
 		}
-		if err := summarizeCustomers(ctx, log, ec, refs, pending, existing, rep); err != nil {
-			return exitStructural
-		}
+		log.Info("dry run — no writes", "migratable", len(migratable), "rejected", len(rows)-len(migratable))
 		rep.Emit(os.Stdout)
 		if rep.HasFindings() {
 			return exitFindings

@@ -451,3 +451,49 @@ func TestReconstructState_CustomerIsPartOfTheKey(t *testing.T) {
 		}
 	})
 }
+
+// TestRejectDuplicateKeys: two rows on one natural key are indistinguishable on
+// resume. The real run rejects them in reconstructState; the dry run must report
+// the same thing, or a clean dry run is followed by a real run that rejects rows.
+func TestRejectDuplicateKeys(t *testing.T) {
+	rowFor := func(mig int, customer, title string, year int) Row {
+		r := baseRow(mig, title, "IN_REMEDIATION")
+		r.Customer, r.RiskYear = customer, year
+		return r
+	}
+
+	t.Run("same key rejects every row on it", func(t *testing.T) {
+		rep := NewReport()
+		rejectDuplicateKeys([]Row{
+			rowFor(1, "BankOne", "TLS", 2025),
+			rowFor(2, "  bankone ", "TLS", 2025),
+			rowFor(3, "BankOne", "Other title", 2025),
+		}, rep)
+		rej := rep.RejectedMigrationIDs()
+		if _, ok := rej[1]; !ok {
+			t.Errorf("row 1 not rejected")
+		}
+		if _, ok := rej[2]; !ok {
+			t.Errorf("row 2 not rejected")
+		}
+		if _, ok := rej[3]; ok {
+			t.Errorf("row 3 is on its own key and must not be rejected")
+		}
+		got := findingsFor(rep.findings, "natural key")
+		if len(got) != 2 || !strings.Contains(got[0].Detail, "customer") {
+			t.Errorf("findings = %+v, want two 'natural key' REJECTs naming the customer", got)
+		}
+	})
+
+	t.Run("a different customer or year is a different key", func(t *testing.T) {
+		rep := NewReport()
+		rejectDuplicateKeys([]Row{
+			rowFor(1, "BankOne", "TLS", 2025),
+			rowFor(2, "Bank Of China", "TLS", 2025),
+			rowFor(3, "BankOne", "TLS", 2026),
+		}, rep)
+		if len(rep.findings) != 0 {
+			t.Errorf("findings = %+v, want none", rep.findings)
+		}
+	})
+}

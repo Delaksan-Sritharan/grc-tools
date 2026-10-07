@@ -659,6 +659,7 @@ func (e *EntityClient) PatchActionPlan(ctx context.Context, planID int, req Patc
 // POST|PATCH /risks only ever need Risk's smaller field set.
 type RiskDetail struct {
 	ID                   int     `json:"id"`
+	RiskCode             string  `json:"riskCode"`
 	RiskTitle            string  `json:"riskTitle"`
 	RiskDescription      *string `json:"riskDescription"`
 	RiskYear             int     `json:"riskYear"`

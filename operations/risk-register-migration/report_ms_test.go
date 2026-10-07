@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -331,7 +332,7 @@ func TestExistingRisks_MatchesByCustomerAwareKey(t *testing.T) {
 		r.Customer = customer
 		return r
 	}
-	got, err := existingRisks(context.Background(), s.client(t), []Row{rowFor(1, "BankOne"), rowFor(2, "Bank Of China")})
+	got, err := existingRisks(context.Background(), s.client(t), []Row{rowFor(1, "BankOne"), rowFor(2, "Bank Of China")}, NewReport())
 	if err != nil {
 		t.Fatalf("existingRisks: %v", err)
 	}
@@ -340,5 +341,90 @@ func TestExistingRisks_MatchesByCustomerAwareKey(t *testing.T) {
 	}
 	if got[2].RiskID != 0 {
 		t.Errorf("Bank Of China row must not match BankOne's risk, got %+v", got[2])
+	}
+}
+
+// An ambiguous existing match (two marker risks on one key) is rejected by the
+// real run; the dry run's lookup must say so too, and must not hand the row a number.
+func TestExistingRisks_AmbiguousMatchIsRejected(t *testing.T) {
+	s := &stateStub{t: t, risks: []Risk{
+		withCustomer(markerRisk(80, "TLS 1.0 enabled", 8, 2025, "Q3", "IN_REMEDIATION"), "BankOne"),
+		withCustomer(markerRisk(81, "TLS 1.0 enabled", 8, 2025, "Q3", "IN_REMEDIATION"), "BankOne"),
+	}}
+	row := baseRow(1, "TLS 1.0 enabled", "IN_REMEDIATION")
+	row.Customer = "BankOne"
+
+	rep := NewReport()
+	got, err := existingRisks(context.Background(), s.client(t), []Row{row}, rep)
+	if err != nil {
+		t.Fatalf("existingRisks: %v", err)
+	}
+	if _, ok := rep.RejectedMigrationIDs()[1]; !ok {
+		t.Errorf("row matching two marker risks should be rejected; findings=%+v", rep.findings)
+	}
+	if got[1].RiskID != 0 {
+		t.Errorf("an ambiguous row must not be matched to either risk, got %+v", got[1])
+	}
+}
+
+// dryRunChecks is everything the dry run learns from the entity beyond preflight:
+// it must reach the same row-level verdicts the real run reaches in
+// reconstructState, and size the per-customer summary from the rows that survive.
+func TestDryRunChecks_RejectsWhatTheRealRunRejects_AndSummarisesTheRest(t *testing.T) {
+	cells := func(mig, title, customer string) map[string]string {
+		return msRow(map[string]string{"Migration ID": mig, "Risk Title": title, "Customer": customer})
+	}
+	rd := fixtureRefData(t)
+	rows, fs, err := parseSheet(strings.NewReader(buildCSV(t,
+		cells("1", "T1", "BankOne"), cells("2", "T1", "BankOne"), // duplicate key
+		cells("3", "T1", "Bank Of China"), // fine, new
+		cells("4", "T2", "BankOne"),       // two existing marker risks
+		cells("5", "T3", "Bank Of China"), // fine, already exists
+	)), rd)
+	if err != nil || len(fs) != 0 {
+		t.Fatalf("parseSheet: err=%v findings=%+v", err, fs)
+	}
+
+	fe := newFakeEntity(t)
+	boc, bo := "Bank Of China", "BankOne"
+	for id, r := range map[int]Risk{
+		901: {ID: 901, RiskTitle: "T2", SourceRegID: 1, RiskYear: 2025, RiskQuarter: "Q3", CreatedBy: marker, CustomerName: &bo},
+		902: {ID: 902, RiskTitle: "T2", SourceRegID: 1, RiskYear: 2025, RiskQuarter: "Q3", CreatedBy: marker, CustomerName: &bo},
+		903: {ID: 903, RiskTitle: "T3", SourceRegID: 1, RiskYear: 2025, RiskQuarter: "Q3", CreatedBy: marker, CustomerName: &boc},
+	} {
+		r := r
+		fe.risks[id] = &r
+	}
+
+	rep := NewReport()
+	migratable, err := dryRunChecks(context.Background(), discardLogger(), fe.client(t), rd, rows, rep)
+	if err != nil {
+		t.Fatalf("dryRunChecks: %v", err)
+	}
+
+	rej := rep.RejectedMigrationIDs()
+	for _, id := range []int{1, 2, 4} {
+		if _, ok := rej[id]; !ok {
+			t.Errorf("row %d should be rejected, as the real run would", id)
+		}
+	}
+	for _, id := range []int{3, 5} {
+		if _, ok := rej[id]; ok {
+			t.Errorf("row %d should not be rejected", id)
+		}
+	}
+	if len(migratable) != 2 {
+		t.Fatalf("migratable = %d rows, want 2 (3 and 5)", len(migratable))
+	}
+
+	// Only Bank Of China survives: row 3 is new, row 5 already exists.
+	var got []CustomerSummary
+	rep.Emit(io.Discard)
+	got = rep.customerSummaries
+	if len(got) != 1 || got[0].Customer != "Bank Of China" || got[0].Risks != 2 || got[0].New != 1 {
+		t.Fatalf("summaries = %+v, want Bank Of China with 2 risks, 1 new", got)
+	}
+	if got[0].FirstCode != "2025-MS-BOC-Q3-0001" {
+		t.Errorf("first code = %q", got[0].FirstCode)
 	}
 }

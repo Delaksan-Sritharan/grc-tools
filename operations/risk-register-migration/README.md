@@ -45,14 +45,21 @@ this repo). Section references (§n) in the code comments point there.
 7. **Verify** (real run only, `verify.go`) — re-reads every migratable row back
    from the entity (`GET /risks/{id}/detail` + escalations + grants, plus
    `GET /risks/{id}/assessments` for any row where Residual differs from
-   Gross) and diffs it, field by field, against the CSV — including customer and
-   deployment type (by id), products and environments (as sets), and that no
-   compliance reference is present; also confirms every
-   rejected row still has no matching risk. Runs unconditionally, covering
-   every migratable row — including ones already complete from an earlier
-   run and `Skipped` this time — not just what this invocation wrote. A
-   disagreement becomes a `MISMATCH` finding in the same report as
-   `REJECT`/`WARN`.
+   Gross) and diffs it, field by field, against the CSV. That includes:
+   - customer and deployment type (by id), products and environments (as sets),
+     and that no compliance reference is present;
+   - the entity-assigned risk code: it must start with the row's own
+     `YEAR-REGISTER-CUSTOMER-QUARTER-` followed by a number. The number itself
+     is not checked, because a row the entity rejected earlier shifts it;
+   - unexpected grants: only RISK_TEAM grants on teams this sheet touches are
+     inspected, because the original migration's grants carry the same marker.
+     Stale GLOBAL grants go unflagged.
+
+   It also confirms every rejected row still has no matching risk. It runs
+   unconditionally, covering every migratable row — including ones already
+   complete from an earlier run and `Skipped` this time — not just what this
+   invocation wrote. A disagreement becomes a `MISMATCH` finding in the same
+   report as `REJECT`/`WARN`.
 
 ## The Managed Services sheet
 
@@ -97,6 +104,11 @@ allowed-values list). In short:
    Owner grants itself for every `IN_REMEDIATION` row.
 
 ### What the dry run prints
+
+A dry run reaches the same row-level verdicts as the real run, so a clean dry
+run is not followed by a real run that rejects rows: besides everything the
+parser rejects, it REJECTs rows that share a natural key with another row in the
+sheet, and rows that already match two marker risks in the entity.
 
 Besides `errors.csv`, `report.txt` gains, when there is something to say:
 
@@ -297,14 +309,26 @@ disable verification and no new exit code.
 
 ## Rollback
 
-`rollback.sql` — by-marker `DELETE` in FK order, run by hand against the target
-DB. The tool never deletes. The Managed Services template rows go with their
-risks (cascade). The per-customer counters have no marker, so the script records
-the affected customers first and afterwards resets each counter to the highest
-number still in use (0 when the customer has no risk left); without that,
-numbering would resume after the rolled-back risks. Tested against the real
-schema on MySQL: a customer with a pre-existing risk keeps its number, a customer
-the import never touched keeps its counter.
+`rollback.sql`, run by hand against the target DB. The tool never deletes.
+
+The `risk-sheet-migration` marker is **not unique to this import**: the original
+register migration wrote its risks and grants under the same marker in the same
+database, so deleting by marker alone would delete those too. The script
+selects this import's risks as those with the marker **and** a
+`risk_managed_service_detail` row, and deletes their children by risk id. It
+deletes only RISK_TEAM grants (with the marker) on the teams those risks use.
+GLOBAL grants (the management-approver grant) cannot be attributed to one
+migration, so they are listed for review, never deleted. The preview also
+counts the marker risks it will leave alone.
+
+The Managed Services template rows go with their risks (cascade). The
+per-customer counters have no marker, so the script records the affected
+customers first and afterwards resets each counter to the highest number still
+in use (0 when the customer has no risk left); without that, numbering would
+resume after the rolled-back risks. Tested against the real schema on MySQL with
+the original migration's data alongside: a customer with a pre-existing risk
+keeps its number, the original migration's risks, plans, history and grants
+survive, and an admin-created grant on the same team survives.
 
 ## Status
 

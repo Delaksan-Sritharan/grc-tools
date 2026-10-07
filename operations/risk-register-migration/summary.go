@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"sort"
 	"strings"
 )
@@ -33,7 +34,28 @@ import (
 // the real number at create time; this is the same format, used to show the
 // operator what a run is about to produce.
 func riskCode(year int, teamCode, customerCode, quarter string, seq int) string {
-	return fmt.Sprintf("%d-%s-%s-%s-%04d", year, teamCode, customerCode, quarter, seq)
+	return fmt.Sprintf("%s%04d", riskCodePrefix(year, teamCode, customerCode, quarter), seq)
+}
+
+// riskCodePrefix is everything in a Managed Services risk code before the
+// number. The tool can vouch for this part (it knows the row's year, quarter,
+// register and customer); the number is the entity's to assign.
+func riskCodePrefix(year int, teamCode, customerCode, quarter string) string {
+	return fmt.Sprintf("%d-%s-%s-%s-", year, teamCode, customerCode, quarter)
+}
+
+// riskCodeHasPrefix reports whether code is prefix followed by a number.
+func riskCodeHasPrefix(code, prefix string) bool {
+	rest, ok := strings.CutPrefix(code, prefix)
+	if !ok || rest == "" {
+		return false
+	}
+	for _, r := range rest {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // CustomerSummary is one customer's line in the report.
@@ -99,23 +121,53 @@ func buildCustomerSummaries(rows []Row, rd RefData, progress map[int]ResumeState
 
 // existingRisks says which rows already have a marker risk, matched by the
 // same natural key resume uses. It reads only the risk search, so a dry run can
-// call it; a row with no match is absent from the map's RiskID (zero).
-func existingRisks(ctx context.Context, ec *EntityClient, rows []Row) (map[int]ResumeState, error) {
+// call it. A row that matches more than one marker risk is REJECTed exactly as
+// reconstructState would reject it, and is left unmatched; a row with no match
+// is absent from the map (its RiskID is zero).
+func existingRisks(ctx context.Context, ec *EntityClient, rows []Row, rep *Report) (map[int]ResumeState, error) {
 	found, err := searchMarkerRisks(ctx, ec, rows)
 	if err != nil {
 		return nil, err
 	}
-	byKey := map[string]Risk{}
+	byKey := map[string][]Risk{}
 	for _, r := range found {
-		byKey[naturalKey(r.RiskTitle, r.SourceRegID, deref(r.CustomerName), r.RiskYear, r.RiskQuarter)] = r
+		k := naturalKey(r.RiskTitle, r.SourceRegID, deref(r.CustomerName), r.RiskYear, r.RiskQuarter)
+		byKey[k] = append(byKey[k], r)
 	}
 	out := make(map[int]ResumeState, len(rows))
 	for _, row := range rows {
-		if r, ok := byKey[naturalKey(row.RiskTitle, row.SourceRegisterID, row.Customer, row.RiskYear, row.RiskQuarter)]; ok {
-			out[row.MigrationID] = ResumeState{Progress: ProgressCreated, RiskID: r.ID, CurrentStatus: r.WorkflowStatus}
+		matches := byKey[naturalKey(row.RiskTitle, row.SourceRegisterID, row.Customer, row.RiskYear, row.RiskQuarter)]
+		switch len(matches) {
+		case 0:
+		case 1:
+			out[row.MigrationID] = ResumeState{Progress: ProgressCreated, RiskID: matches[0].ID, CurrentStatus: matches[0].WorkflowStatus}
+		default:
+			rep.Add(ambiguousMatchFinding(row, len(matches)))
 		}
 	}
 	return out, nil
+}
+
+// dryRunChecks is what a dry run learns from the entity beyond preflight. It
+// reaches the same row-level verdicts the real run reaches in reconstructState
+// (rows that share a natural key, rows that match two existing risks), then
+// fills the per-customer summary from the rows that survive. It only reads, and
+// returns the rows that survive.
+func dryRunChecks(ctx context.Context, log *slog.Logger, ec *EntityClient, rd RefData, pending []Row, rep *Report) ([]Row, error) {
+	rejectDuplicateKeys(pending, rep)
+	pending = selectMigratable(pending, rep)
+
+	existing, err := existingRisks(ctx, ec, pending, rep)
+	if err != nil {
+		log.Error("could not look up existing risks — aborting", "err", err)
+		return nil, err
+	}
+	pending = selectMigratable(pending, rep)
+
+	if err := summarizeCustomers(ctx, log, ec, rd, pending, existing, rep); err != nil {
+		return nil, err
+	}
+	return pending, nil
 }
 
 // computeCustomerSummaries reads each customer's next number from the entity

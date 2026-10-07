@@ -139,6 +139,11 @@ type fakeEntity struct {
 	// customerNames resolves CreateRiskRequest.CustomerID to the name /risks/search
 	// returns (domain.Risk.CustomerName). Matches fixtureRefData's customers.
 	customerNames map[int]string
+	// teamCodes / customerCodes / issued let the fake assign risk codes the way
+	// the entity does: YEAR-TEAM-CUSTOMER-QUARTER-NNNN, numbered per customer.
+	teamCodes     map[int]string
+	customerCodes map[int]string
+	issued        map[int]int
 	// nextSeq is each customer's next risk number for GET
 	// /risks/next-sequence-number; nextSeqCalls counts the reads.
 	nextSeq      map[int]int
@@ -161,8 +166,9 @@ func newFakeEntity(t *testing.T) *fakeEntity {
 		t: t, risks: map[int]*Risk{}, escalations: map[int][]Escalation{},
 		planStatus: map[int]string{}, grants: map[int][]Grant{}, assessments: map[int][]Assessment{}, users: map[string]int{},
 		createReqByRisk: map[int]CreateRiskRequest{}, complianceApprovalDate: map[int]string{},
-		planCompletedDate:    map[int]string{},
-		customerNames:        map[int]string{20: "BankOne", 21: "Bank Of China"},
+		planCompletedDate: map[int]string{},
+		customerNames:     map[int]string{20: "BankOne", 21: "Bank Of China"},
+		teamCodes:         map[int]string{1: "MS"}, customerCodes: map[int]string{20: "BO", 21: "BOC"}, issued: map[int]int{},
 		complianceRefsByRisk: map[int][]int{},
 		nextRiskID:           1000, nextUserID: 500,
 	}
@@ -250,6 +256,11 @@ func (fe *fakeEntity) handle(w http.ResponseWriter, r *http.Request) {
 				fe.risks[fe.nextRiskID].CustomerName = &name
 			}
 		}
+		if body.CustomerID != nil {
+			fe.issued[*body.CustomerID]++
+			fe.risks[fe.nextRiskID].RiskCode = riskCode(body.RiskYear, fe.teamCodes[body.SourceRegisterID],
+				fe.customerCodes[*body.CustomerID], body.RiskQuarter, fe.issued[*body.CustomerID])
+		}
 		fe.createReqByRisk[fe.nextRiskID] = body
 		w.WriteHeader(http.StatusCreated)
 		_ = enc.Encode(map[string]any{
@@ -275,7 +286,7 @@ func (fe *fakeEntity) handle(w http.ResponseWriter, r *http.Request) {
 			complianceApprovalDate = d
 		}
 		_ = enc.Encode(map[string]any{
-			"id": id, "riskTitle": body.RiskTitle, "riskDescription": body.RiskDescription,
+			"id": id, "riskCode": rk.RiskCode, "riskTitle": body.RiskTitle, "riskDescription": body.RiskDescription,
 			"riskYear": body.RiskYear, "riskQuarter": body.RiskQuarter,
 			"sourceRegisterId": body.SourceRegisterID, "assignmentTeamId": body.AssignmentTeamID,
 			"assignerId": body.AssignerID, "ownerId": body.OwnerID,
