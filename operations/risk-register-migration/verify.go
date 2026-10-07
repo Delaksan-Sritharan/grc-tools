@@ -64,7 +64,7 @@ func verifyMigration(ctx context.Context, log *slog.Logger, ec *EntityClient, rd
 	}
 	risksByKey := map[string][]Risk{}
 	for _, r := range existing {
-		k := naturalKey(r.RiskTitle, r.SourceRegID, r.RiskYear, r.RiskQuarter)
+		k := naturalKey(r.RiskTitle, r.SourceRegID, deref(r.CustomerName), r.RiskYear, r.RiskQuarter)
 		risksByKey[k] = append(risksByKey[k], r)
 	}
 
@@ -92,7 +92,7 @@ func verifyMigration(ctx context.Context, log *slog.Logger, ec *EntityClient, rd
 	grantCache := map[int][]Grant{}
 
 	for _, row := range allRows {
-		key := naturalKey(row.RiskTitle, row.SourceRegisterID, row.RiskYear, row.RiskQuarter)
+		key := naturalKey(row.RiskTitle, row.SourceRegisterID, row.Customer, row.RiskYear, row.RiskQuarter)
 		matches := risksByKey[key]
 
 		if _, bad := rejected[row.MigrationID]; bad {
@@ -124,6 +124,10 @@ func verifyMigration(ctx context.Context, log *slog.Logger, ec *EntityClient, rd
 			mismatchCount++
 			rep.Add(mismatchFinding(row, "risk missing", "no matching risk found in the entity after a real run"))
 		case 1:
+			rep.AddRiskCode(RiskCodeEntry{
+				MigrationID: row.MigrationID, Customer: row.Customer,
+				RiskCode: matches[0].RiskCode, RiskTitle: row.RiskTitle,
+			})
 			mismatches, err := verifyRow(ctx, ec, rd, migrationDate, row, matches[0].ID, grantCache)
 			if err != nil {
 				// verifyRow only ever reads (GetRiskDetail/ListEscalations/
@@ -172,7 +176,19 @@ func verifyMigration(ctx context.Context, log *slog.Logger, ec *EntityClient, rd
 		}
 	}
 
-	extra, err := verifyNoExtraGrants(ctx, ec, expectedGrantsByUser, grantCache)
+	// The teams this sheet touches: the only scopes a stale grant of this
+	// import's could be on. See verifyNoExtraGrants for why nothing else is
+	// inspected.
+	inScopeTeams := map[int]bool{}
+	for _, row := range allRows {
+		for _, id := range []int{row.SourceRegisterID, row.AssignmentTeamID} {
+			if id != 0 {
+				inScopeTeams[id] = true
+			}
+		}
+	}
+
+	extra, err := verifyNoExtraGrants(ctx, ec, expectedGrantsByUser, inScopeTeams, grantCache)
 	if err != nil {
 		return err
 	}
@@ -185,11 +201,19 @@ func verifyMigration(ctx context.Context, log *slog.Logger, ec *EntityClient, rd
 }
 
 // verifyNoExtraGrants flags a marker-created grant that isn't expected by any
-// migratable row for that user — e.g. a stale grant left over from a CSV that
-// used to grant management approval on a since-lowered score. Only ever
-// inspects createdBy==marker rows: a grant from unrelated platform activity
-// (an admin, another migration) is never this tool's business.
-func verifyNoExtraGrants(ctx context.Context, ec *EntityClient, expectedByUser map[int]map[string]struct{}, grantCache map[int][]Grant) ([]Finding, error) {
+// migratable row for that user — e.g. a stale grant left over from an earlier
+// version of this sheet that named a different assignment team.
+//
+// The marker is not unique to this import: the original register migration
+// wrote its grants under the same created_by, and the same people own risks in
+// both. So a marker alone does not make a grant this tool's business. Only
+// RISK_TEAM grants on a team this sheet touches (inScopeTeams: its source
+// register and assignment teams) are inspected. GLOBAL grants are skipped: the
+// management-approver grant is GLOBAL, and nothing says which migration wrote
+// it. The cost is that a stale management grant from an earlier run of this
+// same sheet goes unnoticed; the alternative is a false MISMATCH for every
+// approver the two migrations share.
+func verifyNoExtraGrants(ctx context.Context, ec *EntityClient, expectedByUser map[int]map[string]struct{}, inScopeTeams map[int]bool, grantCache map[int][]Grant) ([]Finding, error) {
 	userIDs := make([]int, 0, len(expectedByUser))
 	for id := range expectedByUser {
 		userIDs = append(userIDs, id)
@@ -209,7 +233,7 @@ func verifyNoExtraGrants(ctx context.Context, ec *EntityClient, expectedByUser m
 		}
 		expected := expectedByUser[userID]
 		for _, g := range grants {
-			if g.CreatedBy != marker {
+			if g.CreatedBy != marker || g.ScopeType != "RISK_TEAM" || !inScopeTeams[g.ScopeID] {
 				continue
 			}
 			key := grantKey(g.RoleID, g.ScopeType, g.ScopeID)
@@ -269,6 +293,18 @@ func verifyRow(ctx context.Context, ec *EntityClient, rd RefData, migrationDate 
 	}
 
 	add("Risk Title", row.RiskTitle, detail.RiskTitle)
+	// The entity assigns the risk code. Its number is not ours to vouch for (a row
+	// the entity rejected earlier shifts it), but the rest is the row's own year,
+	// register code, customer code and quarter: a wrong customer or register code
+	// would otherwise survive every other check.
+	prefix := riskCodePrefix(row.RiskYear, rd.TeamCodeByID[row.SourceRegisterID], rd.CustomerCodeByID[row.CustomerID], row.RiskQuarter)
+	if !riskCodeHasPrefix(detail.RiskCode, prefix) {
+		got := detail.RiskCode
+		if got == "" {
+			got = "(empty)"
+		}
+		out = append(out, fieldMismatch{"Risk Code", prefix + "NNNN", got})
+	}
 	add("Risk Description", row.RiskDescription, strOrNil(detail.RiskDescription))
 	add("Source Register", strconv.Itoa(row.SourceRegisterID), strconv.Itoa(detail.SourceRegisterID))
 	add("Assignment Team", strconv.Itoa(row.AssignmentTeamID), strconv.Itoa(detail.AssignmentTeamID))
@@ -322,8 +358,19 @@ func verifyRow(ctx context.Context, ec *EntityClient, rd RefData, migrationDate 
 		}
 	}
 
-	if diff := diffIntSets(row.ComplianceRefIDs, complianceRefIDs(detail.ComplianceReferences)); diff != "" {
-		out = append(out, fieldMismatch{"Security Compliance Reference", fmt.Sprint(row.ComplianceRefIDs), diff})
+	// Managed Services template fields: single values compared by id (a renamed
+	// customer must not read as a mismatch), the two sets without regard to the
+	// order the entity returns them in.
+	add("Customer", strconv.Itoa(row.CustomerID), lookupRefID(detail.Customer))
+	add("Deployment Type", strconv.Itoa(row.DeploymentTypeID), lookupRefID(detail.DeploymentType))
+	if diff := diffIntSets(row.ProductIDs, lookupIDs(detail.Products)); diff != "" {
+		out = append(out, fieldMismatch{"Product", fmt.Sprint(row.ProductIDs), diff})
+	}
+	if diff := diffStringSets(row.Environments, detail.Environments); diff != "" {
+		out = append(out, fieldMismatch{"Environment", fmt.Sprint(row.Environments), diff})
+	}
+	if diff := diffIntSets(nil, complianceRefIDs(detail.ComplianceReferences)); diff != "" {
+		out = append(out, fieldMismatch{"Security Compliance Reference", "none", diff})
 	}
 	if diff := diffIntSets(row.RiskCategoryIDs, riskCategoryIDs(detail.RiskCategories)); diff != "" {
 		out = append(out, fieldMismatch{"Risk Category", fmt.Sprint(row.RiskCategoryIDs), diff})
@@ -399,6 +446,51 @@ func standardPlanCompletedDate(plans []ActionPlanView) string {
 		}
 	}
 	return ""
+}
+
+// lookupRefID renders a single lookup value's id for comparison, or "none".
+func lookupRefID(l *RiskLookup) string {
+	if l == nil {
+		return "none"
+	}
+	return strconv.Itoa(l.ID)
+}
+
+func lookupIDs(ls []RiskLookup) []int {
+	ids := make([]int, len(ls))
+	for i, l := range ls {
+		ids[i] = l.ID
+	}
+	return ids
+}
+
+// diffStringSets is diffIntSets for strings.
+func diffStringSets(want, got []string) string {
+	ws := map[string]bool{}
+	for _, w := range want {
+		ws[w] = true
+	}
+	gs := map[string]bool{}
+	for _, g := range got {
+		gs[g] = true
+	}
+	var missing, extra []string
+	for w := range ws {
+		if !gs[w] {
+			missing = append(missing, w)
+		}
+	}
+	for g := range gs {
+		if !ws[g] {
+			extra = append(extra, g)
+		}
+	}
+	if len(missing) == 0 && len(extra) == 0 {
+		return ""
+	}
+	sort.Strings(missing)
+	sort.Strings(extra)
+	return fmt.Sprintf("missing=%v extra=%v", missing, extra)
 }
 
 func complianceRefIDs(refs []ComplianceRef) []int {

@@ -47,7 +47,17 @@ type Finding struct {
 	// Value is the raw offending token when there is one — an unresolvable
 	// email, an unknown reference. Feeds the report's "unresolved people" list.
 	Value string
+	// Problem says why a lookup value was refused, so the report can group the
+	// values the admins must add (ProblemUnknown) apart from those they must
+	// reactivate (ProblemInactive). Empty for every other kind of finding.
+	Problem string
 }
+
+// Lookup problems (Finding.Problem).
+const (
+	ProblemUnknown  = "unknown"
+	ProblemInactive = "inactive"
+)
 
 // personColumns are the Failure codes whose Value is an unresolvable email.
 var personColumns = map[string]bool{
@@ -66,7 +76,23 @@ type Report struct {
 	grantsWritten          int
 	assessmentsWritten     int
 	suppressingEscalations []int // Migration IDs that got a D8 suppressing escalation
+
+	customerSummaries []CustomerSummary
+	riskCodes         []RiskCodeEntry
 }
+
+// RiskCodeEntry is one line of the Migration ID -> risk code list printed after
+// a real run. The codes are assigned by the entity, are permanent, and go out in
+// emails and Git issues, so whoever owns the sheet needs to match them to rows.
+type RiskCodeEntry struct {
+	MigrationID int
+	Customer    string
+	RiskCode    string
+	RiskTitle   string
+}
+
+// AddRiskCode records a migrated risk's code for the risk_codes.csv block.
+func (r *Report) AddRiskCode(e RiskCodeEntry) { r.riskCodes = append(r.riskCodes, e) }
 
 func NewReport() *Report { return &Report{migratedByBucket: map[string]int{}} }
 
@@ -80,6 +106,10 @@ func (r *Report) Migrated(bucket string) {
 }
 
 func (r *Report) Skipped() { r.skipped++ }
+
+// SetCustomerSummaries stores the per-customer summary (summary.go) for the
+// report.txt block.
+func (r *Report) SetCustomerSummaries(s []CustomerSummary) { r.customerSummaries = s }
 
 func (r *Report) GrantWritten() { r.grantsWritten++ }
 
@@ -151,9 +181,29 @@ func (r *Report) Emit(w io.Writer) {
 	cw.Flush()
 
 	r.emitNarrative(&buf)
+	r.emitRiskCodes(&buf)
 	fmt.Fprintln(&buf, "----- end report -----")
 
 	_, _ = w.Write(buf.Bytes())
+}
+
+// emitRiskCodes prints the Migration ID -> risk code list as a CSV block, sorted
+// by Migration ID. Nothing is printed when no code was recorded (a dry run, or a
+// run that migrated nothing).
+func (r *Report) emitRiskCodes(w io.Writer) {
+	if len(r.riskCodes) == 0 {
+		return
+	}
+	entries := append([]RiskCodeEntry(nil), r.riskCodes...)
+	sort.Slice(entries, func(i, j int) bool { return entries[i].MigrationID < entries[j].MigrationID })
+
+	fmt.Fprintln(w, "\n----- risk_codes.csv -----")
+	cw := csv.NewWriter(w)
+	_ = cw.Write([]string{"migration_id", "customer", "risk_code", "risk_title"})
+	for _, e := range entries {
+		_ = cw.Write([]string{strconv.Itoa(e.MigrationID), e.Customer, e.RiskCode, e.RiskTitle})
+	}
+	cw.Flush()
 }
 
 // emitNarrative is the report.txt block (plan §9): a failure-code breakdown,
@@ -187,6 +237,9 @@ func (r *Report) emitNarrative(w io.Writer) {
 			fmt.Fprintf(w, "  %4d  %s\n", row.n, row.k)
 		}
 	}
+
+	r.emitLookupProblems(w)
+	r.emitCustomerSummaries(w)
 
 	// Distinct unresolved people.
 	emails := map[string]struct{}{}

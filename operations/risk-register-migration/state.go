@@ -97,8 +97,8 @@ const searchPageLimit = 100
 // entity and derives how far it got. It queries /risks/search scoped to the
 // union of the pending rows' registers / years / quarters (that endpoint has no
 // createdBy filter, so the marker is applied client-side), pages through every
-// result, and indexes by the natural key (title + source register + year +
-// quarter). A natural-key collision — two pending rows on one key, or two
+// result, and indexes by the natural key (title + source register + customer +
+// year + quarter). A natural-key collision — two pending rows on one key, or two
 // marker risks on one key — is a data-quality problem: the affected rows get a
 // REJECT and are not migrated.
 func reconstructState(ctx context.Context, ec *EntityClient, rd RefData, migrationDate string, rows []Row, rep *Report) (map[int]ResumeState, error) {
@@ -113,28 +113,17 @@ func reconstructState(ctx context.Context, ec *EntityClient, rd RefData, migrati
 	}
 	risksByKey := map[string][]Risk{}
 	for _, r := range existing {
-		k := naturalKey(r.RiskTitle, r.SourceRegID, r.RiskYear, r.RiskQuarter)
+		k := naturalKey(r.RiskTitle, r.SourceRegID, deref(r.CustomerName), r.RiskYear, r.RiskQuarter)
 		risksByKey[k] = append(risksByKey[k], r)
 	}
 
-	rowIDsByKey := map[string][]int{}
-	for _, row := range rows {
-		k := naturalKey(row.RiskTitle, row.SourceRegisterID, row.RiskYear, row.RiskQuarter)
-		rowIDsByKey[k] = append(rowIDsByKey[k], row.MigrationID)
-	}
+	collided := rejectDuplicateKeys(rows, rep)
 
 	for _, row := range rows {
-		k := naturalKey(row.RiskTitle, row.SourceRegisterID, row.RiskYear, row.RiskQuarter)
-
-		if len(rowIDsByKey[k]) > 1 {
-			rep.Add(Finding{
-				MigrationID: row.MigrationID, CSVRow: row.CSVLine, RiskTitle: row.RiskTitle,
-				Severity: SevReject, Failure: "natural key",
-				Detail: fmt.Sprintf("Migration IDs %v share (title, source register, year, quarter) — indistinguishable on resume",
-					rowIDsByKey[k]),
-			})
+		if _, bad := collided[row.MigrationID]; bad {
 			continue
 		}
+		k := naturalKey(row.RiskTitle, row.SourceRegisterID, row.Customer, row.RiskYear, row.RiskQuarter)
 
 		switch matches := risksByKey[k]; len(matches) {
 		case 0:
@@ -151,14 +140,47 @@ func reconstructState(ctx context.Context, ec *EntityClient, rd RefData, migrati
 				HasAssessment: st.hasAssessment,
 			}
 		default:
-			rep.Add(Finding{
-				MigrationID: row.MigrationID, CSVRow: row.CSVLine, RiskTitle: row.RiskTitle,
-				Severity: SevReject, Failure: "natural key",
-				Detail: fmt.Sprintf("%d marker risks already match this row's (title, source register, year, quarter)", len(matches)),
-			})
+			rep.Add(ambiguousMatchFinding(row, len(matches)))
 		}
 	}
 	return out, nil
+}
+
+// rejectDuplicateKeys REJECTs every row that shares its natural key with another
+// row in the sheet: such rows are indistinguishable on resume. It returns the
+// set of Migration IDs it rejected. The real run reaches this through
+// reconstructState; the dry run calls it directly, so both give the same verdict.
+func rejectDuplicateKeys(rows []Row, rep *Report) map[int]struct{} {
+	idsByKey := map[string][]int{}
+	for _, row := range rows {
+		k := naturalKey(row.RiskTitle, row.SourceRegisterID, row.Customer, row.RiskYear, row.RiskQuarter)
+		idsByKey[k] = append(idsByKey[k], row.MigrationID)
+	}
+	collided := map[int]struct{}{}
+	for _, row := range rows {
+		k := naturalKey(row.RiskTitle, row.SourceRegisterID, row.Customer, row.RiskYear, row.RiskQuarter)
+		if len(idsByKey[k]) <= 1 {
+			continue
+		}
+		collided[row.MigrationID] = struct{}{}
+		rep.Add(Finding{
+			MigrationID: row.MigrationID, CSVRow: row.CSVLine, RiskTitle: row.RiskTitle,
+			Severity: SevReject, Failure: "natural key",
+			Detail: fmt.Sprintf("Migration IDs %v share (title, source register, customer, year, quarter) — indistinguishable on resume",
+				idsByKey[k]),
+		})
+	}
+	return collided
+}
+
+// ambiguousMatchFinding is the REJECT for a row whose natural key already
+// matches more than one marker risk in the entity.
+func ambiguousMatchFinding(row Row, matches int) Finding {
+	return Finding{
+		MigrationID: row.MigrationID, CSVRow: row.CSVLine, RiskTitle: row.RiskTitle,
+		Severity: SevReject, Failure: "natural key",
+		Detail: fmt.Sprintf("%d marker risks already match this row's (title, source register, customer, year, quarter)", matches),
+	}
 }
 
 // searchMarkerRisks pages /risks/search over the union of the rows' registers /
@@ -599,33 +621,36 @@ func migrateRow(ctx context.Context, ec *EntityClient, cfg Config, rd RefData, r
 // rather than "".
 func buildCreateRiskRequest(row Row) CreateRiskRequest {
 	req := CreateRiskRequest{
-		RiskTitle:              row.RiskTitle,
-		RiskDescription:        ptrOrNil(row.RiskDescription),
-		SourceRegisterID:       row.SourceRegisterID,
-		AssignmentTeamID:       row.AssignmentTeamID,
-		AssignerID:             row.AssignerID,
-		OwnerID:                row.OwnerID,
-		ManagementApproverID:   row.ManagementApproverID,
-		RiskYear:               row.RiskYear,
-		RiskQuarter:            row.RiskQuarter,
-		Likelihood:             row.GrossLikelihood,
-		Impact:                 row.GrossImpact,
-		TreatmentStrategy:      ptrOrNil(row.TreatmentStrategy),
-		ImplementationDate:     ptrOrNil(row.ImplementationDate),
-		ReassessmentDate:       ptrOrNil(row.ReassessmentDate),
-		ImpactDescription:      ptrOrNil(row.ImpactDescription),
-		RiskIdentifiedDate:     ptrOrNil(row.RiskIdentifiedDate),
-		IdentifiedByType:       ptrOrNil(row.IdentifiedByType),
-		IdentifiedByName:       ptrOrNil(row.IdentifiedByName),
-		GitIssueURL:            ptrOrNil(row.GitIssueURL),
-		EmailSubject:           ptrOrNil(row.EmailSubject),
-		Remarks:                ptrOrNil(row.Remarks),
-		Progress:               ptrOrNil(row.Progress),
-		ActionOwnerID:          row.ActionOwnerID,
-		ActionPlanDescription:  ptrOrNil(row.ActionPlanDescription),
-		ComplianceReferenceIDs: row.ComplianceRefIDs,
-		RiskCategoryIDs:        row.RiskCategoryIDs,
-		CreatedBy:              marker,
+		RiskTitle:             row.RiskTitle,
+		RiskDescription:       ptrOrNil(row.RiskDescription),
+		SourceRegisterID:      row.SourceRegisterID,
+		AssignmentTeamID:      row.AssignmentTeamID,
+		AssignerID:            row.AssignerID,
+		OwnerID:               row.OwnerID,
+		ManagementApproverID:  row.ManagementApproverID,
+		RiskYear:              row.RiskYear,
+		RiskQuarter:           row.RiskQuarter,
+		Likelihood:            row.GrossLikelihood,
+		Impact:                row.GrossImpact,
+		TreatmentStrategy:     ptrOrNil(row.TreatmentStrategy),
+		ImplementationDate:    ptrOrNil(row.ImplementationDate),
+		ReassessmentDate:      ptrOrNil(row.ReassessmentDate),
+		ImpactDescription:     ptrOrNil(row.ImpactDescription),
+		RiskIdentifiedDate:    ptrOrNil(row.RiskIdentifiedDate),
+		IdentifiedByType:      ptrOrNil(row.IdentifiedByType),
+		IdentifiedByName:      ptrOrNil(row.IdentifiedByName),
+		GitIssueURL:           ptrOrNil(row.GitIssueURL),
+		EmailSubject:          ptrOrNil(row.EmailSubject),
+		Remarks:               ptrOrNil(row.Remarks),
+		Progress:              ptrOrNil(row.Progress),
+		ActionOwnerID:         row.ActionOwnerID,
+		ActionPlanDescription: ptrOrNil(row.ActionPlanDescription),
+		RiskCategoryIDs:       row.RiskCategoryIDs,
+		CustomerID:            &row.CustomerID,
+		DeploymentTypeID:      &row.DeploymentTypeID,
+		ProductIDs:            row.ProductIDs,
+		Environments:          row.Environments,
+		CreatedBy:             marker,
 	}
 	for _, s := range row.ActionSteps {
 		req.ActionSteps = append(req.ActionSteps, ActionStepInput{Description: s})
@@ -684,6 +709,18 @@ func ptrOrNil(s string) *string {
 	return &s
 }
 
-func naturalKey(title string, sourceRegID, year int, quarter string) string {
-	return strings.TrimSpace(title) + "\x00" + strconv.Itoa(sourceRegID) + "\x00" + strconv.Itoa(year) + "\x00" + quarter
+// naturalKey identifies a risk across runs: title + source register + customer
+// + year + quarter. The customer is compared the way the lookups are (case and
+// inner spacing ignored), so a sheet's "  bankone " and the entity's "BankOne"
+// are the same customer.
+func naturalKey(title string, sourceRegID int, customer string, year int, quarter string) string {
+	return strings.TrimSpace(title) + "\x00" + strconv.Itoa(sourceRegID) + "\x00" + normHeader(customer) +
+		"\x00" + strconv.Itoa(year) + "\x00" + quarter
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

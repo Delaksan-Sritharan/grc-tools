@@ -206,29 +206,6 @@ func parseDate(s string) (string, error) {
 	return "", fmt.Errorf("%q is not a recognised date", s)
 }
 
-// complianceAliases fold common spellings onto the seeded reference names
-// (RefData.ComplianceIDByName keys are upper-cased). Applied after the token is
-// trimmed and upper-cased.
-var complianceAliases = map[string]string{
-	"HIPPA":     "HIPAA",
-	"SOC 2":     "SOC2",
-	"PCI":       "PCI DSS",
-	"PCI-DSS":   "PCI DSS",
-	"PCIDSS":    "PCI DSS",
-	"ISO 27001": "ISO",
-	"ISO27001":  "ISO",
-}
-
-// normalizeComplianceToken trims, upper-cases and de-aliases one
-// security-compliance-reference token.
-func normalizeComplianceToken(s string) string {
-	key := strings.ToUpper(strings.TrimSpace(s))
-	if alias, ok := complianceAliases[key]; ok {
-		return alias
-	}
-	return key
-}
-
 var httpURLRe = regexp.MustCompile(`(?i)^https?://\S`)
 
 // scrubHTTPURL returns (trimmed, true) when s looks like an http(s) URL, and

@@ -23,22 +23,10 @@ import (
 	"testing"
 )
 
-// sheetTestRefData is a RefData with enough teams / categories / refs for the
-// mapping tests (a superset of goodRefInputs).
+// sheetTestRefData is the Managed Services RefData shared with sheet_ms_test.go.
 func sheetTestRefData(t *testing.T) RefData {
 	t.Helper()
-	teams := []RiskTeam{
-		{ID: 1, Name: "Asgardeo", Code: strptr("ASG"), Status: "ACTIVE"},
-		{ID: 8, Name: "Legal", Code: nil, Status: "ACTIVE"},
-	}
-	cats := []RiskCategory{{ID: 3, Name: "Access Control & Credentials"}}
-	refs := []ComplianceRef{{ID: 2, Name: "ISO"}, {ID: 5, Name: "SOC2"}, {ID: 6, Name: "HIPAA"}}
-	scores := []RiskScore{{ID: 7, Likelihood: 3, Impact: 2}}
-	rd, err := buildRefData(teams, cats, refs, scores, goodRoles())
-	if err != nil {
-		t.Fatalf("buildRefData: %v", err)
-	}
-	return rd
+	return msRefData(t)
 }
 
 // buildCSV renders a header row from expectedHeaders plus the given data rows.
@@ -78,23 +66,23 @@ func findingsFor(fs []Finding, failure string) []Finding {
 // just because of that invisible prefix.
 func TestParseSheet_StripsUTF8BOM(t *testing.T) {
 	csvText := buildCSV(t, map[string]string{
-		"Year":                          "2025",
-		"Quarter":                       "Q3",
-		"Source Register":               "Asgardeo",
-		"Risk Title":                    "BOM smoke test",
-		"Security Compliance Reference": "ISO",
-		"Risk Category":                 "Access Control & Credentials",
-		"Risk Assigned To":              "user1@wso2.com",
-		"Likelihood":                    "2",
-		"Impact":                        "2",
-		"Implementation Date":           "2025-06-30",
-		"Assignment Team":               "Legal",
-		"Risk Owner":                    "user2@wso2.com",
-		"Management Approver":           "user3@wso2.com",
-		"Action Steps":                  "Do the thing",
-		"Treatment Strategy":            "Accept",
-		"Workflow Status":               "IN_REMEDIATION",
-		"Migration ID":                  "1",
+		"Year":            "2025",
+		"Quarter":         "Q3",
+		"Source Register": "Managed Services",
+		"Customer":        "BankOne", "Deployment Type": "Private Cloud", "Product": "APIM", "Environment": "Production",
+		"Risk Title":          "BOM smoke test",
+		"Risk Category":       "Access Control & Credentials",
+		"Risk Assigned To":    "user1@wso2.com",
+		"Likelihood":          "2",
+		"Impact":              "2",
+		"Implementation Date": "2025-06-30",
+		"Assignment Team":     "SRE One",
+		"Risk Owner":          "user2@wso2.com",
+		"Management Approver": "user3@wso2.com",
+		"Action Steps":        "Do the thing",
+		"Treatment Strategy":  "Accept",
+		"Workflow Status":     "IN_REMEDIATION",
+		"Migration ID":        "1",
 	})
 	withBOM := "\xEF\xBB\xBF" + csvText
 
@@ -135,14 +123,14 @@ func TestParseSheet_StripsUTF8BOM_QuotedHeader(t *testing.T) {
 
 func TestMapRow_CleanRow(t *testing.T) {
 	csvText := buildCSV(t, map[string]string{
-		"Year":                          "2025.0",
-		"Quarter":                       "Q3",
-		"Source Register":               "Asgardeo",
-		"Risk Title":                    "Supplier contract renewal delay",
-		"Risk Description":              "Delay renewing supplier contracts.",
-		"Security Compliance Reference": "HIPPA",
-		"Risk Category":                 "Access Control & Credentials",
-		"Risk Identified By":            "Employee",
+		"Year":            "2025.0",
+		"Quarter":         "Q3",
+		"Source Register": "Managed Services",
+		"Customer":        "BankOne", "Deployment Type": "Private Cloud", "Product": "APIM", "Environment": "Production",
+		"Risk Title":         "Supplier contract renewal delay",
+		"Risk Description":   "Delay renewing supplier contracts.",
+		"Risk Category":      "Access Control & Credentials",
+		"Risk Identified By": "Employee",
 		"Select Employee/ Name of External Person/ Tool": "Employee One",
 		"Risk Identified Date":                           "45667.0",
 		"Risk Assigned To":                               "User1@wso2.com",
@@ -153,7 +141,7 @@ func TestMapRow_CleanRow(t *testing.T) {
 		"Impact Description":                             "service interruption",
 		"Implementation Date":                            "45838.0",
 		"Reassessment Date":                              "30th Sep 2025",
-		"Assignment Team":                                "Legal",
+		"Assignment Team":                                "SRE One",
 		"Risk Owner":                                     "user2@wso2.com",
 		"Management Approver":                            "user3@wso2.com",
 		"Action Owner":                                   "",
@@ -192,14 +180,11 @@ func TestMapRow_CleanRow(t *testing.T) {
 	if r.ImplementationDate != "2025-06-30" || r.RiskIdentifiedDate != "2025-01-10" || r.ReassessmentDate != "2025-09-30" {
 		t.Errorf("dates: impl=%q id=%q re=%q", r.ImplementationDate, r.RiskIdentifiedDate, r.ReassessmentDate)
 	}
-	if r.SourceRegisterID != 1 || r.AssignmentTeamID != 8 {
+	if r.SourceRegisterID != idRegMS || r.AssignmentTeamID != idTeamSRE {
 		t.Errorf("team ids: sr=%d at=%d", r.SourceRegisterID, r.AssignmentTeamID)
 	}
 	if len(r.RiskCategoryIDs) != 1 || r.RiskCategoryIDs[0] != 3 {
 		t.Errorf("category ids: %v", r.RiskCategoryIDs)
-	}
-	if len(r.ComplianceRefIDs) != 1 || r.ComplianceRefIDs[0] != 6 {
-		t.Errorf("compliance ids: %v (HIPPA should alias to HIPAA id 6)", r.ComplianceRefIDs)
 	}
 	if r.AssignerEmail != "user1@wso2.com" {
 		t.Errorf("assigner email not lowercased: %q", r.AssignerEmail)
@@ -219,28 +204,27 @@ func TestMapRow_CleanRow(t *testing.T) {
 
 func TestMapRow_MessyRowRejects(t *testing.T) {
 	csvText := buildCSV(t, map[string]string{
-		"Year":                          "twenty",
-		"Quarter":                       "Q9",
-		"Source Register":               "Nowhere",
-		"Risk Title":                    "",
-		"Security Compliance Reference": "ISO, BOGUS",
-		"Risk Category":                 "Unknown Category",
-		"Risk Identified By":            "Robot",
-		"Risk Identified Date":          "1/2/2024",
-		"Risk Assigned To":              "x@wso2.com",
-		"Gross Likelihood":              "5.0",
-		"Gross Impact":                  "0",
-		"Residual Likelihood":           "5.0",
-		"Residual Impact":               "0",
-		"Implementation Date":           "",
-		"Reassessment Date":             "whenever",
-		"Assignment Team":               "",
-		"Risk Owner":                    "y@wso2.com",
-		"Management Approver":           "z@wso2.com",
-		"Treatment Strategy":            "",
-		"Git Issue URL":                 "https://github.com/o/r/issues/9",
-		"Workflow Status":               "PENDING",
-		"Migration ID":                  "2",
+		"Year":                 "twenty",
+		"Quarter":              "Q9",
+		"Source Register":      "Nowhere",
+		"Risk Title":           "",
+		"Risk Category":        "Unknown Category",
+		"Risk Identified By":   "Robot",
+		"Risk Identified Date": "1/2/2024",
+		"Risk Assigned To":     "x@wso2.com",
+		"Gross Likelihood":     "5.0",
+		"Gross Impact":         "0",
+		"Residual Likelihood":  "5.0",
+		"Residual Impact":      "0",
+		"Implementation Date":  "",
+		"Reassessment Date":    "whenever",
+		"Assignment Team":      "",
+		"Risk Owner":           "y@wso2.com",
+		"Management Approver":  "z@wso2.com",
+		"Treatment Strategy":   "",
+		"Git Issue URL":        "https://github.com/o/r/issues/9",
+		"Workflow Status":      "PENDING",
+		"Migration ID":         "2",
 	})
 
 	rows, fs, err := parseSheet(strings.NewReader(csvText), sheetTestRefData(t))
@@ -255,7 +239,7 @@ func TestMapRow_MessyRowRejects(t *testing.T) {
 		"Year", "Quarter", "Risk Title", "Source Register", "Risk Category",
 		"Gross Likelihood", "Gross Impact", "Residual Likelihood", "Residual Impact",
 		"Implementation Date", "Assignment Team",
-		"Treatment Strategy", "Workflow Status", "Security Compliance Reference",
+		"Treatment Strategy", "Workflow Status", "Customer", "Deployment Type", "Product", "Environment",
 	}
 	for _, f := range wantReject {
 		got := findingsFor(fs, f)
@@ -292,12 +276,12 @@ func TestParseSheet_DuplicateMigrationIDRejects(t *testing.T) {
 	// a Migration ID — the natural-key collision check in reconstructState would
 	// miss this, so parseSheet has to catch it.
 	base := map[string]string{
-		"Year": "2025", "Quarter": "Q3", "Source Register": "Asgardeo",
-		"Security Compliance Reference": "ISO", "Risk Category": "Access Control & Credentials",
+		"Year": "2025", "Quarter": "Q3", "Source Register": "Managed Services", "Customer": "BankOne", "Deployment Type": "Private Cloud", "Product": "APIM", "Environment": "Production",
+		"Risk Category":    "Access Control & Credentials",
 		"Risk Assigned To": "a@wso2.com",
 		"Gross Likelihood": "3", "Gross Impact": "2",
 		"Residual Likelihood": "3", "Residual Impact": "2",
-		"Implementation Date": "45838.0", "Assignment Team": "Legal",
+		"Implementation Date": "45838.0", "Assignment Team": "SRE One",
 		"Risk Owner": "b@wso2.com", "Management Approver": "c@wso2.com",
 		"Action Plan Description": "x", "Action Steps": "step 1",
 		"Treatment Strategy": "Accept", "Workflow Status": "IN_REMEDIATION",

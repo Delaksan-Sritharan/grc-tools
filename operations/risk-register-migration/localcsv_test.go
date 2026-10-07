@@ -32,17 +32,17 @@ import (
 // file is pointed at for an actual local run. This test is the regression
 // lock that the shape stays fully valid: 5 rows, zero REJECTs, the dates /
 // aliases / buckets all landing where the runbook says.
-const localTestCSV = `Year,Quarter,Source Register,Risk Title,Risk Description,Security Compliance Reference ,Risk Category,Risk Identified By,Select Employee/ Name of External Person/ Tool,Risk Identified Date,Risk Assigned To,Gross Likelihood,Gross Impact,Residual Likelihood,Residual Impact,Impact Description,Implementation Date,Reassessment Date,Assignment Team,Risk Owner,Management Approver,Action Owner,Action Plan Description,Action Steps,Treatment Strategy,Progress,Git Issue URL,Email Subject,Remarks,Exidence Attachments,Workflow Status ,Migration ID
-2025,Q3,Asgardeo,Supplier contract renewal delay,Delay in renewing supplier contracts may cause service interruption and unplanned cost increases.,HIPPA,Access Control & Credentials,Employee,User One,"January 10, 2025",user1@wso2.com,3,2,3,2,Service interruption and unplanned cost increases for the organisation.,"June 30, 2025",30th Sep 2025,Business,user2@wso2.com,user1@wso2.com,user2@wso2.com,Targeting completion by end of 2025,"Action Item -1
-Action 2",Accept,WIP,https://github.com/wso2/product-risk/issues/101,Risk identification on threat models,Raised during the Q3 threat-model review.,,IN_REMEDIATION,1
-2025,Q3,Asgardeo,Employee security training gap,Absence of regular security awareness training increases susceptibility to phishing and social engineering.,BUSINESS,"Logging, Monitoring & Detection",Employee,User Two,"February 5, 2025",user2@wso2.com,2,3,2,3,"Higher susceptibility to phishing, social engineering and insider threats.","September 30, 2025",31st Dec 2025,Digi Ops,user1@wso2.com,user2@wso2.com,user1@wso2.com,Targeting completion by end of 2026,"Action Item -1
-Action 2",Transfer,WIP,,Hackathon findings - ABC,,,CLOSED,2
-2025,Q4,Choreo,Business continuity plan not tested,Without regular BCP drills the organisation cannot validate critical operations during a disruption.,ISO,Access Control & Credentials,Employee,User Two,"March 15, 2025",user2@wso2.com,3,2,3,2,Cannot validate the ability to maintain critical operations during a major incident.,2025-12-31,30th Jun 2026,Choreo,user1@wso2.com,user1@wso2.com,user2@wso2.com,Targeting completion by end of 2027,"Action Item -1
-Action 2",Remediate,WIP,,Risk identification on threat models,,,IN_REMEDIATION,3
-2026,Q1,Clever Care,Regulatory data localisation requirement,Emerging regulations may mandate that customer data be stored within specific geographic regions.,BUSINESS,Data Exposure & Privacy (PII),Employee,User One,"April 1, 2025",user1@wso2.com,3,1,3,1,Significant infrastructure changes and additional compliance effort.,"March 31, 2026",30th Jun 2026,Digi Ops,user2@wso2.com,user2@wso2.com,user1@wso2.com,Targeting completion by end of 2028,"Action Item -1
-Action 2",Avoid,WIP,,Hackathon findings - ABC,,,CLOSED,4
-2026,Q3,Business,Payment gateway single point of failure,Exclusive reliance on a single payment gateway provider risks halting revenue collection on any outage.,SOC2,Process & Documentation Gaps,Employee,User One,"May 20, 2025",user1@wso2.com,3,3,3,3,Any provider downtime directly halts revenue collection and customer transactions.,2025-10-31,31st Dec 2025,Asgardeo,user2@wso2.com,user1@wso2.com,user2@wso2.com,Targeting completion by end of 2029,"Action Item -1
-Action 2",Accept,WIP,,External report,,,IN_REMEDIATION,5
+const localTestCSV = `Year,Quarter,Source Register,Customer,Deployment Type,Product,Environment,Risk Title,Risk Description,Risk Category,Risk Identified By,Select Employee/ Name of External Person/ Tool,Risk Identified Date,Risk Assigned To,Gross Likelihood,Gross Impact,Residual Likelihood,Residual Impact,Impact Description,Implementation Date,Reassessment Date,Assignment Team,Risk Owner,Management Approver,Action Owner,Action Plan Description,Action Steps,Treatment Strategy,Progress,Git Issue URL,Email Subject,Remarks,Workflow Status,Migration ID
+2025,Q3,Managed Services,BankOne,Private Cloud,APIM; MI,Production; DR,Supplier contract renewal delay,Delay in renewing supplier contracts may cause service interruption and unplanned cost increases.,Access Control & Credentials,Employee,User One,"January 10, 2025",user1@wso2.com,3,2,3,2,Service interruption and unplanned cost increases for the organisation.,"June 30, 2025",30th Sep 2025,SRE One,user2@wso2.com,user1@wso2.com,user2@wso2.com,Targeting completion by end of 2025,"Action Item -1
+Action 2",Accept,WIP,https://github.com/wso2/product-risk/issues/101,Risk identification on threat models,Raised during the Q3 threat-model review.,IN_REMEDIATION,1
+2025,Q3,Managed Services,BankOne,Managed Services - Customer's On Prem,IS,Non-Production,Employee security training gap,Absence of regular security awareness training increases susceptibility to phishing and social engineering.,"Logging, Monitoring & Detection",Employee,User Two,"February 5, 2025",user2@wso2.com,2,3,2,3,"Higher susceptibility to phishing, social engineering and insider threats.","September 30, 2025",31st Dec 2025,SRE Two,user1@wso2.com,user2@wso2.com,user1@wso2.com,Targeting completion by end of 2026,"Action Item -1
+Action 2",Transfer,WIP,,Hackathon findings - ABC,,CLOSED,2
+2025,Q4,Managed Services,Bank Of China,Private Cloud,APIM,Production,Business continuity plan not tested,Without regular BCP drills the organisation cannot validate critical operations during a disruption.,Access Control & Credentials,Employee,User Two,"March 15, 2025",user2@wso2.com,3,2,3,2,Cannot validate the ability to maintain critical operations during a major incident.,2025-12-31,30th Jun 2026,SRE Three,user1@wso2.com,user1@wso2.com,user2@wso2.com,Targeting completion by end of 2027,"Action Item -1
+Action 2",Remediate,WIP,,Risk identification on threat models,,IN_REMEDIATION,3
+2026,Q1,Managed Services,BankOne,Private Cloud,MI,DR,Regulatory data localisation requirement,Emerging regulations may mandate that customer data be stored within specific geographic regions.,Data Exposure & Privacy (PII),Employee,User One,"April 1, 2025",user1@wso2.com,3,1,3,1,Significant infrastructure changes and additional compliance effort.,"March 31, 2026",30th Jun 2026,SRE Two,user2@wso2.com,user2@wso2.com,user1@wso2.com,Targeting completion by end of 2028,"Action Item -1
+Action 2",Avoid,WIP,,Hackathon findings - ABC,,CLOSED,4
+2026,Q3,Managed Services,Bank Of China,Private Cloud,IS; MI,Production; Non-Production,Payment gateway single point of failure,Exclusive reliance on a single payment gateway provider risks halting revenue collection on any outage.,Process & Documentation Gaps,Employee,User One,"May 20, 2025",user1@wso2.com,3,3,3,3,Any provider downtime directly halts revenue collection and customer transactions.,2025-10-31,31st Dec 2025,SRE One,user2@wso2.com,user1@wso2.com,user2@wso2.com,Targeting completion by end of 2029,"Action Item -1
+Action 2",Accept,WIP,,External report,,IN_REMEDIATION,5
 `
 
 func TestLocalTestCSV_ParsesCleanAndFullyResolves(t *testing.T) {
@@ -72,8 +72,8 @@ func TestLocalTestCSV_ParsesCleanAndFullyResolves(t *testing.T) {
 	if r1.RiskIdentifiedDate != "2025-01-10" || r1.ImplementationDate != "2025-06-30" || r1.ReassessmentDate != "2025-09-30" {
 		t.Errorf("row 1 dates: id=%q impl=%q re=%q", r1.RiskIdentifiedDate, r1.ImplementationDate, r1.ReassessmentDate)
 	}
-	if len(r1.ComplianceRefIDs) != 1 || r1.ComplianceRefIDs[0] != 42 {
-		t.Errorf("row 1 HIPPA should alias to HIPAA (id 42): %v", r1.ComplianceRefIDs)
+	if r1.CustomerID != 20 || len(r1.ProductIDs) != 2 || len(r1.Environments) != 2 {
+		t.Errorf("row 1 template fields: customer=%d products=%v environments=%v", r1.CustomerID, r1.ProductIDs, r1.Environments)
 	}
 	if r1.GitIssueURL != "https://github.com/wso2/product-risk/issues/101" {
 		t.Errorf("row 1 real git URL should survive: %q", r1.GitIssueURL)

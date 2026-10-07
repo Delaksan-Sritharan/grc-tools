@@ -1,8 +1,13 @@
 # risk-register-migration
 
-One-time migration that loads the historical risk register into the platform
-database by driving the **compliance-entity HTTP API**. Deployed as a **Choreo
-Manual Task** (Go).
+One-time migration that loads the historical **Managed Services** risk register
+into the platform database by driving the **compliance-entity HTTP API**.
+Deployed as a **Choreo Manual Task** (Go).
+
+It imports the Managed Services register only. The original register migration
+is done, and WSO2 Cloud has no existing risks, so a row on any other register is
+rejected. The original behaviour is in git history. Design:
+`RISK_MODULE_DESIGN.md` §14 (Phase 2).
 
 Full design: `RISK_REGISTER_CSV_MIGRATION_PLAN.md` (a planning doc kept outside
 this repo). Section references (§n) in the code comments point there.
@@ -10,8 +15,9 @@ this repo). Section references (§n) in the code comments point there.
 ## What it does
 
 1. **Preflight** (§7) — entity health, SCIM reachable, the three risk roles
-   `ACTIVE`, reference data populated, CSV headers present. Any failure aborts
-   before a single write.
+   `ACTIVE`, reference data populated (including customers, products and
+   deployment types), at least one register on the `MANAGED_SERVICES` template,
+   CSV headers present. Any failure aborts before a single write.
 2. **Parse + map** the CSV (§4, §6) — header-name matched, legend/blank rows
    skipped, values transformed, bad rows → `REJECT` findings.
 3. **Resolve people** (§6) — work email → uuid via the SCIM org snapshot →
@@ -22,7 +28,9 @@ this repo). Section references (§n) in the code comments point there.
 6. **Write** each row in `Migration ID` order (§5):
    - `POST /risks` (born `PENDING_RISK_OWNER_APPROVAL`, `created_by` = marker;
      `likelihood`/`impact` in this call are the row's **Gross** values, and
-     set the immutable `gross_score_id`)
+     set the immutable `gross_score_id`; also `customerId`, `deploymentTypeId`,
+     `productIds` and `environments`. The entity assigns the risk code and
+     bumps the per-customer counter in the same transaction)
    - Residual differs from Gross → `POST /risks/{id}/assessments` with the
      row's **Residual** values, so the CSV's current-state numbers show up
      as a real reassessment (skipped entirely when Residual == Gross)
@@ -37,12 +45,81 @@ this repo). Section references (§n) in the code comments point there.
 7. **Verify** (real run only, `verify.go`) — re-reads every migratable row back
    from the entity (`GET /risks/{id}/detail` + escalations + grants, plus
    `GET /risks/{id}/assessments` for any row where Residual differs from
-   Gross) and diffs it, field by field, against the CSV; also confirms every
-   rejected row still has no matching risk. Runs unconditionally, covering
-   every migratable row — including ones already complete from an earlier
-   run and `Skipped` this time — not just what this invocation wrote. A
-   disagreement becomes a `MISMATCH` finding in the same report as
-   `REJECT`/`WARN`.
+   Gross) and diffs it, field by field, against the CSV. That includes:
+   - customer and deployment type (by id), products and environments (as sets),
+     and that no compliance reference is present;
+   - the entity-assigned risk code: it must start with the row's own
+     `YEAR-REGISTER-CUSTOMER-QUARTER-` followed by a number. The number itself
+     is not checked, because a row the entity rejected earlier shifts it;
+   - unexpected grants: only RISK_TEAM grants on teams this sheet touches are
+     inspected, because the original migration's grants carry the same marker.
+     Stale GLOBAL grants go unflagged.
+
+   It also confirms every rejected row still has no matching risk. It runs
+   unconditionally, covering every migratable row — including ones already
+   complete from an earlier run and `Skipped` this time — not just what this
+   invocation wrote. A disagreement becomes a `MISMATCH` finding in the same
+   report as `REJECT`/`WARN`.
+
+## The Managed Services sheet
+
+The CSV format handed to the sheet owner is
+`RISK_REGISTER_CSV_FORMAT.md` (kept outside this repo, in the planning-docs
+`handoff/managed-services-risk-register/` folder, with an example CSV and the
+allowed-values list). In short:
+
+- **Columns:** the original columns **minus** `Security Compliance Reference`,
+  **plus** `Customer`, `Deployment Type`, `Product` and `Environment`. All four
+  new ones are mandatory on every row. The compliance column is optional: if it
+  is left in, every cell must be blank.
+- **Register:** `Source Register` must be the Managed Services register (name or
+  code). `Assignment Team` is any existing active team, as everywhere else (the
+  entity only checks that it exists); for this sheet it is always the Managed
+  Services team.
+- **Lookups:** `Customer`, `Product` and `Deployment Type` are matched by name
+  (case and spacing ignored) against the entity's lists. An unknown or inactive
+  value rejects the row; the tool never creates lookup values. `Product` and
+  `Environment` take several values separated by `;` (`,` and line breaks are
+  tolerated). `Environment` is exactly `Production`, `Non-Production` or `DR`.
+- **Row key:** title + source register + **customer** + year + quarter, used for
+  the duplicate check, resume matching and verification. Two customers may
+  share a title in one quarter. The entity's search returns the customer *name*,
+  so a customer renamed between a run and its resume would stop matching.
+- **Risk numbers:** assigned by the entity, per (register, customer), in the
+  order the tool writes rows, which is Migration ID order. The sheet owner sorts
+  the sheet by Year, Quarter, then original order before numbering Migration ID.
+  A row rejected now and fixed in a later run takes the next number then, so get
+  the dry run clean before the real run.
+
+### Before a run (per environment)
+
+1. Phase 1 deployed: the register-template schema, the Compliance Entity, the
+   backend and the frontend.
+2. The `Managed Services` register exists with the `MANAGED_SERVICES` template
+   (Admin Console). Staging must have no leftover test risks on it, because the
+   template is locked once a risk uses it.
+3. The lookup seed script has run (customers with codes, deployment types,
+   products). Customer codes are frozen once a risk uses them; check them first.
+4. The assignment team (Managed Services) exists. The tool creates its Risk
+   Owner grants itself for every `IN_REMEDIATION` row.
+
+### What the dry run prints
+
+A dry run reaches the same row-level verdicts as the real run, so a clean dry
+run is not followed by a real run that rejects rows: besides everything the
+parser rejects, it REJECTs rows that share a natural key with another row in the
+sheet, and rows that already match two marker risks in the entity.
+
+Besides `errors.csv`, `report.txt` gains, when there is something to say:
+
+- **unknown values to add in the Admin Console** — each distinct unknown
+  Customer / Deployment Type / Product, with its row count and first Migration
+  IDs; **inactive values to reactivate**; and **invalid environments** (fix in
+  the sheet).
+- **per-customer summary** — risks by status, how many are new, and the first
+  and last risk code the run would assign. The next number is read once from
+  `GET /risks/next-sequence-number`, so nobody should raise a risk for these
+  customers during the import. Check the codes before the real run.
 
 ## Buckets
 
@@ -118,6 +195,11 @@ mysql -uroot -p grc_platform < ../../apps/grc-platform/backend/Resources/shared_
 # — that file seeds neither risk_team nor risk_score, and buildRefData aborts
 # preflight when any of the four is empty.
 mysql -uroot -p grc_platform < <path-to>/staging_risk_seed_data.sql
+# Managed Services lookups (customers, deployment types, products, platforms).
+mysql -uroot -p grc_platform < <path-to>/managed_services_lookup_seed_data.sql
+# Then give the Managed Services register its template
+# (risk_team.register_template = 'MANAGED_SERVICES'), as the Admin Console does;
+# preflight aborts when no register is on that template.
 
 # Run the seed files from the mysql CLI, not MySQL Workbench: Workbench's safe
 # update mode rejects shared_seed_data.sql's `WHERE role_name COLLATE
@@ -177,9 +259,10 @@ attempts (it deliberately leaves `user` rows alone — see its header comment;
 delete those separately if you're switching identity source and want a fully
 clean slate).
 
-A `testdata/risks.csv`-shaped register (5 rows: 3 `IN_REMEDIATION`, 2
-`CLOSED`, one `ACCEPT`/high row that also gets the management grant) is a good
-size for a first local pass before trying the real register export.
+A `testdata/risks.csv`-shaped register (5 data rows: 3 `IN_REMEDIATION`, 2
+`CLOSED`, one `ACCEPT`/high row that also gets the management grant, across two
+customers and three assignment teams) is a good size for a first local pass before
+trying the real register export.
 
 ## Report
 
@@ -193,6 +276,13 @@ see the note in `report.go` on why it's one `Write` call, not several):
 - **`report.txt`** — findings-by-code counts, the distinct unresolved people,
   the Migration IDs that got a suppressing escalation, the grant count, and
   (real run) per-bucket migrated counts.
+
+A real run also prints a third block, **`risk_codes.csv`** (`migration_id,
+customer, risk_code, risk_title`, sorted by Migration ID): the code the entity
+assigned to every risk the verification pass matched, including ones written by
+an earlier run. Send it to the sheet owner so she can match her rows to the
+numbers, which are permanent and go out in emails and Git issues. It is not
+printed on a dry run, because there are no codes yet.
 
 A real run additionally logs one `verifying` progress line every 10 rows and
 one `verification complete` summary line (verified-ok / mismatch / confirmed-
@@ -226,17 +316,56 @@ disable verification and no new exit code.
 
 ## Rollback
 
-`rollback.sql` — by-marker `DELETE` in FK order, run by hand against the target
-DB. The tool never deletes.
+`rollback.sql`, run by hand against the target DB. The tool never deletes.
+
+The `risk-sheet-migration` marker is **not unique to this import**: the original
+register migration wrote its risks and grants under the same marker in the same
+database, so deleting by marker alone would delete those too. The script
+selects this import's risks as those with the marker **and** a
+`risk_managed_service_detail` row, and deletes their children by risk id.
+
+Grants are handled more carefully, because a grant row can be shared. The entity
+creates grants with `ON DUPLICATE KEY`, which never changes `created_by`: when
+the original migration and this import grant the same person the same role on
+the same team there is one row, still carrying the marker. So the script deletes
+a marker RISK_TEAM grant only on a team that **no other risk uses** (as source
+register or assignment team). Grants on a team another risk also uses are never
+deleted: the preview lists them with a `used_by_other_risks` flag, and you decide
+by hand. If real Managed Services risks already exist on the Managed Services
+team, its grants therefore stay. GLOBAL grants (the management-approver grant)
+cannot be attributed to one migration, so they are listed, never deleted. The
+preview also counts the marker risks it will leave alone.
+
+The Managed Services template rows go with their risks (cascade).
+
+**The per-customer sequence counters are left alone by default.** They carry no
+marker and are not deleted by cascade. A risk code is a permanent identifier
+(Git issues, emails, the sheet owner's records) and the counter never moves
+backward (RISK_MODULE_DESIGN.md §12); lowering it would let the next risk reuse
+the code of a risk the rollback just deleted. The cost is a gap in the numbering
+after a re-import. For a staging rehearsal, where no code was ever released,
+`rollback.sql` has a separate **OPTIONAL** block that resets each affected
+counter to the highest number still in use (0 when the customer has no risk
+left). Do not use it on production, or wherever `risk_codes.csv` has been sent
+to anyone.
+
+Tested against the real schema on MySQL with the original migration's data
+alongside, including a team both migrations use: the default run leaves every
+counter untouched (the next BankOne number stays 5, so no deleted code is
+reused) and is a safe no-op when run twice; the optional block resets them
+(BankOne back to its real risk's 1, Bank Of China to 0, a customer the import
+never touched unchanged). The original migration's risks, plans, history and
+grants survive, including the shared-team grant, as does an admin-created grant
+on the same team.
 
 ## Status
 
 Implemented (T1–T9, T11): HTTP + SCIM clients, preflight + reference data, CSV
 value mapping, identity resolution, resume-state reconstruction, the write
 pipeline, the post-write verification pass, the report, and a table-driven
-test suite including an end-to-end pass over `testdata/risks.csv` (built from
-the real "Risk Form Structure" tab) against a stateful in-memory fake of the
-entity — including a second run that must be a clean no-op, and a verification
+test suite including an end-to-end pass over `testdata/risks.csv` (a Managed
+Services register, derived from the original "Risk Form Structure" tab) against
+a stateful in-memory fake of the entity — including a second run that must be a clean no-op, and a verification
 pass over that same clean run that must report zero mismatches. `go test ./...`
 is green (the gap is `main`/`run`/`loadConfig` CLI bootstrap).
 

@@ -376,3 +376,124 @@ func TestStatusAtLeast(t *testing.T) {
 		t.Error("a state off the migration path must not count as >=")
 	}
 }
+
+// withCustomer stamps the customer name the entity's /risks/search returns on
+// a marker risk (domain.Risk.CustomerName).
+func withCustomer(r Risk, name string) Risk {
+	r.CustomerName = &name
+	return r
+}
+
+// TestReconstructState_CustomerIsPartOfTheKey: two customers can carry the same
+// risk title in the same register, year and quarter. Resume must tell them
+// apart by customer, or the second one is rejected as a duplicate / matched to
+// the first customer's risk.
+func TestReconstructState_CustomerIsPartOfTheKey(t *testing.T) {
+	rd := sheetTestRefData(t)
+	rowFor := func(mig int, customer string) Row {
+		r := baseRow(mig, "TLS 1.0 enabled", "IN_REMEDIATION")
+		r.Customer = customer
+		return r
+	}
+
+	t.Run("same title, different customers, are not a collision", func(t *testing.T) {
+		s := &stateStub{t: t}
+		prog, rep := run6(t, s, rd, []Row{rowFor(1, "BankOne"), rowFor(2, "Bank Of China")})
+		if len(rep.RejectedMigrationIDs()) != 0 {
+			t.Fatalf("rejected %v; findings=%+v", rep.RejectedMigrationIDs(), rep.findings)
+		}
+		for _, id := range []int{1, 2} {
+			if prog[id].Progress != ProgressNone {
+				t.Errorf("row %d progress = %v, want ProgressNone", id, prog[id].Progress)
+			}
+		}
+	})
+
+	t.Run("same title, same customer, is still a collision (case and spacing ignored)", func(t *testing.T) {
+		s := &stateStub{t: t}
+		_, rep := run6(t, s, rd, []Row{rowFor(1, "BankOne"), rowFor(2, "  bankone ")})
+		rej := rep.RejectedMigrationIDs()
+		if _, ok := rej[1]; !ok {
+			t.Errorf("row 1 not rejected")
+		}
+		if _, ok := rej[2]; !ok {
+			t.Errorf("row 2 not rejected")
+		}
+	})
+
+	t.Run("an existing risk for one customer does not match another customer's row", func(t *testing.T) {
+		s := &stateStub{t: t, risks: []Risk{
+			withCustomer(markerRisk(80, "TLS 1.0 enabled", 8, 2025, "Q3", "PENDING_RISK_OWNER_APPROVAL"), "BankOne"),
+		}}
+		prog, rep := run6(t, s, rd, []Row{rowFor(1, "BankOne"), rowFor(2, "Bank Of China")})
+		if len(rep.RejectedMigrationIDs()) != 0 {
+			t.Fatalf("rejected %v; findings=%+v", rep.RejectedMigrationIDs(), rep.findings)
+		}
+		if prog[1].RiskID != 80 {
+			t.Errorf("BankOne row should resume risk 80, got %+v", prog[1])
+		}
+		if prog[2].Progress != ProgressNone || prog[2].RiskID != 0 {
+			t.Errorf("Bank Of China row must not match BankOne's risk, got %+v", prog[2])
+		}
+	})
+
+	t.Run("one marker risk per customer, each row finds its own", func(t *testing.T) {
+		s := &stateStub{t: t, risks: []Risk{
+			withCustomer(markerRisk(80, "TLS 1.0 enabled", 8, 2025, "Q3", "PENDING_RISK_OWNER_APPROVAL"), "BankOne"),
+			withCustomer(markerRisk(81, "TLS 1.0 enabled", 8, 2025, "Q3", "PENDING_RISK_OWNER_APPROVAL"), "Bank Of China"),
+		}}
+		prog, rep := run6(t, s, rd, []Row{rowFor(1, "BankOne"), rowFor(2, "Bank Of China")})
+		if len(rep.RejectedMigrationIDs()) != 0 {
+			t.Fatalf("two risks sharing a title across customers must not read as duplicates; findings=%+v", rep.findings)
+		}
+		if prog[1].RiskID != 80 || prog[2].RiskID != 81 {
+			t.Errorf("risk ids: row 1 -> %d, row 2 -> %d, want 80 and 81", prog[1].RiskID, prog[2].RiskID)
+		}
+	})
+}
+
+// TestRejectDuplicateKeys: two rows on one natural key are indistinguishable on
+// resume. The real run rejects them in reconstructState; the dry run must report
+// the same thing, or a clean dry run is followed by a real run that rejects rows.
+func TestRejectDuplicateKeys(t *testing.T) {
+	rowFor := func(mig int, customer, title string, year int) Row {
+		r := baseRow(mig, title, "IN_REMEDIATION")
+		r.Customer, r.RiskYear = customer, year
+		return r
+	}
+
+	t.Run("same key rejects every row on it", func(t *testing.T) {
+		rep := NewReport()
+		rejectDuplicateKeys([]Row{
+			rowFor(1, "BankOne", "TLS", 2025),
+			rowFor(2, "  bankone ", "TLS", 2025),
+			rowFor(3, "BankOne", "Other title", 2025),
+		}, rep)
+		rej := rep.RejectedMigrationIDs()
+		if _, ok := rej[1]; !ok {
+			t.Errorf("row 1 not rejected")
+		}
+		if _, ok := rej[2]; !ok {
+			t.Errorf("row 2 not rejected")
+		}
+		if _, ok := rej[3]; ok {
+			t.Errorf("row 3 is on its own key and must not be rejected")
+		}
+		got := findingsFor(rep.findings, "natural key")
+		if len(got) != 2 || !strings.Contains(got[0].Detail, "customer") {
+			t.Errorf("findings = %+v, want two 'natural key' REJECTs naming the customer", got)
+		}
+	})
+
+	t.Run("a different customer or year is a different key", func(t *testing.T) {
+		rep := NewReport()
+		rejectDuplicateKeys([]Row{
+			rowFor(1, "BankOne", "TLS", 2025),
+			rowFor(2, "Bank Of China", "TLS", 2025),
+			rowFor(3, "BankOne", "TLS", 2026),
+		}, rep)
+		if len(rep.findings) != 0 {
+			t.Errorf("findings = %+v, want none", rep.findings)
+		}
+	})
+}

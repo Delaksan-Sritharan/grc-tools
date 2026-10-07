@@ -14,8 +14,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Command risk-register-import loads the historical risk register into the
-// platform database exactly once, by driving the compliance-entity HTTP API.
+// Command risk-register-import loads the historical Managed Services risk
+// register into the platform database exactly once, by driving the
+// compliance-entity HTTP API.
 //
 // It is deployed as a Choreo Manual Task and run twice per environment: first
 // with dryRun=true (validate + resolve + report, write nothing), then with
@@ -214,7 +215,13 @@ func run(ctx context.Context, cfg Config) int {
 	pending := selectMigratable(rows, rep)
 
 	if cfg.DryRun {
-		log.Info("dry run — no writes", "migratable", len(pending), "rejected", len(rows)-len(pending))
+		// The same row-level verdicts the real run reaches in reconstructState,
+		// plus the per-customer summary. Reads only; it reads grants for nobody.
+		migratable, err := dryRunChecks(ctx, log, ec, refs, pending, rep)
+		if err != nil {
+			return exitStructural
+		}
+		log.Info("dry run — no writes", "migratable", len(migratable), "rejected", len(rows)-len(migratable))
 		rep.Emit(os.Stdout)
 		if rep.HasFindings() {
 			return exitFindings
@@ -231,6 +238,16 @@ func run(ctx context.Context, cfg Config) int {
 
 	// reconstructState may reject rows that collide on the natural key.
 	rejected := rep.RejectedMigrationIDs()
+
+	toWrite := make([]Row, 0, len(pending))
+	for _, row := range pending {
+		if _, bad := rejected[row.MigrationID]; !bad {
+			toWrite = append(toWrite, row)
+		}
+	}
+	if err := summarizeCustomers(ctx, log, ec, refs, toWrite, progress, rep); err != nil {
+		return exitStructural
+	}
 
 	// ── Write, in Migration ID order (§9) ───────────────────────────────────
 	for _, row := range pending {
@@ -265,8 +282,8 @@ func run(ctx context.Context, cfg Config) int {
 
 // preflight runs the structural checks in plan §7 in order — the first failure
 // returns an error and the run aborts before any write — and returns the
-// reference-data lookups every row needs (team codes, category names,
-// compliance-ref names, score cells, role ids).
+// reference-data lookups every row needs (team codes and templates, category
+// names, customers / products / deployment types, score cells, role ids).
 //
 // The AVOID-enum precondition (§7) is not checked here: it is a per-environment
 // checklist tick, with a write-time backstop in migrateRow (T7).
@@ -312,20 +329,45 @@ func preflight(ctx context.Context, cfg Config, ec *EntityClient, sc *SCIMClient
 	if err != nil {
 		return RefData{}, nil, fmt.Errorf("list risk categories: %w", err)
 	}
-	refs, err := ec.ListComplianceRefs(ctx)
-	if err != nil {
-		return RefData{}, nil, fmt.Errorf("list compliance references: %w", err)
+	var lk TemplateLookups
+	for _, l := range []struct {
+		kind string
+		into *[]RiskLookup
+	}{
+		{"customers", &lk.Customers},
+		{"products", &lk.Products},
+		{"deployment-types", &lk.DeploymentTypes},
+	} {
+		vals, err := ec.ListRiskLookups(ctx, l.kind)
+		if err != nil {
+			return RefData{}, nil, fmt.Errorf("list %s: %w", l.kind, err)
+		}
+		*l.into = vals
 	}
 	scores, err := ec.ListRiskScores(ctx)
 	if err != nil {
 		return RefData{}, nil, fmt.Errorf("list risk scores: %w", err)
 	}
 
-	rd, err := buildRefData(teams, cats, refs, scores, roles)
+	rd, err := buildRefData(teams, cats, scores, roles, lk)
 	if err != nil {
 		return RefData{}, nil, err
 	}
 	return rd, users, nil
+}
+
+// summarizeCustomers fills the report's per-customer block: how many risks each
+// customer gets and the first and last risk code the run would assign. Read-only,
+// so it runs on a dry run too; the numbers are read once, before anything is
+// written.
+func summarizeCustomers(ctx context.Context, log *slog.Logger, ec *EntityClient, rd RefData, rows []Row, progress map[int]ResumeState, rep *Report) error {
+	summaries, err := computeCustomerSummaries(ctx, ec, rd, rows, progress)
+	if err != nil {
+		log.Error("could not compute the per-customer summary — aborting", "err", err)
+		return err
+	}
+	rep.SetCustomerSummaries(summaries)
+	return nil
 }
 
 // selectMigratable returns the rows with no REJECT finding, in Migration ID order.

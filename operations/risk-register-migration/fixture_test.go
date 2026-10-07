@@ -39,12 +39,12 @@ import (
 func fixtureRefData(t *testing.T) RefData {
 	t.Helper()
 	teams := []RiskTeam{
-		{ID: 1, Name: "Asgardeo", Code: strptr("ASG"), Status: "ACTIVE"},
-		{ID: 2, Name: "Choreo", Code: strptr("CHO"), Status: "ACTIVE"},
-		{ID: 3, Name: "Clever Care", Code: strptr("CC"), Status: "ACTIVE"},
-		{ID: 4, Name: "Business", Code: strptr("Biz"), Status: "ACTIVE"},
-		{ID: 5, Name: "Digi Ops", Code: strptr("DiOp"), Status: "ACTIVE"},
-		{ID: 6, Name: "Legal", Code: nil, Status: "ACTIVE"},
+		{ID: 1, Name: "Managed Services", Code: strptr("MS"), Status: "ACTIVE", RegisterTemplate: "MANAGED_SERVICES"},
+		{ID: 2, Name: "Choreo", Code: strptr("CHO"), Status: "ACTIVE", RegisterTemplate: "STANDARD"},
+		{ID: 3, Name: "WSO2 Cloud", Code: strptr("WSO2CLOUD"), Status: "ACTIVE", RegisterTemplate: "AGGREGATED"},
+		{ID: 4, Name: "SRE One", Code: nil, Status: "ACTIVE", RegisterTemplate: "MANAGED_SERVICES"},
+		{ID: 5, Name: "SRE Two", Code: nil, Status: "ACTIVE", RegisterTemplate: "MANAGED_SERVICES"},
+		{ID: 6, Name: "SRE Three", Code: nil, Status: "ACTIVE", RegisterTemplate: "MANAGED_SERVICES"},
 	}
 	cats := []RiskCategory{
 		{ID: 30, Name: "Access Control & Credentials"},
@@ -52,9 +52,20 @@ func fixtureRefData(t *testing.T) RefData {
 		{ID: 32, Name: "Data Exposure & Privacy (PII)"},
 		{ID: 33, Name: "Process & Documentation Gaps"},
 	}
-	refs := []ComplianceRef{
-		{ID: 40, Name: "ISO"}, {ID: 41, Name: "SOC2"},
-		{ID: 42, Name: "HIPAA"}, {ID: 43, Name: "BUSINESS"},
+	lk := TemplateLookups{
+		Customers: []RiskLookup{
+			{ID: 20, Name: "BankOne", Code: strptr("BO"), Status: "ACTIVE"},
+			{ID: 21, Name: "Bank Of China", Code: strptr("BOC"), Status: "ACTIVE"},
+		},
+		Products: []RiskLookup{
+			{ID: 50, Name: "APIM", Status: "ACTIVE"},
+			{ID: 51, Name: "MI", Status: "ACTIVE"},
+			{ID: 52, Name: "IS", Status: "ACTIVE"},
+		},
+		DeploymentTypes: []RiskLookup{
+			{ID: 60, Name: "Private Cloud", Status: "ACTIVE"},
+			{ID: 61, Name: "Managed Services - Customer's On Prem", Status: "ACTIVE"},
+		},
 	}
 	var scores []RiskScore
 	id := 900
@@ -64,7 +75,7 @@ func fixtureRefData(t *testing.T) RefData {
 			id++
 		}
 	}
-	rd, err := buildRefData(teams, cats, refs, scores, goodRoles())
+	rd, err := buildRefData(teams, cats, scores, goodRoles(), lk)
 	if err != nil {
 		t.Fatalf("buildRefData: %v", err)
 	}
@@ -125,6 +136,22 @@ type fakeEntity struct {
 	grantPosts   []grantCall
 	usersCreated []string
 
+	// customerNames resolves CreateRiskRequest.CustomerID to the name /risks/search
+	// returns (domain.Risk.CustomerName). Matches fixtureRefData's customers.
+	customerNames map[int]string
+	// teamCodes / customerCodes / issued let the fake assign risk codes the way
+	// the entity does: YEAR-TEAM-CUSTOMER-QUARTER-NNNN, numbered per customer.
+	teamCodes     map[int]string
+	customerCodes map[int]string
+	issued        map[int]int
+	// nextSeq is each customer's next risk number for GET
+	// /risks/next-sequence-number; nextSeqCalls counts the reads.
+	nextSeq      map[int]int
+	nextSeqCalls int
+	// complianceRefsByRisk lets a verify test plant a compliance reference the
+	// entity would never have accepted on a Managed Services risk.
+	complianceRefsByRisk map[int][]int
+
 	nextRiskID int
 	nextUserID int
 }
@@ -140,7 +167,10 @@ func newFakeEntity(t *testing.T) *fakeEntity {
 		planStatus: map[int]string{}, grants: map[int][]Grant{}, assessments: map[int][]Assessment{}, users: map[string]int{},
 		createReqByRisk: map[int]CreateRiskRequest{}, complianceApprovalDate: map[int]string{},
 		planCompletedDate: map[int]string{},
-		nextRiskID:        1000, nextUserID: 500,
+		customerNames:     map[int]string{20: "BankOne", 21: "Bank Of China"},
+		teamCodes:         map[int]string{1: "MS"}, customerCodes: map[int]string{20: "BO", 21: "BOC"}, issued: map[int]int{},
+		complianceRefsByRisk: map[int][]int{},
+		nextRiskID:           1000, nextUserID: 500,
 	}
 }
 
@@ -181,6 +211,15 @@ func (fe *fakeEntity) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = enc.Encode(map[string]any{"risks": all, "total": len(all), "limit": 100, "offset": 0})
 
+	case r.Method == http.MethodGet && p == "/risks/next-sequence-number":
+		fe.nextSeqCalls++
+		cust, _ := strconv.Atoi(r.URL.Query().Get("customerId"))
+		n, ok := fe.nextSeq[cust]
+		if !ok {
+			n = 1
+		}
+		_ = enc.Encode(map[string]int{"nextSequenceNumber": n})
+
 	case r.Method == http.MethodGet && strings.HasPrefix(p, "/users/by-uuid/"):
 		uuid := strings.TrimPrefix(p, "/users/by-uuid/")
 		if id, ok := fe.users[uuid]; ok {
@@ -212,6 +251,16 @@ func (fe *fakeEntity) handle(w http.ResponseWriter, r *http.Request) {
 			RiskYear: body.RiskYear, RiskQuarter: body.RiskQuarter,
 			WorkflowStatus: "PENDING_RISK_OWNER_APPROVAL", CreatedBy: marker,
 		}
+		if body.CustomerID != nil {
+			if name, ok := fe.customerNames[*body.CustomerID]; ok {
+				fe.risks[fe.nextRiskID].CustomerName = &name
+			}
+		}
+		if body.CustomerID != nil {
+			fe.issued[*body.CustomerID]++
+			fe.risks[fe.nextRiskID].RiskCode = riskCode(body.RiskYear, fe.teamCodes[body.SourceRegisterID],
+				fe.customerCodes[*body.CustomerID], body.RiskQuarter, fe.issued[*body.CustomerID])
+		}
 		fe.createReqByRisk[fe.nextRiskID] = body
 		w.WriteHeader(http.StatusCreated)
 		_ = enc.Encode(map[string]any{
@@ -237,7 +286,7 @@ func (fe *fakeEntity) handle(w http.ResponseWriter, r *http.Request) {
 			complianceApprovalDate = d
 		}
 		_ = enc.Encode(map[string]any{
-			"id": id, "riskTitle": body.RiskTitle, "riskDescription": body.RiskDescription,
+			"id": id, "riskCode": rk.RiskCode, "riskTitle": body.RiskTitle, "riskDescription": body.RiskDescription,
 			"riskYear": body.RiskYear, "riskQuarter": body.RiskQuarter,
 			"sourceRegisterId": body.SourceRegisterID, "assignmentTeamId": body.AssignmentTeamID,
 			"assignerId": body.AssignerID, "ownerId": body.OwnerID,
@@ -250,7 +299,11 @@ func (fe *fakeEntity) handle(w http.ResponseWriter, r *http.Request) {
 			"gitIssueUrl": body.GitIssueURL, "emailSubject": body.EmailSubject, "remarks": body.Remarks,
 			"createdBy":            body.CreatedBy,
 			"grossScore":           map[string]any{"likelihood": body.Likelihood, "impact": body.Impact},
-			"complianceReferences": fakeIDRefs(body.ComplianceReferenceIDs),
+			"complianceReferences": fakeIDRefs(fe.complianceRefsByRisk[id]),
+			"customer":             fakeOptionalRef(body.CustomerID),
+			"deploymentType":       fakeOptionalRef(body.DeploymentTypeID),
+			"products":             fakeIDRefs(body.ProductIDs),
+			"environments":         body.Environments,
 			"riskCategories":       fakeIDRefs(body.RiskCategoryIDs),
 			"actionPlan": map[string]any{
 				"id": fe.planID(id), "actionOwnerId": body.ActionOwnerID,
@@ -356,6 +409,14 @@ func fakeIDRefs(ids []int) []map[string]any {
 	return out
 }
 
+// fakeOptionalRef is a single lookup value as /detail shapes it, or null.
+func fakeOptionalRef(id *int) any {
+	if id == nil {
+		return nil
+	}
+	return map[string]any{"id": *id}
+}
+
 // fakeActionSteps mirrors the entity's step_no assignment: 1-based, by
 // position, matching CreateRiskRequest.ActionSteps' CSV order.
 func fakeActionSteps(steps []ActionStepInput) []map[string]any {
@@ -414,7 +475,8 @@ func TestFixture_Parse(t *testing.T) {
 	}
 
 	// Row 1: a clean IN_REMEDIATION row exercising serial dates, an ordinal
-	// date, the HIPPA alias, and the "Text" git-URL placeholder.
+	// date, two products and two environments, and the "Text" git-URL
+	// placeholder.
 	r1 := rows[0]
 	if r1.RiskYear != 2025 || r1.RiskQuarter != "Q3" || r1.WorkflowStatus != "IN_REMEDIATION" {
 		t.Errorf("row 1 scalars: %+v", r1)
@@ -425,8 +487,11 @@ func TestFixture_Parse(t *testing.T) {
 	if len(r1.RiskCategoryIDs) != 1 || r1.RiskCategoryIDs[0] != 30 {
 		t.Errorf("row 1 category: %v", r1.RiskCategoryIDs)
 	}
-	if len(r1.ComplianceRefIDs) != 1 || r1.ComplianceRefIDs[0] != 42 {
-		t.Errorf("row 1 compliance (HIPPA→HIPAA=42): %v", r1.ComplianceRefIDs)
+	if r1.CustomerID != 20 || r1.DeploymentTypeID != 60 ||
+		len(r1.ProductIDs) != 2 || r1.ProductIDs[0] != 50 || r1.ProductIDs[1] != 51 ||
+		len(r1.Environments) != 2 || r1.Environments[0] != "PRODUCTION" || r1.Environments[1] != "DR" {
+		t.Errorf("row 1 template fields: customer=%d deployment=%d products=%v environments=%v",
+			r1.CustomerID, r1.DeploymentTypeID, r1.ProductIDs, r1.Environments)
 	}
 	if r1.ImplementationDate != "2025-06-30" || r1.RiskIdentifiedDate != "2025-01-10" || r1.ReassessmentDate != "2025-09-30" {
 		t.Errorf("row 1 dates: impl=%q id=%q re=%q", r1.ImplementationDate, r1.RiskIdentifiedDate, r1.ReassessmentDate)
@@ -454,7 +519,8 @@ func TestFixture_Parse(t *testing.T) {
 		"Year", "Quarter", "Source Register", "Risk Title", "Risk Category",
 		"Gross Likelihood", "Gross Impact", "Residual Likelihood", "Residual Impact",
 		"Implementation Date", "Assignment Team",
-		"Treatment Strategy", "Workflow Status", "Security Compliance Reference",
+		"Treatment Strategy", "Workflow Status",
+		"Customer", "Deployment Type", "Product", "Environment",
 	}
 	for _, code := range wantReject {
 		got := findingsForRow(fs, 6, code)
@@ -570,7 +636,10 @@ func TestFixture_RealRunPipeline_ThenResumeIsNoOp(t *testing.T) {
 	}
 
 	// Grants: rows 1 & 3 → owner + assigner (2 each); row 5 is ACCEPT with
-	// L3×I3=9 ≥ 7 → also the management GLOBAL grant. 2 + 2 + 3 = 7.
+	// L3×I3=9 ≥ 7 → also the management GLOBAL grant. 2 + 2 + 3 = 7 POSTs.
+	// Every assigner grant is on the one Managed Services register, so user2's
+	// grant is POSTed for rows 3 and 5 alike; the entity upserts it (ON DUPLICATE
+	// KEY, grant_repo.go), so repeating it is safe and only 6 distinct grants land.
 	if len(fe.grantPosts) != 7 {
 		t.Errorf("grants = %d, want 7", len(fe.grantPosts))
 	}
@@ -657,4 +726,54 @@ func findingsForMig(fs []Finding, mig int) []Finding {
 		}
 	}
 	return out
+}
+
+// TestFixture_SameTitleTwoCustomers_ThenResumeIsNoOp is the end-to-end proof of
+// the customer-aware key: one finding raised for two customers in the same
+// quarter imports as two risks, verifies clean, and a second run recreates
+// nothing.
+func TestFixture_SameTitleTwoCustomers_ThenResumeIsNoOp(t *testing.T) {
+	cells := func(mig, customer string) map[string]string {
+		return msRow(map[string]string{
+			"Risk Title": "TLS 1.0 enabled on gateway", "Customer": customer, "Migration ID": mig,
+		})
+	}
+	rd := fixtureRefData(t)
+	rows, fs, err := parseSheet(strings.NewReader(buildCSV(t, cells("1", "BankOne"), cells("2", "Bank Of China"))), rd)
+	if err != nil || len(fs) != 0 {
+		t.Fatalf("parseSheet: err=%v findings=%+v", err, fs)
+	}
+	fe := newFakeEntity(t)
+
+	rep := runPipeline(t, fe, rows, rd)
+	if len(rep.RejectedMigrationIDs()) != 0 || len(fe.createdRisks) != 2 {
+		t.Fatalf("first run: rejected=%v created=%d findings=%+v", rep.RejectedMigrationIDs(), len(fe.createdRisks), rep.findings)
+	}
+
+	rep2 := runPipeline(t, fe, rows, rd)
+	if rep2.migrated != 0 || rep2.skipped != 2 || len(fe.createdRisks) != 2 {
+		t.Errorf("resume: migrated=%d skipped=%d created=%d, want 0, 2 and 2", rep2.migrated, rep2.skipped, len(fe.createdRisks))
+	}
+
+	vrep := NewReport()
+	if err := verifyMigration(context.Background(), discardLogger(), fe.client(t), rd, "2026-09-15", rows, vrep); err != nil {
+		t.Fatalf("verifyMigration: %v", err)
+	}
+	for _, f := range vrep.findings {
+		t.Errorf("unexpected verification finding: %+v", f)
+	}
+
+	// The verification pass records each risk's code for the Migration ID -> code list.
+	if len(vrep.riskCodes) != 2 {
+		t.Fatalf("recorded %d risk codes, want 2: %+v", len(vrep.riskCodes), vrep.riskCodes)
+	}
+	want := map[int]string{1: "2025-MS-BO-Q3-0001", 2: "2025-MS-BOC-Q3-0001"}
+	for _, c := range vrep.riskCodes {
+		if c.RiskCode != want[c.MigrationID] {
+			t.Errorf("Migration ID %d recorded code %q, want %q", c.MigrationID, c.RiskCode, want[c.MigrationID])
+		}
+	}
+	if vrep.riskCodes[0].RiskTitle != "TLS 1.0 enabled on gateway" || vrep.riskCodes[0].Customer == "" {
+		t.Errorf("entry = %+v, want the title and customer too", vrep.riskCodes[0])
+	}
 }
