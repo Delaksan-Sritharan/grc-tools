@@ -336,15 +336,27 @@ team, its grants therefore stay. GLOBAL grants (the management-approver grant)
 cannot be attributed to one migration, so they are listed, never deleted. The
 preview also counts the marker risks it will leave alone.
 
-The Managed Services template rows go with their risks (cascade). The
-per-customer counters have no marker, so the script records the affected
-customers first and afterwards resets each counter to the highest number still
-in use (0 when the customer has no risk left); without that, numbering would
-resume after the rolled-back risks. Tested against the real schema on MySQL with
-the original migration's data alongside, including a team both migrations use: a
-customer with a pre-existing risk keeps its number, and the original
-migration's risks, plans, history and grants survive (the shared-team grant
-too), as does an admin-created grant on the same team.
+The Managed Services template rows go with their risks (cascade).
+
+**The per-customer sequence counters are left alone by default.** They carry no
+marker and are not deleted by cascade. A risk code is a permanent identifier
+(Git issues, emails, the sheet owner's records) and the counter never moves
+backward (RISK_MODULE_DESIGN.md §12); lowering it would let the next risk reuse
+the code of a risk the rollback just deleted. The cost is a gap in the numbering
+after a re-import. For a staging rehearsal, where no code was ever released,
+`rollback.sql` has a separate **OPTIONAL** block that resets each affected
+counter to the highest number still in use (0 when the customer has no risk
+left). Do not use it on production, or wherever `risk_codes.csv` has been sent
+to anyone.
+
+Tested against the real schema on MySQL with the original migration's data
+alongside, including a team both migrations use: the default run leaves every
+counter untouched (the next BankOne number stays 5, so no deleted code is
+reused) and is a safe no-op when run twice; the optional block resets them
+(BankOne back to its real risk's 1, Bank Of China to 0, a customer the import
+never touched unchanged). The original migration's risks, plans, history and
+grants survive, including the shared-team grant, as does an admin-created grant
+on the same team.
 
 ## Status
 

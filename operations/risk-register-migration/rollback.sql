@@ -34,11 +34,16 @@
 --
 -- Managed Services template rows (risk_managed_service_detail and the product /
 -- environment junctions) go with their risk: their risk_id FKs are ON DELETE
--- CASCADE. The per-customer sequence counters do NOT: risk_customer_sequence
--- carries no created_by and is never deleted by cascade, so without the reset
--- below the next risk raised for a customer would resume after the numbers the
--- rolled-back import used. The reset sets each affected counter to the highest
--- number still in use (0 when the customer has no risk left).
+-- CASCADE.
+--
+-- SEQUENCE COUNTERS ARE LEFT ALONE. risk_customer_sequence carries no created_by
+-- and is not deleted by cascade. By default this script does not touch it: a
+-- risk code is a permanent identifier (it goes out in Git issues, emails and the
+-- sheet owner's records), the counter never moves backward (RISK_MODULE_DESIGN.md
+-- §12), and lowering it would let the next risk reuse the code of a risk this
+-- script just deleted. The cost is a gap in the numbering after a re-import.
+-- Where no code was ever released (a staging rehearsal), a separate OPTIONAL
+-- block below resets each affected counter to the highest number still in use.
 --
 -- Order matters: children before parents (several FKs are RESTRICT).
 -- Review the preview before running the DELETEs.
@@ -119,7 +124,8 @@ WHERE r.created_by = 'risk-sheet-migration'
 SELECT user_id, role_id, scope_type, scope_id FROM user_role_grant
 WHERE created_by = 'risk-sheet-migration' AND scope_type = 'GLOBAL';
 
--- Counters that will need resetting (register, customer, current last number).
+-- Counters for the customers this import touched (register, customer, current last
+-- number). Left alone by default; see the OPTIONAL reset below.
 SELECT s.risk_team_id, s.customer_id, s.last_sequence_number AS current_last_number
 FROM risk_customer_sequence s
 WHERE (s.risk_team_id, s.customer_id) IN (
@@ -176,9 +182,15 @@ WHERE (s.risk_team_id, s.customer_id) IN (
 --       WHERE (o.source_register_id = user_role_grant.scope_id OR o.assignment_team_id = user_role_grant.scope_id)
 --         AND o.id NOT IN (SELECT risk_id FROM rollback_ms_risks));
 --
--- -- Reset each touched counter to the highest number still in use. A risk code
--- -- ends in its number (YEAR-TEAM-CUSTOMER-QUARTER-NNNN), so the number is the
--- -- part after the last '-'. A customer left with no risk goes back to 0, so
+-- COMMIT;
+
+-- ── OPTIONAL: reset the sequence counters (uncomment ONLY if no code was released) ──
+-- -- Run in the same session as the block above (it reads rollback_ms_counters).
+-- -- Use it where the codes were never used anywhere: a staging rehearsal. On
+-- -- production, or wherever risk_codes.csv has been sent to anyone, leave it
+-- -- commented: it lets a later risk reuse the code of a risk deleted above.
+-- -- A risk code ends in its number (YEAR-TEAM-CUSTOMER-QUARTER-NNNN), so the number
+-- -- is the part after the last '-'. A customer left with no risk goes back to 0, so
 -- -- the next risk raised for it is 0001 again.
 -- UPDATE risk_customer_sequence s
 --   JOIN rollback_ms_counters c ON c.team_id = s.risk_team_id AND c.customer_id = s.customer_id
@@ -189,12 +201,11 @@ WHERE (s.risk_team_id, s.customer_id) IN (
 --     GROUP BY r.source_register_id, d.customer_id
 --   ) m ON m.team_id = s.risk_team_id AND m.customer_id = s.customer_id
 --   SET s.last_sequence_number = COALESCE(m.max_number, 0);
---
+
+-- ── Cleanup (uncomment with the block above; temporary tables also vanish when the session ends) ──
 -- DROP TEMPORARY TABLE rollback_ms_teams;
 -- DROP TEMPORARY TABLE rollback_ms_counters;
 -- DROP TEMPORARY TABLE rollback_ms_risks;
---
--- COMMIT;
 
 -- ── Verify (expect zero, then the original migration's risks still present) ─
 -- SELECT COUNT(*) AS ms_marker_risks_left FROM risk r
@@ -208,8 +219,9 @@ WHERE (s.risk_team_id, s.customer_id) IN (
 -- SELECT user_id, role_id, scope_id AS team_id FROM user_role_grant
 --   WHERE created_by = 'risk-sheet-migration' AND scope_type = 'RISK_TEAM'
 --   ORDER BY scope_id, user_id, role_id;
--- -- Every counter must equal the highest number still in use (compare the two
--- -- columns; a customer with no risk left must show 0):
+-- -- Counters are unchanged by default (they never move backward). If you ran the
+-- -- OPTIONAL reset, each must equal the highest number still in use (compare the
+-- -- two columns; a customer with no risk left must show 0):
 -- SELECT s.risk_team_id, s.customer_id, s.last_sequence_number,
 --        MAX(CAST(SUBSTRING_INDEX(r.risk_code, '-', -1) AS UNSIGNED)) AS highest_in_use
 -- FROM risk_customer_sequence s
