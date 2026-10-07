@@ -34,11 +34,19 @@ func NewRiskTeamService(repo repository.RiskTeamRepository) RiskTeamService {
 
 var validRiskTeamTypes = map[string]bool{"SOURCE_REGISTER": true, "ASSIGNMENT": true, "BOTH": true}
 var validRiskTeamStatuses = map[string]bool{"ACTIVE": true, "INACTIVE": true, "REMOVED": true}
+var validRegisterTemplates = map[string]bool{"STANDARD": true, "AGGREGATED": true, "MANAGED_SERVICES": true}
+
+const invalidRegisterTemplateMsg = "invalid registerTemplate: must be STANDARD, AGGREGATED, or MANAGED_SERVICES"
 
 func (s *riskTeamService) SearchRiskTeams(ctx context.Context, req domain.SearchRiskTeamsRequest) (domain.SearchRiskTeamsResponse, error) {
 	for _, tt := range req.TeamTypeKeys {
 		if !validRiskTeamTypes[strings.ToUpper(tt)] {
 			return domain.SearchRiskTeamsResponse{}, &apierror.ValidationError{Msg: "invalid teamTypeKey: " + tt + " (must be SOURCE_REGISTER, ASSIGNMENT, or BOTH)"}
+		}
+	}
+	for _, t := range req.RegisterTemplateKeys {
+		if !validRegisterTemplates[t] {
+			return domain.SearchRiskTeamsResponse{}, &apierror.ValidationError{Msg: "invalid registerTemplateKey: " + t}
 		}
 	}
 	if req.StatusKey != "" && !validRiskTeamStatuses[strings.ToUpper(req.StatusKey)] {
@@ -76,6 +84,9 @@ func (s *riskTeamService) CreateRiskTeam(ctx context.Context, req domain.CreateR
 	if !validRiskTeamTypes[strings.ToUpper(req.TeamType)] {
 		return domain.RiskTeam{}, &apierror.ValidationError{Msg: "invalid teamType: must be SOURCE_REGISTER, ASSIGNMENT, or BOTH"}
 	}
+	if req.RegisterTemplate != "" && !validRegisterTemplates[req.RegisterTemplate] {
+		return domain.RiskTeam{}, &apierror.ValidationError{Msg: invalidRegisterTemplateMsg}
+	}
 	if req.CreatedBy == "" {
 		return domain.RiskTeam{}, &apierror.ValidationError{Msg: "createdBy is required"}
 	}
@@ -95,6 +106,9 @@ func (s *riskTeamService) UpdateRiskTeam(ctx context.Context, id int, req domain
 	}
 	if req.TeamType != nil && !validRiskTeamTypes[strings.ToUpper(*req.TeamType)] {
 		return domain.RiskTeam{}, &apierror.ValidationError{Msg: "invalid teamType"}
+	}
+	if req.RegisterTemplate != nil && !validRegisterTemplates[*req.RegisterTemplate] {
+		return domain.RiskTeam{}, &apierror.ValidationError{Msg: invalidRegisterTemplateMsg}
 	}
 	t, err := s.repo.UpdateRiskTeam(ctx, id, req)
 	if err != nil {

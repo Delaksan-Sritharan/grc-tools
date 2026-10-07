@@ -115,7 +115,7 @@ func (f *fakeRiskSvc) GetByID(_ context.Context, id int) (*model.RiskDetail, err
 func (f *fakeRiskSvc) Create(context.Context, model.CreateRiskRequest, string) (*model.CreateRiskResponse, error) {
 	return nil, nil
 }
-func (f *fakeRiskSvc) NextSequenceID(context.Context, int) (int, error) { return 0, nil }
+func (f *fakeRiskSvc) NextSequenceID(context.Context, int, *int) (int, error) { return 0, nil }
 func (f *fakeRiskSvc) Update(context.Context, int, model.UpdateRiskRequest, string) error {
 	return nil
 }

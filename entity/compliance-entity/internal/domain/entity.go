@@ -437,22 +437,32 @@ type BulkCreateControlsResponse struct {
 // RiskTeam represents a team from the `risk_team` table.
 // team_type determines which UI pickers show this team.
 type RiskTeam struct {
-	ID          int       `json:"id"`
-	Name        string    `json:"name"`
-	Code        *string   `json:"code"`
-	Description *string   `json:"description"`
-	TeamType    string    `json:"teamType"` // SOURCE_REGISTER | ASSIGNMENT | BOTH
-	Status      string    `json:"status"`
-	CreatedOn   time.Time `json:"createdOn"`
-	UpdatedOn   time.Time `json:"updatedOn"`
+	ID          int     `json:"id"`
+	Name        string  `json:"name"`
+	Code        *string `json:"code"`
+	Description *string `json:"description"`
+	TeamType    string  `json:"teamType"` // SOURCE_REGISTER | ASSIGNMENT | BOTH
+	// RegisterTemplate is STANDARD | AGGREGATED | MANAGED_SERVICES. On a
+	// register it decides which fields its risks carry; an assignment-only team
+	// ignores it (RISK_MODULE_DESIGN.md §14).
+	RegisterTemplate string `json:"registerTemplate"`
+	// HasRisks reports whether any risk uses this team as its source register.
+	// While true the template can no longer change, because those risks carry
+	// its fields.
+	HasRisks  bool      `json:"hasRisks"`
+	Status    string    `json:"status"`
+	CreatedOn time.Time `json:"createdOn"`
+	UpdatedOn time.Time `json:"updatedOn"`
 }
 
 // SearchRiskTeamsRequest is the payload for POST /risk/teams/search.
 type SearchRiskTeamsRequest struct {
-	SearchQuery  string     `json:"searchQuery"`
-	TeamTypeKeys []string   `json:"teamTypeKeys"` // SOURCE_REGISTER | ASSIGNMENT | BOTH
-	StatusKey    string     `json:"statusKey"`    // ACTIVE | INACTIVE | REMOVED | "" (all)
-	Pagination   Pagination `json:"pagination"`
+	SearchQuery  string   `json:"searchQuery"`
+	TeamTypeKeys []string `json:"teamTypeKeys"` // SOURCE_REGISTER | ASSIGNMENT | BOTH
+	// RegisterTemplateKeys narrows to teams on these templates; empty means all.
+	RegisterTemplateKeys []string   `json:"registerTemplateKeys"`
+	StatusKey            string     `json:"statusKey"` // ACTIVE | INACTIVE | REMOVED | "" (all)
+	Pagination           Pagination `json:"pagination"`
 }
 
 // SearchRiskTeamsResponse is returned by POST /risk/teams/search.
@@ -480,6 +490,46 @@ type RiskScore struct {
 // ListRiskScoresResponse is returned by GET /risk/scores.
 type ListRiskScoresResponse struct {
 	Scores []RiskScore `json:"scores"`
+}
+
+// =============================================================================
+// Register-template lookups — Platform, Customer, Product, Deployment Type
+// =============================================================================
+
+// RiskLookup is one admin-managed dropdown value from risk_platform,
+// risk_customer, risk_product or risk_deployment_type. The four tables share
+// one shape; only risk_customer has a Code.
+type RiskLookup struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+	// Code is set for customers only: the A-Z/0-9 code embedded in Managed
+	// Services risk codes. Omitted for the other three lookups.
+	Code   *string `json:"code,omitempty"`
+	Status string  `json:"status"` // ACTIVE | INACTIVE
+	// InUse reports whether any risk references this value. A value in use
+	// can be deactivated but not deleted, and a customer in use cannot have
+	// its code changed.
+	InUse bool `json:"inUse"`
+}
+
+// ListRiskLookupsResponse is returned by GET /risk/{platforms|customers|products|deployment-types}.
+type ListRiskLookupsResponse struct {
+	Values []RiskLookup `json:"values"`
+}
+
+// CreateRiskLookupRequest is the payload for POST /risk/{platforms|customers|products|deployment-types}.
+type CreateRiskLookupRequest struct {
+	Name      string  `json:"name"`
+	Code      *string `json:"code"` // required for customers, rejected for the rest
+	CreatedBy string  `json:"createdBy"`
+}
+
+// UpdateRiskLookupRequest is the payload for PATCH /risk/{platforms|customers|products|deployment-types}/{id}.
+type UpdateRiskLookupRequest struct {
+	Name      *string `json:"name"`
+	Code      *string `json:"code"`   // customers only; refused once the customer is in use
+	Status    *string `json:"status"` // ACTIVE | INACTIVE
+	UpdatedBy string  `json:"updatedBy"`
 }
 
 // ListRiskCategoriesResponse is returned by GET /risk/categories.
@@ -607,6 +657,15 @@ type Risk struct {
 	// the moment a reassessment lands.
 	EffectiveRiskLevel *string `json:"effectiveRiskLevel"`
 	EffectiveColorCode *string `json:"effectiveColorCode"`
+
+	// Register-template summary (RISK_MODULE_DESIGN.md §14), enough for a
+	// register table row. RegisterTemplate is the source register's template;
+	// the rest are nil/empty when that template lacks the field. RiskDetail
+	// carries the full values with ids and statuses.
+	RegisterTemplate string   `json:"registerTemplate"`
+	CustomerName     *string  `json:"customerName"`
+	Environments     []string `json:"environments"`  // PRODUCTION | NON_PRODUCTION | DR
+	PlatformNames    []string `json:"platformNames"` // ordered by name
 }
 
 // SearchRisksRequest is the payload for POST /risks/search.
@@ -662,6 +721,12 @@ type SearchRisksRequest struct {
 	// DueOverdueOnly restricts to risks already past their implementation date,
 	// independent of any Due range above.
 	DueOverdueOnly bool `json:"dueOverdueOnly"`
+
+	// Register-template filters. Each matches risks carrying any of the given
+	// values; risks whose template lacks the field never match.
+	CustomerIDs     []int    `json:"customerIds"`
+	EnvironmentKeys []string `json:"environmentKeys"` // PRODUCTION | NON_PRODUCTION | DR
+	PlatformIDs     []int    `json:"platformIds"`
 
 	// OpenEscalationOnly restricts to risks carrying an unresolved escalation.
 	// This is what the Overdue Risks tab filters on, deliberately *not* the
@@ -1105,8 +1170,10 @@ type CreateRiskTeamRequest struct {
 	Code        *string `json:"code"`
 	Description *string `json:"description"`
 	TeamType    string  `json:"teamType"` // SOURCE_REGISTER | ASSIGNMENT | BOTH
-	Status      string  `json:"status"`
-	CreatedBy   string  `json:"createdBy"`
+	// RegisterTemplate defaults to STANDARD when empty.
+	RegisterTemplate string `json:"registerTemplate"`
+	Status           string `json:"status"`
+	CreatedBy        string `json:"createdBy"`
 }
 
 // UpdateRiskTeamRequest is the payload for PATCH /risk/teams/{id}.
@@ -1115,8 +1182,11 @@ type UpdateRiskTeamRequest struct {
 	Code        *string `json:"code"`
 	Description *string `json:"description"`
 	TeamType    *string `json:"teamType"`
-	Status      *string `json:"status"`
-	UpdatedBy   string  `json:"updatedBy"`
+	// RegisterTemplate may change only while no risk has this team as its
+	// source register; after that the update is refused with a 409.
+	RegisterTemplate *string `json:"registerTemplate"`
+	Status           *string `json:"status"`
+	UpdatedBy        string  `json:"updatedBy"`
 }
 
 // =============================================================================
@@ -1188,6 +1258,21 @@ type CreateRiskRequest struct {
 	// GRC frontend only ever sends one today via a single-select dropdown.
 	RiskCategoryIDs []int `json:"riskCategoryIds"`
 
+	// Register-template fields (RISK_MODULE_DESIGN.md §14). Which of these a
+	// risk may and must carry depends on its source register's template, which
+	// the repository reads inside the create transaction:
+	//   STANDARD         → none of them
+	//   AGGREGATED       → PlatformIDs (at least one)
+	//   MANAGED_SERVICES → CustomerID, DeploymentTypeID, ProductIDs (at least
+	//                      one), Environments (at least one); and no
+	//                      ComplianceReferenceIDs
+	// Every referenced value must exist and be ACTIVE.
+	PlatformIDs      []int    `json:"platformIds"`
+	CustomerID       *int     `json:"customerId"`
+	DeploymentTypeID *int     `json:"deploymentTypeId"`
+	ProductIDs       []int    `json:"productIds"`
+	Environments     []string `json:"environments"` // PRODUCTION | NON_PRODUCTION | DR
+
 	CreatedBy string `json:"createdBy"`
 }
 
@@ -1251,11 +1336,23 @@ type UpdateRiskRequest struct {
 	// write is legal and makes it atomic. That split matters: which edits
 	// require re-approval, and what belongs in the change log, are workflow
 	// rules owned by the GRC backend, not persistence rules owned here.
-	ComplianceReferenceIDs []int              `json:"complianceReferenceIds"`
-	RiskCategoryIDs        []int              `json:"riskCategoryIds"`
-	ActionPlan             *ActionPlanUpdate  `json:"actionPlan"`
-	ActionSteps            []ActionStepUpdate `json:"actionSteps"`
-	ChangeLog              []ChangeLogEntry   `json:"changeLog"`
+	ComplianceReferenceIDs []int `json:"complianceReferenceIds"`
+	RiskCategoryIDs        []int `json:"riskCategoryIds"`
+
+	// Register-template fields follow the same nil-means-untouched,
+	// non-nil-is-the-whole-set rule. They must belong to the risk's template,
+	// and a multi-valued one may not be emptied (each needs at least one).
+	// Newly added values must be ACTIVE; values the risk already has may stay
+	// even if since deactivated. There is deliberately no customer field: a
+	// risk's customer is part of its risk code and never changes.
+	PlatformIDs      []int    `json:"platformIds"`
+	DeploymentTypeID *int     `json:"deploymentTypeId"`
+	ProductIDs       []int    `json:"productIds"`
+	Environments     []string `json:"environments"`
+
+	ActionPlan  *ActionPlanUpdate  `json:"actionPlan"`
+	ActionSteps []ActionStepUpdate `json:"actionSteps"`
+	ChangeLog   []ChangeLogEntry   `json:"changeLog"`
 
 	// ExpectedStatus makes the update a compare-and-set. When the caller
 	// supplies it, the UPDATE is guarded by that status and a mismatch is a
@@ -1875,6 +1972,23 @@ type RiskDetail struct {
 	RiskCategories       []RiskCategory            `json:"riskCategories"`
 	ActionPlan           *RiskActionPlanDetail     `json:"actionPlan"`
 	Assessments          []RiskAssessment          `json:"assessments"`
+
+	// Register-template values with ids and statuses, so an edit form can
+	// preselect them and label an INACTIVE one "(inactive)". Customer and
+	// DeploymentType are nil, and the lists empty, when the risk's template
+	// lacks them. Environments are on the embedded Risk.
+	Customer       *RiskLookupRef  `json:"customer"`
+	DeploymentType *RiskLookupRef  `json:"deploymentType"`
+	Products       []RiskLookupRef `json:"products"`
+	Platforms      []RiskLookupRef `json:"platforms"`
+}
+
+// RiskLookupRef is a lookup value as it appears on one risk.
+type RiskLookupRef struct {
+	ID     int     `json:"id"`
+	Name   string  `json:"name"`
+	Code   *string `json:"code,omitempty"` // customers only
+	Status string  `json:"status"`         // ACTIVE | INACTIVE
 }
 
 // RiskActionPlanDetail is the risk's STANDARD action plan with its steps

@@ -52,7 +52,7 @@ type RiskRepository interface {
 	ResubmitTransition(ctx context.Context, id int, fromStatus, toStatus, updatedBy string) error
 	SetRiskType(ctx context.Context, id int, riskType, updatedBy string) error
 	SetOwnerFirstApprovedAt(ctx context.Context, id int, updatedBy string) error
-	NextSequenceID(ctx context.Context, sourceRegisterID int) (int, error)
+	NextSequenceID(ctx context.Context, sourceRegisterID int, customerID *int) (int, error)
 }
 
 // RiskAssessmentRepository is the data-access contract for residual risk assessments.
@@ -160,6 +160,17 @@ type ComplianceReferenceRepository interface {
 	// reference is still tagged on any risk, since the junction table's FK is
 	// ON DELETE CASCADE and would otherwise silently untag it from every risk
 	// that uses it rather than erroring.
+	Delete(ctx context.Context, id int) error
+}
+
+// LookupRepository is the data-access contract for one register-template
+// lookup: platforms, customers, products or deployment types.
+type LookupRepository interface {
+	// List returns every value ordered by name; status ("ACTIVE" |
+	// "INACTIVE" | "" for all) narrows it.
+	List(ctx context.Context, status string) ([]*model.Lookup, error)
+	Create(ctx context.Context, req model.CreateLookupRequest, createdBy string) (*model.Lookup, error)
+	Update(ctx context.Context, id int, req model.UpdateLookupRequest, updatedBy string) (*model.Lookup, error)
 	Delete(ctx context.Context, id int) error
 }
 

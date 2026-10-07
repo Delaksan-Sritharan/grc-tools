@@ -316,6 +316,22 @@ func NewRouter(db *sql.DB, store *storage.Service) http.Handler {
 	mux.HandleFunc("PATCH /risk/categories/{id}", riskCategoryH.UpdateRiskCategory)
 	mux.HandleFunc("DELETE /risk/categories/{id}", riskCategoryH.DeleteRiskCategory)
 
+	// Register-template lookups (RISK_MODULE_DESIGN.md §14). Four tables of
+	// one shape, served by one handler type per kind.
+	for path, kind := range map[string]repository.LookupKind{
+		"/risk/platforms":        repository.LookupPlatform,
+		"/risk/customers":        repository.LookupCustomer,
+		"/risk/products":         repository.LookupProduct,
+		"/risk/deployment-types": repository.LookupDeploymentType,
+	} {
+		h := handler.NewRiskLookupHandler(
+			service.NewRiskLookupService(repository.NewRiskLookupRepository(db, kind), kind))
+		mux.HandleFunc("GET "+path, h.ListRiskLookups)
+		mux.HandleFunc("POST "+path, h.CreateRiskLookup)
+		mux.HandleFunc("PATCH "+path+"/{id}", h.UpdateRiskLookup)
+		mux.HandleFunc("DELETE "+path+"/{id}", h.DeleteRiskLookup)
+	}
+
 	// Risk compliance references
 	mux.HandleFunc("POST /risk/compliance-references/search", riskReferenceH.SearchRiskReferences)
 	mux.HandleFunc("GET /risk/compliance-references/{id}", riskReferenceH.GetRiskReferenceByID)

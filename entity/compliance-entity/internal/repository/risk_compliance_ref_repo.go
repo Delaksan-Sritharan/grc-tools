@@ -41,10 +41,17 @@ func NewRiskComplianceRefRepository(db *sql.DB) RiskComplianceRefRepository {
 	return &riskComplianceRefRepo{db: db}
 }
 
+// AddRiskComplianceRef links a compliance reference to a risk. A risk whose
+// register is on the Managed Services template has no Security Compliance
+// Reference field (RISK_MODULE_DESIGN.md §14), so the insert only selects a
+// row for any other risk: one statement, so the template cannot be checked
+// and then change before the write.
 func (r *riskComplianceRefRepo) AddRiskComplianceRef(ctx context.Context, riskID int, req domain.AddRiskComplianceRefRequest) (*domain.RiskComplianceRefLink, error) {
-	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO risk_compliance_reference (risk_id, reference_id) VALUES (?, ?)`,
-		riskID, req.ReferenceID)
+	res, err := r.db.ExecContext(ctx,
+		`INSERT INTO risk_compliance_reference (risk_id, reference_id)
+		 SELECT r.id, ? FROM risk r JOIN risk_team t ON t.id = r.source_register_id
+		 WHERE r.id = ? AND t.register_template <> 'MANAGED_SERVICES'`,
+		req.ReferenceID, riskID)
 	if err != nil {
 		if isDuplicateKey(err) {
 			return r.getLink(ctx, riskID, req.ReferenceID)
@@ -53,6 +60,18 @@ func (r *riskComplianceRefRepo) AddRiskComplianceRef(ctx context.Context, riskID
 			return nil, &apierror.NotFoundError{Msg: fmt.Sprintf("compliance reference %d not found", req.ReferenceID)}
 		}
 		return nil, fmt.Errorf("risk_compliance_reference.Add: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		var exists bool
+		if err := r.db.QueryRowContext(ctx,
+			"SELECT EXISTS(SELECT 1 FROM risk WHERE id = ?)", riskID).Scan(&exists); err != nil {
+			return nil, fmt.Errorf("risk_compliance_reference.Add recheck: %w", err)
+		}
+		if !exists {
+			return nil, &apierror.NotFoundError{Msg: fmt.Sprintf("risk %d not found", riskID)}
+		}
+		return nil, &apierror.ValidationError{
+			Msg: "a risk in a Managed Services register has no security compliance references"}
 	}
 	return r.getLink(ctx, riskID, req.ReferenceID)
 }

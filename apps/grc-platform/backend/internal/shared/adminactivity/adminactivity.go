@@ -56,6 +56,11 @@ const (
 	EntityComplianceReference = "COMPLIANCE_REFERENCE"
 	EntityRiskScore           = "RISK_SCORE"
 	EntityAuditTeam           = "AUDIT_TEAM"
+	// Register-template lookups (RISK_MODULE_DESIGN.md §14).
+	EntityRiskPlatform       = "RISK_PLATFORM"
+	EntityRiskCustomer       = "RISK_CUSTOMER"
+	EntityRiskProduct        = "RISK_PRODUCT"
+	EntityRiskDeploymentType = "RISK_DEPLOYMENT_TYPE"
 )
 
 // Client talks to the Compliance Entity's /admin-activity-log endpoints.

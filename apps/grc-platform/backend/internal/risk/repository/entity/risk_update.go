@@ -51,12 +51,18 @@ func (r *riskRepository) Update(ctx context.Context, id int, req model.UpdateRis
 		}
 	}
 
-	// Gross score and reassessment date are full-edit-only: once a risk owner
-	// has approved, they are fixed and any incoming value is discarded rather
-	// than rejected, so an otherwise valid edit still goes through.
+	// Gross score, reassessment date and the register-template fields are
+	// full-edit-only: once a risk owner has approved, they are fixed and any
+	// incoming value is discarded rather than rejected, so an otherwise valid
+	// edit still goes through. (The customer is not editable at all; the
+	// request has no field for it.)
 	if current.OwnerFirstApprovedAt != nil && *current.OwnerFirstApprovedAt != "" {
 		req.GrossScoreID = nil
 		req.ReassessmentDate = ""
+		req.PlatformIDs = nil
+		req.DeploymentTypeID = nil
+		req.ProductIDs = nil
+		req.Environments = nil
 	}
 
 	// Restricted fields force re-approval when changed on an IN_REMEDIATION
@@ -177,6 +183,21 @@ func (r *riskRepository) Update(ctx context.Context, id int, req model.UpdateRis
 	}
 	if req.RiskCategoryIDs != nil {
 		body["riskCategoryIds"] = req.RiskCategoryIDs
+	}
+	// Register-template fields: nil leaves them untouched, a list is the whole
+	// new set. The entity checks they belong to this risk's template and that
+	// newly added values are ACTIVE.
+	if req.PlatformIDs != nil {
+		body["platformIds"] = req.PlatformIDs
+	}
+	if req.DeploymentTypeID != nil {
+		body["deploymentTypeId"] = *req.DeploymentTypeID
+	}
+	if req.ProductIDs != nil {
+		body["productIds"] = req.ProductIDs
+	}
+	if req.Environments != nil {
+		body["environments"] = req.Environments
 	}
 	if req.ActionPlanDescription != "" || req.ActionOwnerID != nil {
 		plan := map[string]any{}

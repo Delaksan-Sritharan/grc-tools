@@ -29,6 +29,9 @@
 --     widening risk_id to nullable.
 --   • Junction tables (risk_compliance_reference,
 --     user_risk_team)                                     ............... CASCADE
+--   • Register-template lookups (risk_platform, risk_customer, risk_product,
+--     risk_deployment_type) ← detail/junction/sequence rows .............. RESTRICT
+--     (values are deactivated, never deleted once used — see that section)
 --
 -- This file defines the CURRENT table structure only. It carries no
 -- conditional `ALTER TABLE` / `information_schema`-guarded backfills for
@@ -54,18 +57,26 @@ SET FOREIGN_KEY_CHECKS = 0;
 --   ASSIGNMENT      → only in "assign to team" picker
 --   BOTH            → appears in both pickers
 -- code is NULL for teams that are never used as source registers (e.g. Legal, HR).
+--
+-- register_template, on a register, is which fields its risks carry (STANDARD:
+-- the original set; AGGREGATED: + Platform; MANAGED_SERVICES:
+-- + Customer/Product/Deployment Type/Environment and no Security Compliance
+-- Reference). An assignment-only team ignores it, and every team is offered as
+-- an assignment team on every register. Fixed once the register has risks — enforced by the
+-- application, not here. See RISK_MODULE_DESIGN.md §14.
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS risk_team (
-  id          INT          NOT NULL AUTO_INCREMENT,
-  name        VARCHAR(255) NOT NULL,
-  code        VARCHAR(50)  NULL COMMENT 'Short abbreviation used in risk codes, e.g. ASG, CHO, CC; NULL for assignment-only teams',
-  description TEXT         NULL,
-  team_type   ENUM('SOURCE_REGISTER','ASSIGNMENT','BOTH') NOT NULL,
-  status      ENUM('ACTIVE','INACTIVE','REMOVED')         NOT NULL DEFAULT 'ACTIVE',
-  created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  created_by  VARCHAR(255) NULL,
-  updated_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  updated_by  VARCHAR(255) NULL,
+  id                INT          NOT NULL AUTO_INCREMENT,
+  name              VARCHAR(255) NOT NULL,
+  code              VARCHAR(50)  NULL COMMENT 'Short abbreviation used in risk codes, e.g. ASG, CHO, CC; NULL for assignment-only teams',
+  description       TEXT         NULL,
+  team_type         ENUM('SOURCE_REGISTER','ASSIGNMENT','BOTH') NOT NULL,
+  register_template ENUM('STANDARD','AGGREGATED','MANAGED_SERVICES') NOT NULL DEFAULT 'STANDARD',
+  status            ENUM('ACTIVE','INACTIVE','REMOVED')         NOT NULL DEFAULT 'ACTIVE',
+  created_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_by        VARCHAR(255) NULL,
+  updated_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  updated_by        VARCHAR(255) NULL,
   PRIMARY KEY (id),
   UNIQUE KEY uq_risk_team_code (code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -560,6 +571,202 @@ CREATE TABLE IF NOT EXISTS risk_reminder (
   -- lookup by risk and no separate index is needed.
   UNIQUE KEY uq_risk_reminder (risk_id, reminder_type, due_date_snapshot),
   CONSTRAINT fk_risk_reminder_risk FOREIGN KEY (risk_id) REFERENCES risk(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- =============================================================================
+-- Register Templates (RISK_MODULE_DESIGN.md §14)
+--
+-- The fields a risk carries beyond the core set depend on its source
+-- register's risk_team.register_template:
+--   AGGREGATED       → Platform (multi)
+--   MANAGED_SERVICES → Customer (single), Deployment Type (single),
+--                      Product (multi), Environment (multi)
+-- STANDARD risks have no rows in any table below.
+--
+-- Lookup tables (risk_platform, risk_customer, risk_product,
+-- risk_deployment_type) are admin-managed reference data. Their rows are
+-- deactivated (status INACTIVE), never deleted once a risk uses them: an
+-- INACTIVE value drops out of pickers but still renders on existing risks.
+-- Every FK to a lookup is therefore RESTRICT — unlike the older junctions'
+-- CASCADE to risk_security_compliance_reference — so deleting a used value
+-- fails instead of silently stripping it from historical risks. FKs to risk
+-- are CASCADE, matching the existing junctions.
+--
+-- Template rules (which fields a register may carry, which are required) are
+-- enforced by the Compliance Entity, which writes a risk and all of its rows
+-- here in one transaction. They cannot be expressed as constraints: whether
+-- risk_managed_service_detail must exist depends on another table's row.
+-- =============================================================================
+
+-- -----------------------------------------------------------------------------
+-- risk_platform
+-- Platforms an AGGREGATED-template risk can affect.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS risk_platform (
+  id          INT          NOT NULL AUTO_INCREMENT,
+  name        VARCHAR(255) NOT NULL,
+  status      ENUM('ACTIVE','INACTIVE') NOT NULL DEFAULT 'ACTIVE',
+  created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_by  VARCHAR(255) NULL,
+  updated_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  updated_by  VARCHAR(255) NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_risk_platform_name (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- -----------------------------------------------------------------------------
+-- risk_customer
+-- Managed Services customers. name is what the dropdown shows and may be
+-- edited; code is embedded in risk codes ({YEAR}-{TEAM_CODE}-{CUSTOMER_CODE}-
+-- {QUARTER}-{SEQ}) and must never change once any risk uses it — risk codes
+-- are never regenerated. That freeze is an application rule.
+--
+-- The CHECK uses REGEXP_LIKE's 'c' (case-sensitive) flag because the column
+-- collation is case-insensitive: a plain REGEXP '^[A-Z0-9]' would accept
+-- lowercase. The same collation makes uq_risk_customer_code case-insensitive,
+-- which is wanted: ABC and abc must not both exist.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS risk_customer (
+  id          INT          NOT NULL AUTO_INCREMENT,
+  name        VARCHAR(255) NOT NULL,
+  code        VARCHAR(12)  NOT NULL COMMENT 'A-Z/0-9, embedded in risk codes; frozen once used',
+  status      ENUM('ACTIVE','INACTIVE') NOT NULL DEFAULT 'ACTIVE',
+  created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_by  VARCHAR(255) NULL,
+  updated_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  updated_by  VARCHAR(255) NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_risk_customer_name (name),
+  UNIQUE KEY uq_risk_customer_code (code),
+  CONSTRAINT chk_risk_customer_code CHECK (REGEXP_LIKE(code, '^[A-Z0-9]{1,12}$', 'c'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- -----------------------------------------------------------------------------
+-- risk_product
+-- Products a MANAGED_SERVICES risk can affect. Independent of customer: no
+-- customer→product mapping (one can be added later without touching risks).
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS risk_product (
+  id          INT          NOT NULL AUTO_INCREMENT,
+  name        VARCHAR(255) NOT NULL,
+  status      ENUM('ACTIVE','INACTIVE') NOT NULL DEFAULT 'ACTIVE',
+  created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_by  VARCHAR(255) NULL,
+  updated_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  updated_by  VARCHAR(255) NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_risk_product_name (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- -----------------------------------------------------------------------------
+-- risk_deployment_type
+-- Deployment types for MANAGED_SERVICES risks (one per risk).
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS risk_deployment_type (
+  id          INT          NOT NULL AUTO_INCREMENT,
+  name        VARCHAR(255) NOT NULL,
+  status      ENUM('ACTIVE','INACTIVE') NOT NULL DEFAULT 'ACTIVE',
+  created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_by  VARCHAR(255) NULL,
+  updated_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  updated_by  VARCHAR(255) NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_risk_deployment_type_name (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- -----------------------------------------------------------------------------
+-- risk_managed_service_detail
+-- The single-valued MANAGED_SERVICES fields, one row per MS risk. A 1:1
+-- extension table rather than nullable columns on risk: risk is the large,
+-- hot table, and every non-MS risk would carry always-NULL columns.
+-- customer_id is locked after creation (it is part of the risk code) —
+-- an application rule.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS risk_managed_service_detail (
+  risk_id            INT          NOT NULL,
+  customer_id        INT          NOT NULL,
+  deployment_type_id INT          NOT NULL,
+  created_at         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_by         VARCHAR(255) NULL,
+  updated_at         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  updated_by         VARCHAR(255) NULL,
+  PRIMARY KEY (risk_id),
+  KEY idx_rmsd_customer        (customer_id),
+  KEY idx_rmsd_deployment_type (deployment_type_id),
+  CONSTRAINT fk_rmsd_risk            FOREIGN KEY (risk_id)            REFERENCES risk(id)                 ON DELETE CASCADE,
+  CONSTRAINT fk_rmsd_customer        FOREIGN KEY (customer_id)        REFERENCES risk_customer(id)        ON DELETE RESTRICT,
+  CONSTRAINT fk_rmsd_deployment_type FOREIGN KEY (deployment_type_id) REFERENCES risk_deployment_type(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- -----------------------------------------------------------------------------
+-- risk_platform_reference  (junction table)
+-- Many-to-many between an AGGREGATED risk and risk_platform (at least one,
+-- enforced by the application).
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS risk_platform_reference (
+  risk_id     INT      NOT NULL,
+  platform_id INT      NOT NULL,
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (risk_id, platform_id),
+  KEY idx_rplat_platform (platform_id),
+  CONSTRAINT fk_rplat_risk     FOREIGN KEY (risk_id)     REFERENCES risk(id)          ON DELETE CASCADE,
+  CONSTRAINT fk_rplat_platform FOREIGN KEY (platform_id) REFERENCES risk_platform(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- -----------------------------------------------------------------------------
+-- risk_product_reference  (junction table)
+-- Many-to-many between a MANAGED_SERVICES risk and risk_product (at least
+-- one, enforced by the application).
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS risk_product_reference (
+  risk_id     INT      NOT NULL,
+  product_id  INT      NOT NULL,
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (risk_id, product_id),
+  KEY idx_rprod_product (product_id),
+  CONSTRAINT fk_rprod_risk    FOREIGN KEY (risk_id)    REFERENCES risk(id)         ON DELETE CASCADE,
+  CONSTRAINT fk_rprod_product FOREIGN KEY (product_id) REFERENCES risk_product(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- -----------------------------------------------------------------------------
+-- risk_environment_reference  (junction table)
+-- Environments a MANAGED_SERVICES risk affects (at least one, enforced by the
+-- application). The values are fixed, so they are an ENUM rather than a
+-- lookup table.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS risk_environment_reference (
+  risk_id     INT      NOT NULL,
+  environment ENUM('PRODUCTION','NON_PRODUCTION','DR') NOT NULL,
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (risk_id, environment),
+  KEY idx_renv_environment (environment),
+  CONSTRAINT fk_renv_risk FOREIGN KEY (risk_id) REFERENCES risk(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- -----------------------------------------------------------------------------
+-- risk_customer_sequence
+-- Risk-code counter for MANAGED_SERVICES registers, one row per (register,
+-- customer): BANKONESUB's risks number 0001, 0002, … regardless of other
+-- customers. Same never-reset, lock-then-bump pattern as
+-- risk_register_sequence, which these registers do not use.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS risk_customer_sequence (
+  risk_team_id         INT NOT NULL COMMENT 'FK to risk_team (source register)',
+  customer_id          INT NOT NULL,
+  last_sequence_number INT NOT NULL DEFAULT 0,
+  PRIMARY KEY (risk_team_id, customer_id),
+  KEY idx_rcs_customer (customer_id),
+  CONSTRAINT fk_rcs_team     FOREIGN KEY (risk_team_id) REFERENCES risk_team(id)     ON DELETE RESTRICT,
+  CONSTRAINT fk_rcs_customer FOREIGN KEY (customer_id)  REFERENCES risk_customer(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 

@@ -33,7 +33,7 @@ type RiskRepository interface {
 	GetRiskByID(ctx context.Context, id int) (*domain.Risk, error)
 	CreateRisk(ctx context.Context, req domain.CreateRiskRequest) (*domain.Risk, error)
 	UpdateRisk(ctx context.Context, id int, req domain.UpdateRiskRequest) (*domain.Risk, error)
-	NextSequenceNumber(ctx context.Context, sourceRegisterID int) (int, error)
+	NextSequenceNumber(ctx context.Context, sourceRegisterID int, customerID *int) (int, error)
 	GetRiskDetail(ctx context.Context, id int) (*domain.RiskDetail, error)
 }
 
@@ -70,7 +70,20 @@ const riskSelectCols = `
   -- discarded the time of day.
   DATE_FORMAT(r.owner_first_approved_at, '%Y-%m-%dT%H:%i:%sZ'),
   r.created_by, r.updated_by,
-  eff.risk_level AS effective_risk_level, eff.color_code AS effective_color_code`
+  eff.risk_level AS effective_risk_level, eff.color_code AS effective_color_code,
+  -- Register-template summary (RISK_MODULE_DESIGN.md §14). Correlated
+  -- subqueries rather than joins so a multi-valued field cannot multiply the
+  -- row. Environments sort in ENUM order (PRODUCTION, NON_PRODUCTION, DR).
+  -- Platform names are joined on the ASCII unit separator (0x1F), which no
+  -- name contains, unlike a comma.
+  src.register_template,
+  (SELECT c.name FROM risk_managed_service_detail m JOIN risk_customer c ON c.id = m.customer_id
+    WHERE m.risk_id = r.id) AS customer_name,
+  (SELECT GROUP_CONCAT(e.environment ORDER BY e.environment SEPARATOR ',')
+     FROM risk_environment_reference e WHERE e.risk_id = r.id) AS environments,
+  (SELECT GROUP_CONCAT(p.name ORDER BY p.name SEPARATOR x'1F')
+     FROM risk_platform_reference rp JOIN risk_platform p ON p.id = rp.platform_id
+    WHERE rp.risk_id = r.id) AS platform_names`
 
 // riskFromClause uses LEFT JOINs throughout. A risk whose register, owner or
 // assigner row has gone missing is a data problem, but it must still be
@@ -238,6 +251,29 @@ func (r *riskRepo) SearchRisks(ctx context.Context, req domain.SearchRisksReques
 	if req.DueOverdueOnly {
 		where += " AND r.implementation_date IS NOT NULL AND r.implementation_date < CURDATE()"
 	}
+	// Register-template filters: EXISTS rather than joins, so a risk with
+	// several matching values is still one row.
+	if len(req.CustomerIDs) > 0 {
+		where += " AND EXISTS (SELECT 1 FROM risk_managed_service_detail m WHERE m.risk_id = r.id AND m.customer_id IN (" +
+			placeholders(len(req.CustomerIDs)) + "))"
+		for _, id := range req.CustomerIDs {
+			args = append(args, id)
+		}
+	}
+	if len(req.EnvironmentKeys) > 0 {
+		where += " AND EXISTS (SELECT 1 FROM risk_environment_reference e WHERE e.risk_id = r.id AND e.environment IN (" +
+			placeholders(len(req.EnvironmentKeys)) + "))"
+		for _, k := range req.EnvironmentKeys {
+			args = append(args, k)
+		}
+	}
+	if len(req.PlatformIDs) > 0 {
+		where += " AND EXISTS (SELECT 1 FROM risk_platform_reference rp WHERE rp.risk_id = r.id AND rp.platform_id IN (" +
+			placeholders(len(req.PlatformIDs)) + "))"
+		for _, id := range req.PlatformIDs {
+			args = append(args, id)
+		}
+	}
 
 	var total int
 	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) "+riskFromClause+" "+where, args...).Scan(&total); err != nil {
@@ -278,7 +314,9 @@ func (r *riskRepo) GetRiskByID(ctx context.Context, id int) (*domain.Risk, error
 }
 
 // CreateRisk generates a unique risk code using the risk_register_sequence table
-// (atomically incremented per team) and inserts the new risk row.
+// (atomically incremented per team), or risk_customer_sequence for a Managed
+// Services register, and inserts the new risk row together with its action
+// plan, references and register-template data.
 func (r *riskRepo) CreateRisk(ctx context.Context, req domain.CreateRiskRequest) (*domain.Risk, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -286,43 +324,76 @@ func (r *riskRepo) CreateRisk(ctx context.Context, req domain.CreateRiskRequest)
 	}
 	defer tx.Rollback()
 
-	// ── 1. Reserve the next sequence number ───────────────────────────────────
+	// ── 1. Read the source register and check the template fields ────────────
+	// FOR SHARE: UpdateRiskTeam locks this row FOR UPDATE before changing
+	// register_template, so the template cannot change between this read and
+	// the commit — the register-template lock rule depends on it.
+	//
+	// Deliberately not COALESCE(code, name): a register with no code is a data
+	// problem, and silently substituting its name would mint a risk code in a
+	// different format that nothing can parse back.
+	var teamCode, template string
+	if err = tx.QueryRowContext(ctx,
+		"SELECT code, register_template FROM risk_team WHERE id = ? FOR SHARE",
+		req.SourceRegisterID).Scan(&teamCode, &template); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &apierror.ValidationError{Msg: fmt.Sprintf("source register %d not found", req.SourceRegisterID)}
+		}
+		return nil, fmt.Errorf("risk.Create source register: %w", err)
+	}
+	if err = checkTemplateFields(template, req); err != nil {
+		return nil, err
+	}
+	if err = checkAssignmentTeam(ctx, tx, req.AssignmentTeamID); err != nil {
+		return nil, err
+	}
+	if err = checkTemplateValues(ctx, tx, req); err != nil {
+		return nil, err
+	}
+
+	// ── 2. Reserve the next sequence number and build the risk code ──────────
 	// Keyed on the SOURCE REGISTER, not the assignment team: a risk's code
 	// belongs to the register it was raised in, and the two are frequently
 	// different. INSERT IGNORE then SELECT ... FOR UPDATE holds the row for the
 	// rest of the transaction, so concurrent creates cannot take the same
 	// number. The counter never resets — it runs across years and quarters.
-	if _, err = tx.ExecContext(ctx,
-		"INSERT IGNORE INTO risk_register_sequence (risk_team_id, last_sequence_number) VALUES (?, 0)",
-		req.SourceRegisterID); err != nil {
-		return nil, fmt.Errorf("risk.Create ensure sequence: %w", err)
-	}
+	//
+	// Managed Services registers count per customer instead, and put the
+	// customer's code in the risk code (RISK_MODULE_DESIGN.md §12).
+	var riskCode string
+	if template == TemplateManagedServices {
+		var customerCode string
+		if err = tx.QueryRowContext(ctx,
+			"SELECT code FROM risk_customer WHERE id = ?", *req.CustomerID).Scan(&customerCode); err != nil {
+			return nil, fmt.Errorf("risk.Create customer code: %w", err)
+		}
+		seqNum, err := reserveCustomerSequence(ctx, tx, req.SourceRegisterID, *req.CustomerID)
+		if err != nil {
+			return nil, err
+		}
+		riskCode = fmt.Sprintf("%d-%s-%s-%s-%04d", req.RiskYear, teamCode, customerCode, req.RiskQuarter, seqNum)
+	} else {
+		if _, err = tx.ExecContext(ctx,
+			"INSERT IGNORE INTO risk_register_sequence (risk_team_id, last_sequence_number) VALUES (?, 0)",
+			req.SourceRegisterID); err != nil {
+			return nil, fmt.Errorf("risk.Create ensure sequence: %w", err)
+		}
 
-	var lastSeq int
-	if err = tx.QueryRowContext(ctx,
-		"SELECT last_sequence_number FROM risk_register_sequence WHERE risk_team_id = ? FOR UPDATE",
-		req.SourceRegisterID).Scan(&lastSeq); err != nil {
-		return nil, fmt.Errorf("risk.Create lock sequence: %w", err)
-	}
-	seqNum := lastSeq + 1
+		var lastSeq int
+		if err = tx.QueryRowContext(ctx,
+			"SELECT last_sequence_number FROM risk_register_sequence WHERE risk_team_id = ? FOR UPDATE",
+			req.SourceRegisterID).Scan(&lastSeq); err != nil {
+			return nil, fmt.Errorf("risk.Create lock sequence: %w", err)
+		}
+		seqNum := lastSeq + 1
 
-	if _, err = tx.ExecContext(ctx,
-		"UPDATE risk_register_sequence SET last_sequence_number = ? WHERE risk_team_id = ?",
-		seqNum, req.SourceRegisterID); err != nil {
-		return nil, fmt.Errorf("risk.Create bump sequence: %w", err)
+		if _, err = tx.ExecContext(ctx,
+			"UPDATE risk_register_sequence SET last_sequence_number = ? WHERE risk_team_id = ?",
+			seqNum, req.SourceRegisterID); err != nil {
+			return nil, fmt.Errorf("risk.Create bump sequence: %w", err)
+		}
+		riskCode = fmt.Sprintf("%d-%s-%s-%04d", req.RiskYear, teamCode, req.RiskQuarter, seqNum)
 	}
-
-	// ── 2. Build the risk code from the source register's code ────────────────
-	// Deliberately not COALESCE(code, name): a register with no code is a data
-	// problem, and silently substituting its name would mint a risk code in a
-	// different format that nothing can parse back.
-	var teamCode string
-	if err = tx.QueryRowContext(ctx,
-		"SELECT code FROM risk_team WHERE id = ?",
-		req.SourceRegisterID).Scan(&teamCode); err != nil {
-		return nil, fmt.Errorf("risk.Create team code: %w", err)
-	}
-	riskCode := fmt.Sprintf("%d-%s-%s-%04d", req.RiskYear, teamCode, req.RiskQuarter, seqNum)
 
 	// ── 3. Resolve the gross score from likelihood/impact ─────────────────────
 	var grossScoreID int
@@ -419,6 +490,10 @@ func (r *riskRepo) CreateRisk(ctx context.Context, req domain.CreateRiskRequest)
 			riskID, categoryID); err != nil {
 			return nil, fmt.Errorf("risk.Create risk category %d: %w", categoryID, err)
 		}
+	}
+
+	if err = writeTemplateData(ctx, tx, riskID, req); err != nil {
+		return nil, err
 	}
 
 	// ── 6. Record the creation in the change log ──────────────────────────────
@@ -560,6 +635,11 @@ func (r *riskRepo) UpdateRisk(ctx context.Context, id int, req domain.UpdateRisk
 	}
 	defer tx.Rollback() //nolint:errcheck
 
+	// Register-template rules, checked before anything is written.
+	if err = checkTemplateUpdate(ctx, tx, id, req); err != nil {
+		return nil, err
+	}
+
 	var query string
 	if req.ExpectedStatus != "" {
 		args = append(args, id, req.ExpectedStatus)
@@ -605,6 +685,10 @@ func (r *riskRepo) UpdateRisk(ctx context.Context, id int, req domain.UpdateRisk
 				return nil, fmt.Errorf("risk.Update compliance reference %d: %w", refID, err)
 			}
 		}
+	}
+
+	if err = writeTemplateUpdate(ctx, tx, id, req); err != nil {
+		return nil, err
 	}
 
 	// Risk categories follow the identical nil-means-untouched, wholesale-replace
@@ -750,6 +834,7 @@ func scanRiskWithExtras(s scanner, extras ...any) (*domain.Risk, error) {
 	var gitIssueURL, emailSubject, remarks sql.NullString
 	var rejectionComment, rejectionStage, ownerFirstApprovedAt sql.NullString
 	var effLevel, effColour sql.NullString
+	var template, customerName, environments, platformNames sql.NullString
 	var grossScoreID, actionPlanID, complianceApprovalBy sql.NullInt64
 
 	dest := []any{
@@ -771,6 +856,7 @@ func scanRiskWithExtras(s scanner, extras ...any) (*domain.Risk, error) {
 		&ownerFirstApprovedAt,
 		&r.CreatedBy, &r.UpdatedBy,
 		&effLevel, &effColour,
+		&template, &customerName, &environments, &platformNames,
 	}
 	if err := s.Scan(append(dest, extras...)...); err != nil {
 		return nil, err
@@ -811,7 +897,23 @@ func scanRiskWithExtras(s scanner, extras ...any) (*domain.Risk, error) {
 	r.ComplianceApprovalBy = nullInt(complianceApprovalBy)
 	r.EffectiveRiskLevel = nullStr(effLevel)
 	r.EffectiveColorCode = nullStr(effColour)
+	// Empty, not "STANDARD", when the register row is missing: the risk is
+	// still listed (see riskFromClause) and inventing a template would hide
+	// the data problem.
+	r.RegisterTemplate = template.String
+	r.CustomerName = nullStr(customerName)
+	r.Environments = splitNonEmpty(environments, ",")
+	r.PlatformNames = splitNonEmpty(platformNames, "\x1f")
 	return &r, nil
+}
+
+// splitNonEmpty splits a GROUP_CONCAT result, returning an empty (non-nil)
+// slice for NULL so the JSON is [] rather than null.
+func splitNonEmpty(ns sql.NullString, sep string) []string {
+	if !ns.Valid || ns.String == "" {
+		return []string{}
+	}
+	return strings.Split(ns.String, sep)
 }
 
 // NextSequenceNumber previews the sequence number the next risk created for
@@ -819,24 +921,50 @@ func scanRiskWithExtras(s scanner, extras ...any) (*domain.Risk, error) {
 // the counter inside its transaction; this is a read used to show the risk code
 // on a form before the risk exists.
 //
-// A register with no row in risk_register_sequence has had no risks created
-// yet, so its next number is 1 — but only if the register itself exists,
-// otherwise a typo in the id would silently preview a valid-looking code.
-func (r *riskRepo) NextSequenceNumber(ctx context.Context, sourceRegisterID int) (int, error) {
-	var lastSeq int
-	err := r.db.QueryRowContext(ctx,
-		"SELECT last_sequence_number FROM risk_register_sequence WHERE risk_team_id = ?",
-		sourceRegisterID).Scan(&lastSeq)
-	if errors.Is(err, sql.ErrNoRows) {
-		var exists bool
-		if err := r.db.QueryRowContext(ctx,
-			"SELECT EXISTS(SELECT 1 FROM risk_team WHERE id = ?)",
-			sourceRegisterID).Scan(&exists); err != nil {
-			return 0, fmt.Errorf("risk.NextSequenceNumber validate register: %w", err)
-		}
-		if !exists {
+// A Managed Services register counts per customer, so it needs customerID and
+// reads risk_customer_sequence; every other register reads
+// risk_register_sequence and must not be given a customer.
+//
+// No counter row means no risk has been created for that register (or
+// register and customer) yet, so the next number is 1 — but only after the
+// register, and the customer, are confirmed to exist; otherwise a typo in an
+// id would silently preview a valid-looking code.
+func (r *riskRepo) NextSequenceNumber(ctx context.Context, sourceRegisterID int, customerID *int) (int, error) {
+	var template string
+	if err := r.db.QueryRowContext(ctx,
+		"SELECT register_template FROM risk_team WHERE id = ?", sourceRegisterID).Scan(&template); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
 			return 0, &apierror.NotFoundError{Msg: fmt.Sprintf("source register %d not found", sourceRegisterID)}
 		}
+		return 0, fmt.Errorf("risk.NextSequenceNumber register: %w", err)
+	}
+
+	var lastSeq int
+	var err error
+	if template == TemplateManagedServices {
+		if customerID == nil {
+			return 0, &apierror.ValidationError{Msg: "customerId is required for this register"}
+		}
+		var exists bool
+		if err := r.db.QueryRowContext(ctx,
+			"SELECT EXISTS(SELECT 1 FROM risk_customer WHERE id = ?)", *customerID).Scan(&exists); err != nil {
+			return 0, fmt.Errorf("risk.NextSequenceNumber validate customer: %w", err)
+		}
+		if !exists {
+			return 0, &apierror.NotFoundError{Msg: fmt.Sprintf("customer %d not found", *customerID)}
+		}
+		err = r.db.QueryRowContext(ctx,
+			"SELECT last_sequence_number FROM risk_customer_sequence WHERE risk_team_id = ? AND customer_id = ?",
+			sourceRegisterID, *customerID).Scan(&lastSeq)
+	} else {
+		if customerID != nil {
+			return 0, &apierror.ValidationError{Msg: "customerId is only accepted for a Managed Services register"}
+		}
+		err = r.db.QueryRowContext(ctx,
+			"SELECT last_sequence_number FROM risk_register_sequence WHERE risk_team_id = ?",
+			sourceRegisterID).Scan(&lastSeq)
+	}
+	if errors.Is(err, sql.ErrNoRows) {
 		return 1, nil
 	}
 	if err != nil {
@@ -902,6 +1030,9 @@ func (r *riskRepo) GetRiskDetail(ctx context.Context, id int) (*domain.RiskDetai
 		return nil, err
 	}
 	if d.Assessments, err = r.detailAssessments(ctx, id); err != nil {
+		return nil, err
+	}
+	if err = r.detailTemplateValues(ctx, id, &d); err != nil {
 		return nil, err
 	}
 	return &d, nil

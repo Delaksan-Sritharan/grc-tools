@@ -104,6 +104,19 @@ type CreateRiskRequest struct {
 	GitIssueURL           string                    `json:"git_issue_url,omitempty"`
 	EmailSubject          string                    `json:"email_subject"`
 	Remarks               string                    `json:"remarks,omitempty"`
+
+	// Register-template fields (RISK_MODULE_DESIGN.md §14). Which are allowed
+	// and required depends on the source register's template; the Compliance
+	// Entity enforces that and its 400 reaches the client unchanged.
+	//   AGGREGATED       → PlatformIDs (at least one)
+	//   MANAGED_SERVICES → CustomerID, DeploymentTypeID, ProductIDs and
+	//                      Environments (at least one each), and no
+	//                      ComplianceReferenceIDs
+	PlatformIDs      []int    `json:"platform_ids,omitempty"`
+	CustomerID       *int     `json:"customer_id,omitempty"`
+	DeploymentTypeID *int     `json:"deployment_type_id,omitempty"`
+	ProductIDs       []int    `json:"product_ids,omitempty"`
+	Environments     []string `json:"environments,omitempty"` // PRODUCTION | NON_PRODUCTION | DR
 }
 
 // CreateActionStepRequest represents one step in the action plan.
@@ -135,12 +148,17 @@ type ListRisksFilter struct {
 	// TreatmentStrategies filters on treatment_strategy directly — REMEDIATE /
 	// ACCEPT / TRANSFER / AVOID / UNSPECIFIED (empty = all).
 	TreatmentStrategies []string
-	OwnerIDs            []int  // owner_id values to include (empty = all)
-	SubmittedFrom       string // created_at >= this date (YYYY-MM-DD); empty = unbounded
-	SubmittedTo         string // created_at <= this date (YYYY-MM-DD); empty = unbounded
-	DueFrom             string // implementation_date >= this date (YYYY-MM-DD); empty = unbounded
-	DueTo               string // implementation_date <= this date (YYYY-MM-DD); empty = unbounded
-	DueOverdueOnly      bool   // implementation_date < today, regardless of the range above
+	OwnerIDs            []int // owner_id values to include (empty = all)
+	// Register-template filters (empty = all). A risk whose template lacks the
+	// field never matches.
+	CustomerIDs    []int
+	Environments   []string // PRODUCTION / NON_PRODUCTION / DR
+	PlatformIDs    []int
+	SubmittedFrom  string // created_at >= this date (YYYY-MM-DD); empty = unbounded
+	SubmittedTo    string // created_at <= this date (YYYY-MM-DD); empty = unbounded
+	DueFrom        string // implementation_date >= this date (YYYY-MM-DD); empty = unbounded
+	DueTo          string // implementation_date <= this date (YYYY-MM-DD); empty = unbounded
+	DueOverdueOnly bool   // implementation_date < today, regardless of the range above
 	// OpenEscalationOnly restricts to risks carrying an unresolved escalation —
 	// what the Overdue Risks tab filters on. Deliberately not the ESCALATED
 	// status: a commented escalation returns the risk to IN_REMEDIATION while
@@ -223,6 +241,13 @@ type RiskListItem struct {
 	RejectionComment     *string `json:"rejection_comment"`
 	RejectionStage       *string `json:"rejection_stage"`
 	CreatedAt            string  `json:"created_at"`
+
+	// Register-template summary for the register table's template columns.
+	// Empty/nil when the risk's template lacks the field.
+	RegisterTemplate string   `json:"register_template"`
+	CustomerName     *string  `json:"customer_name"`
+	Environments     []string `json:"environments"`
+	PlatformNames    []string `json:"platform_names"`
 }
 
 // RiskDetail is the enriched DTO returned by GET /api/v1/risks/{id}.
@@ -299,6 +324,16 @@ type RiskDetail struct {
 	RiskCategories       []RiskCategory        `json:"risk_categories"`
 	ActionPlan           *ActionPlanDetail     `json:"action_plan"`
 	Assessments          []RiskAssessment      `json:"assessments"`
+
+	// Register-template values (RISK_MODULE_DESIGN.md §14), each with its
+	// status so an edit form can label an INACTIVE one. Nil/empty when the
+	// risk's template lacks the field.
+	RegisterTemplate string      `json:"register_template"`
+	Customer         *LookupRef  `json:"customer"`
+	DeploymentType   *LookupRef  `json:"deployment_type"`
+	Products         []LookupRef `json:"products"`
+	Platforms        []LookupRef `json:"platforms"`
+	Environments     []string    `json:"environments"`
 
 	// EffectivePrivileges is what the caller may do ON THIS RISK — their
 	// privileges resolved in its source register, which is the scope every
@@ -398,6 +433,23 @@ type UpdateRiskRequest struct {
 	// Full-edit only (editable before risk owner approval)
 	ReassessmentDate string `json:"reassessment_date,omitempty"`
 	GrossScoreID     *int   `json:"gross_score_id,omitempty"`
+
+	// Register-template fields, also full-edit only. Nil leaves a field
+	// untouched; a non-nil list is the complete new set. There is
+	// deliberately no customer: it is part of the risk code and never changes.
+	PlatformIDs      []int    `json:"platform_ids,omitempty"`
+	DeploymentTypeID *int     `json:"deployment_type_id,omitempty"`
+	ProductIDs       []int    `json:"product_ids,omitempty"`
+	Environments     []string `json:"environments,omitempty"`
+}
+
+// LookupRef is a register-template lookup value (platform, customer, product
+// or deployment type) as it appears on one risk.
+type LookupRef struct {
+	ID     int     `json:"id"`
+	Name   string  `json:"name"`
+	Code   *string `json:"code,omitempty"` // customers only
+	Status string  `json:"status"`         // ACTIVE | INACTIVE
 }
 
 // UpdateAssigneesRequest is the payload for PATCH /api/v1/risks/{id}/assignees,

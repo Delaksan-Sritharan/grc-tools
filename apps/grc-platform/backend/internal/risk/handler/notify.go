@@ -192,6 +192,7 @@ func (d *Deps) sendRiskEventToEmails(ctx context.Context, ev emailer.RiskEvent, 
 		RiskCode:       detail.RiskCode,
 		RiskTitle:      detail.RiskTitle,
 		SourceRegister: detail.SourceRegisterName,
+		Customer:       customerName(detail),
 		RiskLevel:      riskLevel,
 		Actor:          d.describeActor(ctx, actor),
 		Comment:        comment,
@@ -463,4 +464,13 @@ func dedupeLeadEmails(ctx context.Context, esc *model.Escalation, resolve func(c
 		emails = append(emails, email)
 	}
 	return emails
+}
+
+// customerName is the risk's Managed Services customer for the email summary,
+// or "" for any other register template, which drops the row.
+func customerName(detail *model.RiskDetail) string {
+	if detail == nil || detail.Customer == nil {
+		return ""
+	}
+	return detail.Customer.Name
 }
