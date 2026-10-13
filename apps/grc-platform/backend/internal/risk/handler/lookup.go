@@ -16,6 +16,7 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 
@@ -66,9 +67,13 @@ func (d *Deps) handleListLookups(k lookupKind) http.HandlerFunc {
 }
 
 // handleCreateLookup serves POST /api/v1/risks/{lookup}.
+//
+// Customers can also be added, with no approval, by anyone who can raise a
+// Managed Services risk, so a missing customer never blocks Add Risk. Every
+// other lookup stays with the platform admins.
 func (d *Deps) handleCreateLookup(k lookupKind) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !auth.RequirePrivilege(r.Context(), w, privilege.ManageRiskHub) {
+		if !d.canCreateLookup(w, r, k) {
 			return
 		}
 		var req model.CreateLookupRequest
@@ -88,6 +93,41 @@ func (d *Deps) handleCreateLookup(k lookupKind) http.HandlerFunc {
 		d.ActivityLog.Log(r.Context(), createdBy, adminactivity.ActionCreated, k.entityType, v.ID, lookupDetails(v))
 		response.WriteJSONValue(w, http.StatusCreated, v)
 	}
+}
+
+// canCreateLookup answers 403 itself unless the caller may add a value of this
+// kind: a platform admin for any kind, or someone who can raise Managed
+// Services risks for a customer.
+func (d *Deps) canCreateLookup(w http.ResponseWriter, r *http.Request, k lookupKind) bool {
+	if auth.HasPrivilege(r.Context(), privilege.ManageRiskHub) {
+		return true
+	}
+	if k.path == "customers" {
+		canRaise, err := d.canCreateManagedServicesRisk(r.Context())
+		if err != nil {
+			response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
+			return false
+		}
+		if canRaise {
+			return true
+		}
+	}
+	return auth.RequirePrivilege(r.Context(), w, privilege.ManageRiskHub)
+}
+
+// canCreateManagedServicesRisk reports whether the caller holds RISK_CREATE
+// in at least one register on the Managed Services template.
+func (d *Deps) canCreateManagedServicesRisk(ctx context.Context) (bool, error) {
+	registers, err := d.Team.List(ctx, model.ListTeamsFilter{Type: "SOURCE_REGISTER"})
+	if err != nil {
+		return false, err
+	}
+	for _, t := range registers {
+		if t.RegisterTemplate == model.TemplateManagedServices && auth.HasPrivilegeIn(ctx, privilege.CreateRisk, t.ID) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // handleUpdateLookup serves PUT /api/v1/risks/{lookup}/{id}: rename,
