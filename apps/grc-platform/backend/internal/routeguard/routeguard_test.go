@@ -26,6 +26,7 @@ import (
 
 	adminhandler "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/admin/handler"
 	audithandler "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/handler"
+	metahandler "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/meta/handler"
 	riskhandler "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/handler"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/routeguard"
 	userhandler "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/user/handler"
@@ -45,6 +46,7 @@ func registeredPatterns(t *testing.T) []string {
 	t.Helper()
 	rec := &recordingRouter{}
 	userhandler.RegisterRoutes(rec, userhandler.Deps{})
+	metahandler.RegisterRoutes(rec, metahandler.Deps{})
 	riskhandler.RegisterRoutes(rec, riskhandler.Deps{})
 	audithandler.RegisterRoutes(rec, audithandler.Deps{})
 	adminhandler.RegisterRoutes(rec, adminhandler.Deps{})

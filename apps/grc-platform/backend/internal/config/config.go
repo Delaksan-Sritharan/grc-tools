@@ -52,6 +52,12 @@ type Config struct {
 	// Portal configures the Evidence Portal machine-to-machine ingress
 	// (/api/v1/evidence-portal/*). Zero value means the ingress does not mount.
 	Portal PortalConfig
+	// UserGuideURL is GRC_USER_GUIDE_URL, served back by GET
+	// /api/v1/meta/user-guide-url. Optional: "" means not configured, and
+	// callers (e.g. One WSO2's Security and Compliance rail) hide the row
+	// rather than treating it as an error — changing or unsetting this link
+	// is then just an env var edit, not a frontend redeploy.
+	UserGuideURL string
 }
 
 // PortalConfig configures the Evidence Portal client-credentials ingress.
@@ -564,6 +570,7 @@ func Load() (Config, error) {
 		LeadEscalationEmailsEnabled: leadEscalationEmailsEnabled(),
 		SchedulerEnabled:            schedulerEnabled(),
 		Portal:                      PortalConfig{Audience: portalAudience, Clients: portalClients},
+		UserGuideURL:                os.Getenv("GRC_USER_GUIDE_URL"),
 	}, nil
 }
 
