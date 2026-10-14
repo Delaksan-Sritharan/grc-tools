@@ -91,10 +91,6 @@ type Deps struct {
 	// FrontendBaseURL is used to build the risk-detail link inside that
 	// notification email.
 	FrontendBaseURL string
-	// customerRequests rate-limits POST /api/v1/risks/customer-requests per
-	// requester (customer_request.go). A pointer because Deps is passed by
-	// value; RegisterRoutes creates it. nil allows everything.
-	customerRequests *customerRequestLimiter
 	// LeadEscalationEmails gates the escalation email to the Risk Assigner's
 	// and Action Owner's leads (LEAD_ESCALATION_EMAILS_ENABLED). When false,
 	// notifyEscalationLeads is a no-op — but the leads are still resolved and
@@ -126,9 +122,6 @@ type Deps struct {
 // /api/v1/risks/scores, ...). Go's ServeMux gives a literal first segment
 // precedence over the {id} wildcard, so the two groups never collide.
 func RegisterRoutes(mux routeguard.Router, deps Deps) {
-	if deps.customerRequests == nil {
-		deps.customerRequests = &customerRequestLimiter{}
-	}
 	d := &deps
 	ejh := &escalationJobHandler{trigger: deps.TriggerEscalationJob}
 	rjh := &reminderJobHandler{trigger: deps.TriggerReminderJob}
@@ -156,7 +149,6 @@ func RegisterRoutes(mux routeguard.Router, deps Deps) {
 	mux.HandleFunc("DELETE /api/v1/risks/categories/{id}", d.handleDeleteRiskCategory)
 
 	// Register-template lookups: platforms, customers, products, deployment types
-	mux.HandleFunc("POST /api/v1/risks/customer-requests", d.handleRequestCustomer)
 	for _, k := range d.lookupKinds() {
 		mux.HandleFunc("GET /api/v1/risks/"+k.path, d.handleListLookups(k))
 		mux.HandleFunc("POST /api/v1/risks/"+k.path, d.handleCreateLookup(k))

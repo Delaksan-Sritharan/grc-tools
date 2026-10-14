@@ -2502,7 +2502,7 @@ paths:
       tags:
       - Risk Register Template Lookups
       summary: Create a customer
-      description: Admin Console. Gated on MANAGE_RISK_HUB.
+      description: Admin Console, and Add Risk's Add new customer link. Gated on MANAGE_RISK_HUB, or on RISK_CREATE in a Managed Services register, so a Risk Assigner can add a missing customer without approval. The code goes into the risk code and is frozen once a risk uses the customer.
       operationId: createRiskCustomer
       requestBody:
         required: true
@@ -2836,30 +2836,6 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-  /api/v1/risks/customer-requests:
-    post:
-      tags:
-      - Risk Register Template Lookups
-      summary: Request a missing customer
-      description: Emails every MANAGE_RISK_HUB holder, together with the requester, asking for a customer to be added to the Customer Name list. Nothing is stored. Only callers holding RISK_CREATE in a Managed Services register may ask. The send is detached, so 202 means accepted for sending.
-      operationId: requestRiskCustomer
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CustomerRequest'
-      responses:
-        '202':
-          description: Accepted for sending
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/InternalServerError'
   /api/v1/risks/management-approvers:
@@ -5731,20 +5707,6 @@ components:
           enum:
           - ACTIVE
           - INACTIVE
-    CustomerRequest:
-      type: object
-      required:
-      - customer_name
-      properties:
-        customer_name:
-          type: string
-          maxLength: 255
-        suggested_code:
-          type: string
-          pattern: '^[A-Z0-9]{1,12}$'
-        note:
-          type: string
-          maxLength: 1000
     LookupRef:
       type: object
       description: A register-template lookup value (platform, customer, product or deployment type) on one risk.

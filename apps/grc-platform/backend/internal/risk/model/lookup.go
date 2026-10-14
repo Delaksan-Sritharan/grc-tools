@@ -42,12 +42,3 @@ type UpdateLookupRequest struct {
 	Code   *string `json:"code,omitempty"`   // customers only; refused once the customer is in use
 	Status *string `json:"status,omitempty"` // ACTIVE | INACTIVE
 }
-
-// CustomerRequestPayload is the payload for POST /api/v1/risks/customer-requests:
-// a Risk Assigner asking the platform admins to add a customer that is missing
-// from the Customer Name dropdown. Nothing is stored; it is sent as an email.
-type CustomerRequestPayload struct {
-	CustomerName  string `json:"customer_name"`
-	SuggestedCode string `json:"suggested_code,omitempty"`
-	Note          string `json:"note,omitempty"`
-}

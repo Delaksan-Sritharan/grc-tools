@@ -139,7 +139,6 @@ var externalVisible = map[string]bool{
 	"PUT /api/v1/risks/categories/{id}":               false,
 	"DELETE /api/v1/risks/categories/{id}":            false,
 	// Register-template lookups — internal Risk Hub only, like categories.
-	"POST /api/v1/risks/customer-requests":                          false,
 	"GET /api/v1/risks/platforms":                                   false,
 	"POST /api/v1/risks/platforms":                                  false,
 	"PUT /api/v1/risks/platforms/{id}":                              false,
