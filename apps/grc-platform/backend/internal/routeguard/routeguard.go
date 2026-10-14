@@ -36,6 +36,11 @@ var externalVisible = map[string]bool{
 	"GET /api/v1/me/privileges": true,
 	"GET /api/v1/me/profile":    true,
 
+	// ── Meta ─────────────────────────────────────────────────────────────────
+	// A help link, nothing module-specific — visible to every authenticated
+	// caller, internal or external.
+	"GET /api/v1/meta/user-guide-url": true,
+
 	// ── Audit Hub: landing pages ─────────────────────────────────────────────
 	"GET /api/v1/audits/dashboard":  true,
 	"GET /api/v1/audits/work-queue": true,

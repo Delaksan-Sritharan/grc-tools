@@ -35,6 +35,7 @@ import (
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/config"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/directory"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/hrentity"
+	metahandler "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/meta/handler"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/middleware"
 	portalhandler "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/portal/handler"
 	riskhandler "github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/handler"
@@ -172,6 +173,7 @@ func main() {
 	}
 
 	userhandler.RegisterRoutes(mux, userDeps)
+	metahandler.RegisterRoutes(mux, metahandler.Deps{UserGuideURL: cfg.UserGuideURL})
 	riskDeps := buildRiskDeps(entityCli, fileSvc, hrClient, grantRepo, dirSvc, scimClient, cfg.Email, cfg.LeadEscalationEmailsEnabled, activityLog)
 	// Overdue-risk escalation sweep. Constructed here regardless of
 	// SCHEDULER_ENABLED: the scheduler below runs it on the daily tick, and
