@@ -48,6 +48,7 @@ tags:
 - name: Risk Evidence
 - name: Users
 - name: Admin
+- name: Meta
 security:
 - bearerAuth: []
 paths:
@@ -62,6 +63,28 @@ paths:
       responses:
         '200':
           description: Server is up
+  /api/v1/meta/user-guide-url:
+    get:
+      tags:
+      - Meta
+      summary: Get the GRC Platform user guide URL
+      description: Served from GRC_USER_GUIDE_URL. `url` is an empty string when not configured, in which case One WSO2's Security and Compliance rail hides its "User Guide" row. Available to every authenticated caller, including external auditors.
+      operationId: getUserGuideUrl
+      responses:
+        '200':
+          description: The configured user guide URL (empty when unset)
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - url
+                properties:
+                  url:
+                    type: string
+                    example: https://example.com/grc-user-guide
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   # ---------------------------------------------------------------------------
   # Audit Hub
   # ---------------------------------------------------------------------------
