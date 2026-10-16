@@ -1,4 +1,4 @@
--- Updated 10/15/2026 (v1.0.4)
+-- Updated 16/10/2026 (v1.0.4)
 --
 -- Renames the risk workflow status IN_REMEDIATION to APPROVED. Run after v1.0.2.
 -- risk_change_log is not touched; old history keeps the IN_REMEDIATION text.
