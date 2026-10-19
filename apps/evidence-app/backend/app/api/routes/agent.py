@@ -16,11 +16,15 @@ from app.models.evidence import Evidence
 from app.models.evidence_file import EvidenceFile
 from app.models.submission import Submission
 from app.models.usage_log import UsageLog
+from app.portal_url import portal_url_error
 from app.schemas.agent_task import TaskCreate, TaskOut, TaskProgress, TaskResult
 from app.storage.blob_paths import build_control_prefix, sanitize_title
 from app.storage.blob_storage import save_file
 
 router = APIRouter(prefix="/agent", tags=["Agent"])
+
+# The kinds the Runner knows how to execute (wso2_runner/loop.py's _run_task).
+VALID_TASK_KINDS = {"run", "login", "reset"}
 
 # Track last runner poll per user_email (in-memory, resets on restart — fine for v1)
 _last_poll: dict[str, datetime] = {}
@@ -126,6 +130,22 @@ def create_task(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    if req.kind not in VALID_TASK_KINDS:
+        raise HTTPException(status_code=400, detail=f"Kind must be one of: {', '.join(sorted(VALID_TASK_KINDS))}")
+
+    # The Runner opens a login task's prompt as-is in a real browser, and a run
+    # task's portal_url is the portal the agent is told it is on. The Runner
+    # trusts what it is handed, so both are checked here -- see
+    # app/portal_url.py.
+    if req.kind == "login":
+        error = portal_url_error(req.prompt)
+        if error:
+            raise HTTPException(status_code=400, detail=error)
+    if req.portal_url and req.portal_url.strip():
+        error = portal_url_error(req.portal_url)
+        if error:
+            raise HTTPException(status_code=400, detail=error)
+
     # Resolve the Control before inserting. Naming a control_id that doesn't
     # exist is a bad request, not a server failure: left to the foreign key
     # it would surface as a raw IntegrityError, i.e. a 500. Matches
