@@ -3,7 +3,9 @@ uvicorn>=0.30
 python-multipart>=0.0.31
 pydantic>=2.7,<3
 pydantic-settings>=2.14.2
-SQLAlchemy>=2.0,<3
+# Held on 2.0: SQLAlchemy 2.1 reads a plain postgresql:// URL as the psycopg 3
+# driver, and this service ships psycopg2 (below), so 2.1 fails at startup.
+SQLAlchemy>=2.0,<2.1
 alembic>=1.13,<2
 psycopg2-binary>=2.9
 azure-storage-blob>=12.0
