@@ -191,7 +191,11 @@ const (
 	// EventRejectedCompliance tells the Compliance Admin role that a risk was
 	// rejected back to its Risk Assigner. Informational — the assigner is the
 	// one tasked, see EventRejected — so it declares no actions.
-	EventRejectedCompliance  RiskEvent = "REJECTED_COMPLIANCE"
+	EventRejectedCompliance RiskEvent = "REJECTED_COMPLIANCE"
+	// EventAssessed tells the Risk Assigner, Risk Owner and Compliance Admins
+	// that a risk was reassessed. Informational: an assessment leaves the
+	// workflow where it was, so nobody is tasked.
+	EventAssessed            RiskEvent = "ASSESSED"
 	EventEscalated           RiskEvent = "ESCALATED"
 	EventEscalationCommented RiskEvent = "ESCALATION_COMMENTED"
 	// EventEscalatedLead notifies the Risk Assigner's and/or Action Owner's
@@ -398,6 +402,11 @@ var eventTemplates = map[RiskEvent]eventTemplate{
 		lead:       "This risk has been rejected and returned to the Risk Assigner for revision.",
 		actorLabel: "Rejected by",
 		// No actions: compliance is being told, not tasked.
+	},
+	EventAssessed: {
+		lead:       "This risk has been reassessed.",
+		actorLabel: "Assessed by",
+		// No actions: an assessment doesn't hand the risk to anyone.
 	},
 	EventEscalationCommented: {
 		lead:       "This escalated risk has been reviewed and returned to you. It stays in the Overdue tab until you submit it for completion approval.",

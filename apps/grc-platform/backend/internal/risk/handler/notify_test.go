@@ -210,3 +210,46 @@ func TestCandidateIDsExcept(t *testing.T) {
 		})
 	}
 }
+
+func TestWithoutUser(t *testing.T) {
+	one, two, nine := 1, 2, 9
+	cases := []struct {
+		name    string
+		ids     []int
+		exclude *int
+		want    []int
+	}{
+		{"assessor is the assigner", []int{1, 2}, &one, []int{2}},
+		{"assessor is the owner", []int{1, 2}, &two, []int{1}},
+		{"assigner and owner are the assessor", []int{1, 1}, &one, []int{}},
+		{"assessor is on neither", []int{1, 2}, &nine, []int{1, 2}},
+		{"assessor unknown", []int{1, 2}, nil, []int{1, 2}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := withoutUser(c.ids, c.exclude)
+			if len(got) != len(c.want) {
+				t.Fatalf("got %v, want %v", got, c.want)
+			}
+			for i := range got {
+				if got[i] != c.want[i] {
+					t.Fatalf("got %v, want %v", got, c.want)
+				}
+			}
+		})
+	}
+}
+
+func TestAssessmentComment(t *testing.T) {
+	cases := []struct{ level, notes, want string }{
+		{"MEDIUM", "Controls improved", "Residual level: MEDIUM — Controls improved"},
+		{"MEDIUM", "  ", "Residual level: MEDIUM"},
+		{"", "Only notes", "Only notes"},
+		{"", "", ""},
+	}
+	for _, c := range cases {
+		if got := assessmentComment(c.level, c.notes); got != c.want {
+			t.Errorf("assessmentComment(%q, %q) = %q, want %q", c.level, c.notes, got, c.want)
+		}
+	}
+}

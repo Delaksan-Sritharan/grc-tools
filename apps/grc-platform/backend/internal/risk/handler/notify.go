@@ -404,6 +404,58 @@ func candidateIDsExcept(candidates []grant.Candidate, excludeUUID string) []int 
 	return ids
 }
 
+// notifyRiskAssessed tells the risk's Assigner, Owner and the Compliance
+// Admins that it was reassessed, leaving out whoever performed the assessment
+// from all three. Detached and best-effort like the other notifiers: the
+// assessment is already saved.
+//
+// The email's "Risk Level" row is the gross level, which an assessment doesn't
+// change, so the new residual level travels in the comment instead.
+func (d *Deps) notifyRiskAssessed(ctx context.Context, riskID int, result *model.RiskAssessment, by string) {
+	detail, err := d.Risk.GetByID(ctx, riskID)
+	if err != nil {
+		slog.Warn("risk notification: failed to load risk for assessment", "riskId", riskID, "err", err)
+		return
+	}
+	// A failed lookup must not block the email: the worst case is the assessor
+	// also receives it.
+	assessorID, err := d.callerUserID(ctx)
+	if err != nil {
+		slog.Warn("risk notification: failed to resolve assessor", "riskId", riskID, "err", err)
+	}
+	comment := assessmentComment(result.ResidualLevel, result.Progress)
+	if ids := withoutUser([]int{detail.AssignerID, detail.OwnerID}, assessorID); len(ids) > 0 {
+		d.notifyRiskEvent(emailer.EventAssessed, riskID, ids, by, comment)
+	}
+	d.notifyComplianceAdminsExcept(emailer.EventAssessed, riskID, detail.SourceRegisterID, by, comment, by)
+}
+
+// assessmentComment is the email's comment box: the new residual level, then
+// the assessor's notes when they wrote any.
+func assessmentComment(residualLevel, progress string) string {
+	notes := strings.TrimSpace(progress)
+	switch {
+	case residualLevel == "":
+		return notes
+	case notes == "":
+		return "Residual level: " + residualLevel
+	default:
+		return "Residual level: " + residualLevel + " — " + notes
+	}
+}
+
+// withoutUser returns ids minus exclude. A nil exclude removes nobody.
+func withoutUser(ids []int, exclude *int) []int {
+	out := make([]int, 0, len(ids))
+	for _, id := range ids {
+		if exclude != nil && id == *exclude {
+			continue
+		}
+		out = append(out, id)
+	}
+	return out
+}
+
 // notifyEscalationLeads emails the Risk Assigner's and Action Owner's leads
 // (their HR line managers) that riskID has been escalated. by is the actor that
 // triggered the escalation — a real user for the manual button, the escalation

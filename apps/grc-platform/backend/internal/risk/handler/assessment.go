@@ -78,6 +78,7 @@ func (d *Deps) handleAssessRisk(w http.ResponseWriter, r *http.Request) {
 		details.PreviousLevel = prev
 	}
 	d.recordEvent(r.Context(), id, by, model.HistoryAssess, details)
+	d.notifyRiskAssessed(r.Context(), id, result, by)
 	response.WriteJSONValue(w, http.StatusCreated, result)
 }
 
