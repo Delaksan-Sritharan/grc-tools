@@ -25,6 +25,7 @@ import (
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/model"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/emailer"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/grant"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/privilege"
 )
 
@@ -346,6 +347,14 @@ func (d *Deps) describeActor(ctx context.Context, actorUUID string) string {
 // currently holds the privilege in logs a warning rather than failing that
 // already-committed transition.
 func (d *Deps) notifyComplianceAdmins(ev emailer.RiskEvent, riskID, registerID int, actor, comment string) {
+	d.notifyComplianceAdminsExcept(ev, riskID, registerID, actor, comment, "")
+}
+
+// notifyComplianceAdminsExcept is notifyComplianceAdmins minus one person:
+// whoever's Asgardeo id is excludeUUID is dropped from the recipients. Used by
+// rejection, where an admin who rejected the risk themselves needn't be told.
+// An empty excludeUUID excludes nobody.
+func (d *Deps) notifyComplianceAdminsExcept(ev emailer.RiskEvent, riskID, registerID int, actor, comment, excludeUUID string) {
 	if d.Grants == nil {
 		// Local dev: no privilege store configured, so no grants exist to
 		// resolve a recipient list from.
@@ -373,12 +382,26 @@ func (d *Deps) notifyComplianceAdmins(ev emailer.RiskEvent, riskID, registerID i
 				"event", ev, "riskId", riskID, "registerId", registerID)
 			return
 		}
-		ids := make([]int, len(candidates))
-		for i, c := range candidates {
-			ids[i] = c.ID
+		ids := candidateIDsExcept(candidates, excludeUUID)
+		if len(ids) == 0 {
+			// Everyone who could be told is the excluded person.
+			return
 		}
 		_ = d.sendRiskEvent(ctx, ev, riskID, ids, actor, comment)
 	}()
+}
+
+// candidateIDsExcept returns the candidates' user ids, omitting the one whose
+// UUID is excludeUUID. An empty excludeUUID omits nobody.
+func candidateIDsExcept(candidates []grant.Candidate, excludeUUID string) []int {
+	ids := make([]int, 0, len(candidates))
+	for _, c := range candidates {
+		if excludeUUID != "" && c.UUID == excludeUUID {
+			continue
+		}
+		ids = append(ids, c.ID)
+	}
+	return ids
 }
 
 // notifyEscalationLeads emails the Risk Assigner's and Action Owner's leads

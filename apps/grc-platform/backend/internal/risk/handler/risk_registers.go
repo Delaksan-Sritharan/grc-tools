@@ -888,6 +888,8 @@ func (d *Deps) handleRejectRisk(w http.ResponseWriter, r *http.Request) {
 	// One notification covers every rejection stage: whoever rejected it, the
 	// risk lands back with the assigner, who is the one who has to act.
 	d.notifyRiskEvent(emailer.EventRejected, id, []int{detail.AssignerID}, by, req.RejectionComment)
+	// Compliance Admins are told too, minus the rejector if they are one.
+	d.notifyComplianceAdminsExcept(emailer.EventRejectedCompliance, id, detail.SourceRegisterID, by, req.RejectionComment, by)
 	w.WriteHeader(http.StatusNoContent)
 }
 

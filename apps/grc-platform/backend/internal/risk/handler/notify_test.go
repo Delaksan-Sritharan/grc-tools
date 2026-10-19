@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/model"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/grant"
 )
 
 func ptr(s string) *string { return &s }
@@ -179,5 +180,33 @@ func TestNotifySemBoundsConcurrency(t *testing.T) {
 		// isn't actually exercising the bound (e.g. attempts too low relative
 		// to the sleep), which would silently defeat its own purpose.
 		t.Errorf("peak concurrent holders = %d, never reached notifyConcurrency (%d) — test isn't exercising the limit", peak, notifyConcurrency)
+	}
+}
+
+func TestCandidateIDsExcept(t *testing.T) {
+	admins := []grant.Candidate{{ID: 1, UUID: "a"}, {ID: 2, UUID: "b"}, {ID: 3, UUID: "c"}}
+	cases := []struct {
+		name       string
+		candidates []grant.Candidate
+		exclude    string
+		want       []int
+	}{
+		{"rejector is not an admin", admins, "x", []int{1, 2, 3}},
+		{"rejector is an admin", admins, "b", []int{1, 3}},
+		{"rejector is the only admin", admins[:1], "a", []int{}},
+		{"no exclusion", admins, "", []int{1, 2, 3}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := candidateIDsExcept(c.candidates, c.exclude)
+			if len(got) != len(c.want) {
+				t.Fatalf("got %v, want %v", got, c.want)
+			}
+			for i := range got {
+				if got[i] != c.want[i] {
+					t.Fatalf("got %v, want %v", got, c.want)
+				}
+			}
+		})
 	}
 }
