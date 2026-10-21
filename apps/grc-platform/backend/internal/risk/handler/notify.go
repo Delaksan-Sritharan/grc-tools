@@ -406,28 +406,35 @@ func candidateIDsExcept(candidates []grant.Candidate, excludeUUID string) []int 
 
 // notifyRiskAssessed tells the risk's Assigner, Owner and the Compliance
 // Admins that it was reassessed, leaving out whoever performed the assessment
-// from all three. Detached and best-effort like the other notifiers: the
-// assessment is already saved.
+// (by, a UUID) from all three. Detached and best-effort like the other
+// notifiers: the assessment is already saved.
+//
+// detail is the risk the handler already loaded for its privilege check, so
+// nothing here touches the database before the response is written; the
+// notifiers it calls do their remaining work in their own goroutines.
 //
 // The email's "Risk Level" row is the gross level, which an assessment doesn't
 // change, so the new residual level travels in the comment instead.
-func (d *Deps) notifyRiskAssessed(ctx context.Context, riskID int, result *model.RiskAssessment, by string) {
-	detail, err := d.Risk.GetByID(ctx, riskID)
-	if err != nil {
-		slog.Warn("risk notification: failed to load risk for assessment", "riskId", riskID, "err", err)
-		return
-	}
-	// A failed lookup must not block the email: the worst case is the assessor
-	// also receives it.
-	assessorID, err := d.callerUserID(ctx)
-	if err != nil {
-		slog.Warn("risk notification: failed to resolve assessor", "riskId", riskID, "err", err)
-	}
+func (d *Deps) notifyRiskAssessed(detail *model.RiskDetail, result *model.RiskAssessment, by string) {
 	comment := assessmentComment(result.ResidualLevel, result.Progress)
-	if ids := withoutUser([]int{detail.AssignerID, detail.OwnerID}, assessorID); len(ids) > 0 {
-		d.notifyRiskEvent(emailer.EventAssessed, riskID, ids, by, comment)
+	if ids := assessmentRecipients(detail, by); len(ids) > 0 {
+		d.notifyRiskEvent(emailer.EventAssessed, detail.ID, ids, by, comment)
 	}
-	d.notifyComplianceAdminsExcept(emailer.EventAssessed, riskID, detail.SourceRegisterID, by, comment, by)
+	d.notifyComplianceAdminsExcept(emailer.EventAssessed, detail.ID, detail.SourceRegisterID, by, comment, by)
+}
+
+// assessmentRecipients returns the risk's Assigner and Owner user ids, omitting
+// whichever has the UUID by. Matching on UUID rather than a resolved user id
+// means an assessor with no user row, or a failed lookup, can't leave them in.
+func assessmentRecipients(detail *model.RiskDetail, by string) []int {
+	ids := make([]int, 0, 2)
+	if detail.AssignerUUID != by {
+		ids = append(ids, detail.AssignerID)
+	}
+	if detail.OwnerUUID != by {
+		ids = append(ids, detail.OwnerID)
+	}
+	return ids
 }
 
 // assessmentComment is the email's comment box: the new residual level, then
@@ -442,18 +449,6 @@ func assessmentComment(residualLevel, progress string) string {
 	default:
 		return "Residual level: " + residualLevel + " — " + notes
 	}
-}
-
-// withoutUser returns ids minus exclude. A nil exclude removes nobody.
-func withoutUser(ids []int, exclude *int) []int {
-	out := make([]int, 0, len(ids))
-	for _, id := range ids {
-		if exclude != nil && id == *exclude {
-			continue
-		}
-		out = append(out, id)
-	}
-	return out
 }
 
 // notifyEscalationLeads emails the Risk Assigner's and Action Owner's leads

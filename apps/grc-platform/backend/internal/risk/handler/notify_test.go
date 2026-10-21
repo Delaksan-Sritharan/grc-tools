@@ -211,23 +211,20 @@ func TestCandidateIDsExcept(t *testing.T) {
 	}
 }
 
-func TestWithoutUser(t *testing.T) {
-	one, two, nine := 1, 2, 9
+func TestAssessmentRecipients(t *testing.T) {
+	detail := &model.RiskDetail{AssignerID: 1, AssignerUUID: "a", OwnerID: 2, OwnerUUID: "o"}
 	cases := []struct {
-		name    string
-		ids     []int
-		exclude *int
-		want    []int
+		name string
+		by   string
+		want []int
 	}{
-		{"assessor is the assigner", []int{1, 2}, &one, []int{2}},
-		{"assessor is the owner", []int{1, 2}, &two, []int{1}},
-		{"assigner and owner are the assessor", []int{1, 1}, &one, []int{}},
-		{"assessor is on neither", []int{1, 2}, &nine, []int{1, 2}},
-		{"assessor unknown", []int{1, 2}, nil, []int{1, 2}},
+		{"assessor is the assigner", "a", []int{2}},
+		{"assessor is the owner", "o", []int{1}},
+		{"assessor is on neither", "x", []int{1, 2}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := withoutUser(c.ids, c.exclude)
+			got := assessmentRecipients(detail, c.by)
 			if len(got) != len(c.want) {
 				t.Fatalf("got %v, want %v", got, c.want)
 			}
