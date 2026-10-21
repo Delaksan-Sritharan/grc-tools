@@ -39,8 +39,12 @@ def _package_version() -> str:
 # token alongside our own name. So we send both. Tidy this back down to
 # just our own name and production goes back to refusing every request the
 # Runner makes — see spec chala2001/grc-tools#133.
-USER_AGENT = f"wso2-runner/{_package_version()} curl/8.5.0"
+RUNNER_VERSION = _package_version()
+USER_AGENT = f"wso2-runner/{RUNNER_VERSION} curl/8.5.0"
 USER_AGENT_HEADER = {"User-Agent": USER_AGENT}
+# Read by the backend to refuse tasks to a Runner older than the version its
+# admins require (see the backend's app/agent_policy.py).
+VERSION_HEADER = {"X-Runner-Version": RUNNER_VERSION}
 
 # Config lives in the user's home dir — works whether installed via pip or cloned.
 # The repo's runner/.env (if present) is loaded first so a clone with that file

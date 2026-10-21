@@ -10,10 +10,60 @@ from pathlib import Path
 import httpx
 
 from wso2_runner import oauth
-from wso2_runner.agent import execute_task, open_login_browser, reset_browser
+from wso2_runner.agent import (
+    configure_network_guard,
+    execute_task,
+    open_login_browser,
+    reset_browser,
+    update_url_policy,
+)
 from wso2_runner.azure_credential import ClientAuthenticationError, CredentialUnavailableError
 from wso2_runner.client import CloudClient
-from wso2_runner.config import settings
+from wso2_runner.config import RUNNER_VERSION, settings
+from wso2_runner.egress_proxy import EgressProxy
+from wso2_runner.url_policy import PolicyError, RunnerUrlPolicy
+
+
+class _PolicyUnavailable(Exception):
+    """The URL policy couldn't be loaded. The message says why, in words a
+    user can act on."""
+
+
+async def _load_url_policy(client: CloudClient) -> RunnerUrlPolicy:
+    """Fetch and check the URL policy the browser must enforce.
+
+    There is deliberately no fallback: no cached copy and no built-in list.
+    A Runner that can't get the current policy runs nothing and asks for a
+    retry, rather than enforcing a policy an admin may since have tightened.
+    """
+    try:
+        data = await client.get_url_policy()
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            raise _PolicyUnavailable("the server has no URL policy — it may be older than this Runner") from exc
+        raise _PolicyUnavailable(f"the server answered HTTP {exc.response.status_code}") from exc
+    except httpx.HTTPError as exc:
+        raise _PolicyUnavailable(f"the server couldn't be reached ({type(exc).__name__})") from exc
+    except ValueError as exc:
+        raise _PolicyUnavailable("the server's answer wasn't a URL policy") from exc
+    try:
+        return RunnerUrlPolicy.from_json(data)
+    except PolicyError as exc:
+        raise _PolicyUnavailable(f"the server's URL policy can't be used: {exc}") from exc
+
+
+def _too_old_message(policy: RunnerUrlPolicy) -> str:
+    return (
+        f"This Runner is version {RUNNER_VERSION}; the server requires {policy.min_runner_version} or newer. "
+        "Install the latest Runner release, then start it again."
+    )
+
+
+async def _fail_task(client: CloudClient, task: dict, message: str) -> None:
+    try:
+        await client.post_result(task["id"], {"status": "failed", "result": None, "error": message, "screenshots": []})
+    except Exception:
+        pass
 
 
 def _runner_id() -> str:
@@ -84,6 +134,28 @@ async def run_forever(
     print(f"[runner] Server : {url}")
     print(f"[runner] User   : {email}")
     print(f"[runner] ID     : {runner_id}")
+
+    # The URL policy and the egress proxy come first: no browser opens until
+    # both are in place (agent.py refuses to create one before then).
+    try:
+        policy = await _load_url_policy(client)
+    except _PolicyUnavailable as exc:
+        print(f"[runner] ✗ Couldn't load the URL policy from {url}: {exc}.")
+        print("[runner]   Nothing was run. Check your connection, then run `wso2-runner start` again.")
+        await client.aclose()
+        raise SystemExit(1)
+    if policy.requires_newer_than(RUNNER_VERSION):
+        print(f"[runner] ✗ {_too_old_message(policy)}")
+        await client.aclose()
+        raise SystemExit(1)
+    proxy = EgressProxy(policy)
+    await proxy.start()
+    configure_network_guard(policy, proxy)
+
+    print(
+        f"[runner] Guard  : {len(policy.allowed_domains)} approved domain(s), "
+        f"{len(policy.internal_names) + len(policy.internal_networks)} internal host(s) or range(s)"
+    )
     print(f"[runner] Polling every {interval}s — press Ctrl+C to stop")
     print()
 
@@ -106,6 +178,28 @@ async def run_forever(
                     if task.get("region_hint"):
                         print(f"[runner] Hint   : {task['region_hint']}")
                 print()
+
+                # The policy is fetched fresh for every task, so an admin's
+                # change applies from the next task on. If it can't be
+                # fetched, this task fails with a request to retry it.
+                try:
+                    policy = await _load_url_policy(client)
+                except _PolicyUnavailable as exc:
+                    message = (
+                        f"The Runner couldn't load the URL policy from the server ({exc}), "
+                        "so it didn't run this task. Retry the task."
+                    )
+                    print(f"[runner] ✗ Task #{task['id']} not run — {message}")
+                    print()
+                    await _fail_task(client, task, message)
+                    continue
+                if policy.requires_newer_than(RUNNER_VERSION):
+                    message = _too_old_message(policy)
+                    print(f"[runner] ✗ Task #{task['id']} not run — {message}")
+                    await _fail_task(client, task, message)
+                    raise SystemExit(1)
+                proxy.set_policy(policy)
+                update_url_policy(policy)
 
                 try:
                     outcome = await _run_task_supervised(task, client)
@@ -161,6 +255,7 @@ async def run_forever(
                 await asyncio.sleep(5)
 
     finally:
+        await proxy.close()
         await client.aclose()
 
 

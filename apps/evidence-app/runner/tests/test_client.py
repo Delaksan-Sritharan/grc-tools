@@ -20,7 +20,7 @@ import httpx
 import pytest
 
 from wso2_runner.client import CloudClient
-from wso2_runner.config import USER_AGENT
+from wso2_runner.config import RUNNER_VERSION, USER_AGENT
 
 
 @pytest.fixture(autouse=True)
@@ -195,4 +195,32 @@ def test_a_non_2xx_response_is_raised_not_swallowed():
 
     with pytest.raises(httpx.HTTPStatusError):
         _run(c.get_next_task("runner-1"))
+    _run(c.aclose())
+
+
+def test_init_sets_the_runner_version_header_as_a_client_default():
+    """The backend refuses tasks to a Runner older than its configured
+    minimum, and reads the version from this header on every call."""
+    c = CloudClient("https://backend.example", "org", "cid")
+    assert c._http.headers["X-Runner-Version"] == RUNNER_VERSION
+    _run(c.aclose())
+
+
+def test_get_url_policy_reads_the_policy_with_the_bearer_token():
+    requests = []
+    policy = {"allowed_domains": ["*.azure.com"], "internal_hosts": [], "min_runner_version": None}
+    c = _client_recording_into(requests, lambda r: httpx.Response(200, json=policy))
+
+    assert _run(c.get_url_policy()) == policy
+    assert requests[0].method == "GET"
+    assert str(requests[0].url) == "https://backend.example/api/agent/policy"
+    assert requests[0].headers["Authorization"] == "Bearer test-token"
+    _run(c.aclose())
+
+
+def test_get_url_policy_raises_on_a_non_2xx_response():
+    c = _client_recording_into([], lambda r: httpx.Response(404))
+
+    with pytest.raises(httpx.HTTPStatusError):
+        _run(c.get_url_policy())
     _run(c.aclose())

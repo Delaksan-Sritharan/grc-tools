@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import contextlib
 import io
 import json
 import re
@@ -14,6 +15,8 @@ from urllib.parse import urlparse
 from browser_use import ActionResult, Agent, BrowserProfile, BrowserSession, Tools
 
 from wso2_runner.config import settings
+from wso2_runner.egress_proxy import GUARD_CHECK_HOST, EgressProxy
+from wso2_runner.url_policy import RunnerUrlPolicy
 
 # ── Pricing ────────────────────────────────────────────────────────────────
 
@@ -2150,13 +2153,63 @@ async def _capture_evidence_pdf(browser: "BrowserSession") -> list[Path]:
             return []
 
 
+# ── Network guard ──────────────────────────────────────────────────────────
+#
+# The browser only ever runs behind the guard: the URL policy decides which
+# pages it may open, and the local egress proxy (egress_proxy.py) decides
+# which addresses any of its connections may reach. loop.py sets both up
+# before the first task and refreshes the policy before every task;
+# _get_browser() refuses to create a browser until then.
+
+_url_policy: RunnerUrlPolicy | None = None
+_egress_proxy: EgressProxy | None = None
+
+# Chrome flags that close the routes around the proxy. Chrome normally sends
+# localhost traffic directly, whatever proxy is set; "<-loopback>" removes that
+# exception, so loopback requests reach the proxy and are refused there. QUIC
+# and WebRTC can use UDP, which an HTTP proxy never sees.
+_GUARD_PROXY_BYPASS = "<-loopback>"
+_GUARD_CHROME_ARGS = (
+    "--disable-quic",
+    "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+)
+
+GUARD_NOT_READY_MESSAGE = "The Runner's network guard isn't set up, so the browser was not started."
+GUARD_BYPASSED_MESSAGE = (
+    "The browser isn't sending its traffic through the Runner's network guard, so nothing was run. "
+    "Close every browser window the Runner opened, then start the Runner again. If this keeps happening, "
+    "a policy on this machine may be overriding the browser's proxy settings."
+)
+
+
+def configure_network_guard(policy: RunnerUrlPolicy, proxy: EgressProxy) -> None:
+    global _url_policy, _egress_proxy
+    _url_policy = policy
+    _egress_proxy = proxy
+
+
+def update_url_policy(policy: RunnerUrlPolicy) -> None:
+    """Apply a freshly fetched policy to the browser that is already open.
+
+    browser-use reads `allowed_domains` from the profile on every navigation,
+    so replacing it takes effect from the next page the browser opens."""
+    global _url_policy
+    _url_policy = policy
+    if _browser is not None:
+        _browser.browser_profile.allowed_domains = policy.browser_allowed_domains()
+
+
 # ── Browser singleton ──────────────────────────────────────────────────────
 
 _browser: BrowserSession | None = None
+# The browser instance whose traffic has been seen going through the proxy.
+_guard_checked_browser: BrowserSession | None = None
 
 
 def _get_browser() -> BrowserSession:
     global _browser
+    if _url_policy is None or _egress_proxy is None or not _egress_proxy.port:
+        raise RuntimeError(GUARD_NOT_READY_MESSAGE)
     if _browser is None:
         channel = (settings.BROWSER_CHANNEL or "chrome").strip().lower()
         profile_dir = _PROFILE_DIR / channel
@@ -2166,9 +2219,63 @@ def _get_browser() -> BrowserSession:
             headless=False,
             user_data_dir=str(profile_dir),
             keep_alive=True,
+            allowed_domains=_url_policy.browser_allowed_domains(),
+            proxy={"server": f"http://127.0.0.1:{_egress_proxy.port}", "bypass": _GUARD_PROXY_BYPASS},
+            args=list(_GUARD_CHROME_ARGS),
         )
         _browser = BrowserSession(browser_profile=profile)
     return _browser
+
+
+async def _check_traffic_goes_through_guard(browser: BrowserSession) -> bool:
+    """Fetch a host that exists nowhere from a throwaway browser context, and
+    report whether the request reached the egress proxy.
+
+    Only the proxy can see that request: without it, the browser looks the
+    name up itself, fails, and the proxy never hears of it. A separate
+    context keeps the check away from the user's tabs and logins."""
+    _egress_proxy.guard_check_seen = False
+    root = (await browser.get_or_create_cdp_session()).cdp_client
+    context_id = (await root.send.Target.createBrowserContext(params={}))["browserContextId"]
+    try:
+        target_id = (
+            await root.send.Target.createTarget(
+                params={"url": "about:blank", "browserContextId": context_id, "background": True}
+            )
+        )["targetId"]
+        session_id = (await root.send.Target.attachToTarget(params={"targetId": target_id, "flatten": True}))[
+            "sessionId"
+        ]
+        await root.send.Runtime.evaluate(
+            params={
+                "expression": f"fetch('https://{GUARD_CHECK_HOST}/', {{mode: 'no-cors'}}).then(() => 1, () => 0)",
+                "awaitPromise": True,
+            },
+            session_id=session_id,
+        )
+    finally:
+        with contextlib.suppress(Exception):
+            await root.send.Target.disposeBrowserContext(params={"browserContextId": context_id})
+    return _egress_proxy.guard_check_seen
+
+
+async def _start_browser() -> BrowserSession:
+    """Start the browser, and before its first use, prove its traffic goes
+    through the guard. A browser that fails the check is closed again."""
+    global _guard_checked_browser
+    browser = _get_browser()
+    await browser.start()
+    if _guard_checked_browser is not browser:
+        try:
+            through_guard = await _check_traffic_goes_through_guard(browser)
+        except Exception as exc:
+            await reset_browser()
+            raise RuntimeError(f"{GUARD_BYPASSED_MESSAGE} ({exc})") from exc
+        if not through_guard:
+            await reset_browser()
+            raise RuntimeError(GUARD_BYPASSED_MESSAGE)
+        _guard_checked_browser = browser
+    return browser
 
 
 async def reset_browser() -> dict:
@@ -2196,9 +2303,11 @@ async def open_login_browser(url: str) -> dict:
     """Open the same persistent browser/profile used for agent tasks and
     navigate to `url`, so the user can manually authenticate (incl. MFA).
     Because the profile is persistent and the session is kept alive, the
-    cookies set here are reused by execute_task() for subsequent tasks."""
-    browser = _get_browser()
-    await browser.start()
+    cookies set here are reused by execute_task() for subsequent tasks.
+
+    A URL off the approved list is refused by browser-use's own check before
+    anything is requested, and that error fails the task."""
+    browser = await _start_browser()
     await browser.navigate_to(url)
     return {
         "status": "completed",
@@ -2331,8 +2440,7 @@ async def execute_task(
         Result dict to pass to client.post_result()
     """
     llm = _build_llm()
-    browser = _get_browser()
-    await browser.start()
+    browser = await _start_browser()
 
     subtask_specs = parse_subtasks(task["prompt"])
     max_steps = int(task.get("max_steps") or 25)

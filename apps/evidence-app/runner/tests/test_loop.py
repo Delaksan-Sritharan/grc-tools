@@ -57,9 +57,16 @@ async def _unused_reset_browser(*args, **kwargs):
 _fake_agent.execute_task = _unused_execute_task
 _fake_agent.open_login_browser = _unused_open_login_browser
 _fake_agent.reset_browser = _unused_reset_browser
+# The network-guard hooks only record; the autouse fixture below swaps them
+# for recording versions, and tests about the guard read those recordings.
+_fake_agent.configure_network_guard = lambda policy, proxy: None
+_fake_agent.update_url_policy = lambda policy: None
 sys.modules["wso2_runner.agent"] = _fake_agent
 
 from wso2_runner import loop  # noqa: E402 — must follow the sys.modules injection above
+
+
+_POLICY_JSON = {"allowed_domains": ["*.azure.com"], "internal_hosts": [], "min_runner_version": None}
 
 
 class _StopLoop(BaseException):
@@ -91,6 +98,14 @@ def _make_fake_client_class(queue, calls):
                 "asgardeo_org": asgardeo_org,
                 "asgardeo_client_id": asgardeo_client_id,
             }
+
+        async def get_url_policy(self):
+            calls.setdefault("get_url_policy", []).append(True)
+            responses = calls.get("_policy_responses")
+            response = responses.pop(0) if responses else _POLICY_JSON
+            if isinstance(response, BaseException):
+                raise response
+            return response
 
         async def get_next_task(self, runner_id):
             calls.setdefault("get_next_task", []).append(runner_id)
@@ -132,6 +147,9 @@ def _make_raising_once_client_class(exc, calls):
         def __init__(self, base_url, asgardeo_org, asgardeo_client_id):
             pass
 
+        async def get_url_policy(self):
+            return _POLICY_JSON
+
         async def get_next_task(self, runner_id):
             calls.setdefault("get_next_task", []).append(runner_id)
             if len(calls["get_next_task"]) == 1:
@@ -156,6 +174,30 @@ def sleep_calls(monkeypatch):
     monkeypatch.setattr("wso2_runner.oauth.get_access_token", lambda *a, **kw: "test-token")
     monkeypatch.setattr("wso2_runner.oauth.current_email", lambda: "user@example.com")
 
+    # A stand-in for the egress proxy and the agent's guard hooks, recording
+    # what the loop hands them. No socket is opened.
+    guard.clear()
+    guard["policies_applied"] = []
+
+    class FakeProxy:
+        def __init__(self, policy):
+            guard["proxy_started_with"] = policy
+            self.port = 0
+
+        async def start(self):
+            self.port = 41234
+            return self.port
+
+        def set_policy(self, policy):
+            guard.setdefault("proxy_policies", []).append(policy)
+
+        async def close(self):
+            guard["proxy_closed"] = True
+
+    monkeypatch.setattr(loop, "EgressProxy", FakeProxy)
+    monkeypatch.setattr(loop, "configure_network_guard", lambda policy, proxy: guard.update(configured=(policy, proxy.port)))
+    monkeypatch.setattr(loop, "update_url_policy", lambda policy: guard["policies_applied"].append(policy))
+
     calls = []
 
     async def fake_sleep(seconds):
@@ -163,6 +205,9 @@ def sleep_calls(monkeypatch):
 
     monkeypatch.setattr(asyncio, "sleep", fake_sleep)
     return calls
+
+
+guard: dict = {}
 
 
 def _run_bounded(coro):
@@ -497,3 +542,114 @@ def test_failed_screenshot_upload_keeps_the_local_file(monkeypatch, tmp_path):
 
     assert calls["upload_screenshot"] == [shot]
     assert shot.exists()
+
+
+# --- URL policy and network guard ----------------------------------------
+
+
+def test_the_guard_is_set_up_with_the_fetched_policy_before_any_task(monkeypatch):
+    calls = {}
+    monkeypatch.setattr(loop, "CloudClient", _make_fake_client_class([], calls))
+
+    _run_bounded(loop.run_forever(cloud_url="https://cloud.example", poll_interval=0))
+
+    policy, port = guard["configured"]
+    assert policy.allowed_domains == ("*.azure.com",)
+    assert port == 41234
+    assert guard["proxy_started_with"] is policy
+    assert guard["proxy_closed"] is True
+
+
+def test_no_policy_at_startup_stops_the_runner_before_it_polls(monkeypatch):
+    """No cached copy and no built-in list: a Runner that can't load the
+    current policy runs nothing and asks to be started again."""
+    calls = {"_policy_responses": [httpx.ConnectError("offline")]}
+    monkeypatch.setattr(loop, "CloudClient", _make_fake_client_class([{"id": 1, "kind": "run", "prompt": "x"}], calls))
+
+    with pytest.raises(SystemExit) as exc_info:
+        asyncio.run(loop.run_forever(cloud_url="https://cloud.example", poll_interval=0))
+
+    assert exc_info.value.code == 1
+    assert "get_next_task" not in calls
+    assert "configured" not in guard
+    assert calls["aclose"] is True
+
+
+def test_a_server_without_the_policy_endpoint_stops_the_runner(monkeypatch, capsys):
+    response = httpx.Response(404, request=httpx.Request("GET", "https://cloud.example/api/agent/policy"))
+    calls = {"_policy_responses": [httpx.HTTPStatusError("404", request=response.request, response=response)]}
+    monkeypatch.setattr(loop, "CloudClient", _make_fake_client_class([], calls))
+
+    with pytest.raises(SystemExit):
+        asyncio.run(loop.run_forever(cloud_url="https://cloud.example", poll_interval=0))
+
+    assert "older than this Runner" in capsys.readouterr().out
+
+
+def test_a_policy_that_cannot_be_used_stops_the_runner(monkeypatch):
+    calls = {"_policy_responses": [{"allowed_domains": [], "internal_hosts": [], "min_runner_version": None}]}
+    monkeypatch.setattr(loop, "CloudClient", _make_fake_client_class([], calls))
+
+    with pytest.raises(SystemExit):
+        asyncio.run(loop.run_forever(cloud_url="https://cloud.example", poll_interval=0))
+
+    assert "configured" not in guard
+
+
+def test_a_runner_older_than_the_minimum_stops_at_startup(monkeypatch, capsys):
+    calls = {"_policy_responses": [{**_POLICY_JSON, "min_runner_version": "99.0.0"}]}
+    monkeypatch.setattr(loop, "CloudClient", _make_fake_client_class([], calls))
+
+    with pytest.raises(SystemExit):
+        asyncio.run(loop.run_forever(cloud_url="https://cloud.example", poll_interval=0))
+
+    assert "99.0.0" in capsys.readouterr().out
+    assert "get_next_task" not in calls
+
+
+def test_each_task_runs_under_a_freshly_fetched_policy(monkeypatch):
+    newer = {**_POLICY_JSON, "allowed_domains": ["*.azure.com", "*.github.com"]}
+    calls = {"_policy_responses": [_POLICY_JSON, newer]}
+    monkeypatch.setattr(loop, "CloudClient", _make_fake_client_class([{"id": 7, "kind": "login", "prompt": "https://github.com/"}], calls))
+
+    async def fake_open_login_browser(prompt):
+        assert guard["policies_applied"][-1].allowed_domains == ("*.azure.com", "*.github.com")
+        return {"status": "completed", "result": "ok", "error": None, "screenshots": []}
+
+    monkeypatch.setattr(loop, "open_login_browser", fake_open_login_browser)
+
+    _run_bounded(loop.run_forever(cloud_url="https://cloud.example", poll_interval=0))
+
+    assert len(calls["get_url_policy"]) == 2
+    assert guard["proxy_policies"][-1].allowed_domains == ("*.azure.com", "*.github.com")
+    assert dict(calls["post_result"])[7]["status"] == "completed"
+
+
+def test_a_task_whose_policy_cannot_be_refreshed_fails_and_asks_for_a_retry(monkeypatch):
+    calls = {"_policy_responses": [_POLICY_JSON, httpx.ReadTimeout("slow")]}
+    monkeypatch.setattr(loop, "CloudClient", _make_fake_client_class([{"id": 8, "kind": "login", "prompt": "https://portal.azure.com/"}], calls))
+
+    async def must_not_run(prompt):
+        raise AssertionError("the task must not run without a fresh policy")
+
+    monkeypatch.setattr(loop, "open_login_browser", must_not_run)
+
+    _run_bounded(loop.run_forever(cloud_url="https://cloud.example", poll_interval=0))
+
+    result = dict(calls["post_result"])[8]
+    assert result["status"] == "failed"
+    assert "Retry the task" in result["error"]
+    assert guard["policies_applied"] == []
+
+
+def test_a_minimum_raised_while_running_fails_the_task_and_stops_the_runner(monkeypatch):
+    calls = {"_policy_responses": [_POLICY_JSON, {**_POLICY_JSON, "min_runner_version": "99.0.0"}]}
+    monkeypatch.setattr(loop, "CloudClient", _make_fake_client_class([{"id": 9, "kind": "run", "prompt": "x"}], calls))
+
+    with pytest.raises(SystemExit):
+        asyncio.run(loop.run_forever(cloud_url="https://cloud.example", poll_interval=0))
+
+    result = dict(calls["post_result"])[9]
+    assert result["status"] == "failed"
+    assert "99.0.0" in result["error"]
+    assert guard["proxy_closed"] is True
