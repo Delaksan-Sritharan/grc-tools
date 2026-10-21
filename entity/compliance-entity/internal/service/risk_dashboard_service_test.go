@@ -304,3 +304,43 @@ func TestBuildCommonOpenCategoriesEmpty(t *testing.T) {
 		t.Errorf("buildCommonOpenCategories(nil) = %#v, want non-nil empty", got)
 	}
 }
+
+func TestBuildManagedServices(t *testing.T) {
+	themeFacts := []domain.ManagedThemeFact{
+		{CategoryID: 1, CategoryName: "Disaster Recovery", CustomerID: 10, RiskLevel: "HIGH", Count: 1},
+		{CategoryID: 1, CategoryName: "Disaster Recovery", CustomerID: 11, RiskLevel: "LOW", Count: 2},
+		{CategoryID: 1, CategoryName: "Disaster Recovery", CustomerID: 11, RiskLevel: "MEDIUM", Count: 1},
+		{CategoryID: 2, CategoryName: "Access Control", CustomerID: 10, RiskLevel: "MEDIUM", Count: 1},
+		{CategoryID: 3, CategoryName: "Closed Only", CustomerID: 12, RiskLevel: "HIGH", Closed: true, Count: 1},
+	}
+	riskFacts := []domain.ManagedRiskFact{
+		{CustomerID: 10, RiskLevel: "HIGH", Count: 1},
+		{CustomerID: 10, RiskLevel: "MEDIUM", Count: 1},
+		{CustomerID: 11, RiskLevel: "LOW", Count: 2},
+		{CustomerID: 11, RiskLevel: "MEDIUM", Count: 1},
+		{CustomerID: 12, RiskLevel: "HIGH", Closed: true, Count: 1},
+	}
+
+	got := buildManagedServices(themeFacts, riskFacts)
+	want := domain.ManagedServicesRisks{
+		CustomerCount: 3,
+		OpenRisks:     5,
+		ClosedRisks:   1,
+		HighOpen:      1,
+		HighClosed:    1,
+		Themes: []domain.ManagedServicesTheme{
+			{CategoryID: 1, CategoryName: "Disaster Recovery", Customers: 2, Total: 4, High: 1, Medium: 1, Low: 2},
+			{CategoryID: 2, CategoryName: "Access Control", Customers: 1, Total: 1, Medium: 1},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("buildManagedServices() = %+v, want %+v", got, want)
+	}
+}
+
+func TestBuildManagedServicesEmpty(t *testing.T) {
+	got := buildManagedServices(nil, nil)
+	if got.CustomerCount != 0 || got.Themes == nil || len(got.Themes) != 0 {
+		t.Errorf("buildManagedServices(nil, nil) = %+v, want zero counts and empty non-nil themes", got)
+	}
+}

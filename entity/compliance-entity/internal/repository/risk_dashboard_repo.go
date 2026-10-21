@@ -41,6 +41,8 @@ type RiskDashboardRepository interface {
 	CertTagCounts(ctx context.Context, registerID *int, registerIDs []int) ([]domain.RegisterCertCount, error)
 	RepeatedComplianceRisks(ctx context.Context, registerID *int, registerIDs []int) ([]domain.RepeatedRiskRow, error)
 	CategoryRegisterFacts(ctx context.Context, registerID *int, registerIDs []int) ([]domain.CategoryRegisterFact, error)
+	ManagedThemeFacts(ctx context.Context, registerID *int, registerIDs []int) ([]domain.ManagedThemeFact, error)
+	ManagedRiskFacts(ctx context.Context, registerID *int, registerIDs []int) ([]domain.ManagedRiskFact, error)
 	HighRisks(ctx context.Context, registerID *int, registerIDs []int) ([]domain.HighRiskItem, error)
 	LevelOrder(ctx context.Context) ([]string, error)
 }
@@ -224,6 +226,83 @@ func (d *riskDashboardRepo) CategoryRegisterFacts(ctx context.Context, registerI
 			&f.RegisterID, &f.RegisterName, &f.CategoryID, &f.CategoryName, &f.Bucket, &f.Count,
 		); err != nil {
 			return nil, fmt.Errorf("scan category register fact: %w", err)
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+// managedServicesJoin restricts a query over risk r to risks raised in a
+// MANAGED_SERVICES register and exposes their customer as msd.customer_id.
+const managedServicesJoin = `
+	JOIN risk_team mst ON mst.id = r.source_register_id AND mst.register_template = '` + TemplateManagedServices + `'
+	JOIN risk_managed_service_detail msd ON msd.risk_id = r.id`
+
+// managedClosedExpr is shared verbatim between the managed-services queries'
+// SELECT and GROUP BY clauses, for the same ONLY_FULL_GROUP_BY reason as
+// registerStatusBucketCase.
+const managedClosedExpr = `r.workflow_status = '` + statusClosed + `'`
+
+// ManagedThemeFacts has the score join, so a risk with no score is left out:
+// the managed-services block splits every count by level.
+func (d *riskDashboardRepo) ManagedThemeFacts(ctx context.Context, registerID *int, registerIDs []int) ([]domain.ManagedThemeFact, error) {
+	clause, filterArgs := registerFilter(registerID)
+	scopeClause, scopeArgs := registerScopeFilter("r", registerIDs)
+	args := append([]any{statusCancelled}, filterArgs...)
+	args = append(args, scopeArgs...)
+
+	// #nosec G202 -- concatenated parts are fixed SQL fragments from registerFilter/registerScopeFilter/managedServicesJoin/dashboardScoreJoin, never user input; values go through args
+	rows, err := d.db.QueryContext(ctx, `
+		SELECT cat.id, cat.name, msd.customer_id, rs.risk_level,
+		       `+managedClosedExpr+`, COUNT(*)
+		FROM risk r`+managedServicesJoin+dashboardScoreJoin+`
+		JOIN risk_category_reference rcr ON rcr.risk_id = r.id
+		JOIN risk_category cat ON cat.id = rcr.category_id
+		WHERE r.workflow_status <> ?`+clause+scopeClause+`
+		GROUP BY cat.id, cat.name, msd.customer_id, rs.risk_level, `+managedClosedExpr+`
+		ORDER BY cat.name, cat.id`,
+		args...,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("risk dashboard managed theme facts: %w", err)
+	}
+	defer rows.Close()
+
+	var out []domain.ManagedThemeFact
+	for rows.Next() {
+		var f domain.ManagedThemeFact
+		if err := rows.Scan(&f.CategoryID, &f.CategoryName, &f.CustomerID, &f.RiskLevel, &f.Closed, &f.Count); err != nil {
+			return nil, fmt.Errorf("scan managed theme fact: %w", err)
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+func (d *riskDashboardRepo) ManagedRiskFacts(ctx context.Context, registerID *int, registerIDs []int) ([]domain.ManagedRiskFact, error) {
+	clause, filterArgs := registerFilter(registerID)
+	scopeClause, scopeArgs := registerScopeFilter("r", registerIDs)
+	args := append([]any{statusCancelled}, filterArgs...)
+	args = append(args, scopeArgs...)
+
+	// #nosec G202 -- concatenated parts are fixed SQL fragments from registerFilter/registerScopeFilter/managedServicesJoin/dashboardScoreJoin, never user input; values go through args
+	rows, err := d.db.QueryContext(ctx, `
+		SELECT msd.customer_id, rs.risk_level, `+managedClosedExpr+`, COUNT(*)
+		FROM risk r`+managedServicesJoin+dashboardScoreJoin+`
+		WHERE r.workflow_status <> ?`+clause+scopeClause+`
+		GROUP BY msd.customer_id, rs.risk_level, `+managedClosedExpr,
+		args...,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("risk dashboard managed risk facts: %w", err)
+	}
+	defer rows.Close()
+
+	var out []domain.ManagedRiskFact
+	for rows.Next() {
+		var f domain.ManagedRiskFact
+		if err := rows.Scan(&f.CustomerID, &f.RiskLevel, &f.Closed, &f.Count); err != nil {
+			return nil, fmt.Errorf("scan managed risk fact: %w", err)
 		}
 		out = append(out, f)
 	}
