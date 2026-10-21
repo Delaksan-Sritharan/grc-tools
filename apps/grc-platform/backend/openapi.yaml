@@ -6733,6 +6733,42 @@ components:
           type: integer
         closed:
           type: integer
+    ManagedServicesTheme:
+      type: object
+      description: One Risk Category's open managed-services risks, split by effective residual level. customers counts distinct customers; total is high + medium + low.
+      properties:
+        category_id:
+          type: integer
+        category_name:
+          type: string
+        customers:
+          type: integer
+        total:
+          type: integer
+        high:
+          type: integer
+        medium:
+          type: integer
+        low:
+          type: integer
+    ManagedServicesRisks:
+      type: object
+      description: Risks raised in MANAGED_SERVICES registers, themed by Risk Category. open_risks and closed_risks count distinct risks; themes count open risks only, and a multi-category risk appears under each of its categories.
+      properties:
+        customer_count:
+          type: integer
+        open_risks:
+          type: integer
+        closed_risks:
+          type: integer
+        high_open:
+          type: integer
+        high_closed:
+          type: integer
+        themes:
+          type: array
+          items:
+            $ref: '#/components/schemas/ManagedServicesTheme'
     HighRiskItem:
       type: object
       properties:
@@ -6759,7 +6795,7 @@ components:
           nullable: true
     DashboardSummary:
       type: object
-      description: Full payload for GET /api/v1/risks/dashboard. CANCELLED risks are excluded everywhere; every field is open-risks-only except registers[].status_levels, repeated_categories and common_open_categories.
+      description: Full payload for GET /api/v1/risks/dashboard. CANCELLED risks are excluded everywhere; every field is open-risks-only except registers[].status_levels, repeated_categories, common_open_categories and the open/closed totals in managed_services.
       properties:
         summary:
           $ref: '#/components/schemas/RiskStatusSummary'
@@ -6795,6 +6831,8 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CommonOpenCategory'
+        managed_services:
+          $ref: '#/components/schemas/ManagedServicesRisks'
         high_risks:
           type: array
           items:
