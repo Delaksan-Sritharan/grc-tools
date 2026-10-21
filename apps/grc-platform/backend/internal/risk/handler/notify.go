@@ -25,6 +25,7 @@ import (
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/model"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/emailer"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/grant"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/privilege"
 )
 
@@ -346,6 +347,14 @@ func (d *Deps) describeActor(ctx context.Context, actorUUID string) string {
 // currently holds the privilege in logs a warning rather than failing that
 // already-committed transition.
 func (d *Deps) notifyComplianceAdmins(ev emailer.RiskEvent, riskID, registerID int, actor, comment string) {
+	d.notifyComplianceAdminsExcept(ev, riskID, registerID, actor, comment, "")
+}
+
+// notifyComplianceAdminsExcept is notifyComplianceAdmins minus one person:
+// whoever's Asgardeo id is excludeUUID is dropped from the recipients. Used by
+// rejection, where an admin who rejected the risk themselves needn't be told.
+// An empty excludeUUID excludes nobody.
+func (d *Deps) notifyComplianceAdminsExcept(ev emailer.RiskEvent, riskID, registerID int, actor, comment, excludeUUID string) {
 	if d.Grants == nil {
 		// Local dev: no privilege store configured, so no grants exist to
 		// resolve a recipient list from.
@@ -373,12 +382,73 @@ func (d *Deps) notifyComplianceAdmins(ev emailer.RiskEvent, riskID, registerID i
 				"event", ev, "riskId", riskID, "registerId", registerID)
 			return
 		}
-		ids := make([]int, len(candidates))
-		for i, c := range candidates {
-			ids[i] = c.ID
+		ids := candidateIDsExcept(candidates, excludeUUID)
+		if len(ids) == 0 {
+			// Everyone who could be told is the excluded person.
+			return
 		}
 		_ = d.sendRiskEvent(ctx, ev, riskID, ids, actor, comment)
 	}()
+}
+
+// candidateIDsExcept returns the candidates' user ids, omitting the one whose
+// UUID is excludeUUID. An empty excludeUUID omits nobody.
+func candidateIDsExcept(candidates []grant.Candidate, excludeUUID string) []int {
+	ids := make([]int, 0, len(candidates))
+	for _, c := range candidates {
+		if excludeUUID != "" && c.UUID == excludeUUID {
+			continue
+		}
+		ids = append(ids, c.ID)
+	}
+	return ids
+}
+
+// notifyRiskAssessed tells the risk's Assigner, Owner and the Compliance
+// Admins that it was reassessed, leaving out whoever performed the assessment
+// (by, a UUID) from all three. Detached and best-effort like the other
+// notifiers: the assessment is already saved.
+//
+// detail is the risk the handler already loaded for its privilege check, so
+// nothing here touches the database before the response is written; the
+// notifiers it calls do their remaining work in their own goroutines.
+//
+// The email's "Risk Level" row is the gross level, which an assessment doesn't
+// change, so the new residual level travels in the comment instead.
+func (d *Deps) notifyRiskAssessed(detail *model.RiskDetail, result *model.RiskAssessment, by string) {
+	comment := assessmentComment(result.ResidualLevel, result.Progress)
+	if ids := assessmentRecipients(detail, by); len(ids) > 0 {
+		d.notifyRiskEvent(emailer.EventAssessed, detail.ID, ids, by, comment)
+	}
+	d.notifyComplianceAdminsExcept(emailer.EventAssessed, detail.ID, detail.SourceRegisterID, by, comment, by)
+}
+
+// assessmentRecipients returns the risk's Assigner and Owner user ids, omitting
+// whichever has the UUID by. Matching on UUID rather than a resolved user id
+// means an assessor with no user row, or a failed lookup, can't leave them in.
+func assessmentRecipients(detail *model.RiskDetail, by string) []int {
+	ids := make([]int, 0, 2)
+	if detail.AssignerUUID != by {
+		ids = append(ids, detail.AssignerID)
+	}
+	if detail.OwnerUUID != by {
+		ids = append(ids, detail.OwnerID)
+	}
+	return ids
+}
+
+// assessmentComment is the email's comment box: the new residual level, then
+// the assessor's notes when they wrote any.
+func assessmentComment(residualLevel, progress string) string {
+	notes := strings.TrimSpace(progress)
+	switch {
+	case residualLevel == "":
+		return notes
+	case notes == "":
+		return "Residual level: " + residualLevel
+	default:
+		return "Residual level: " + residualLevel + " — " + notes
+	}
 }
 
 // notifyEscalationLeads emails the Risk Assigner's and Action Owner's leads

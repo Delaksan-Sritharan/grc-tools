@@ -146,7 +146,7 @@ func TestEveryRiskEventHasATemplate(t *testing.T) {
 		EventCreated, EventPendingMgmtApproval, EventComplianceApproved,
 		EventActionPlanCompleted, EventPendingOwnerClosure, EventPendingMgmtClosure,
 		EventRejected, EventEscalated, EventEscalationCommented, EventEscalatedLead,
-		EventPendingComplianceReview, EventPendingComplianceClosure, EventClosed,
+		EventPendingComplianceReview, EventPendingComplianceClosure, EventClosed, EventRejectedCompliance, EventAssessed,
 	}
 	for _, ev := range all {
 		tpl, ok := eventTemplates[ev]
@@ -350,6 +350,8 @@ func TestSendRiskEventRendersTheEventsActorLabel(t *testing.T) {
 	}{
 		{EventCreated, "Created by"},
 		{EventRejected, "Rejected by"},
+		{EventRejectedCompliance, "Rejected by"},
+		{EventAssessed, "Assessed by"},
 		{EventActionPlanCompleted, "Completed by"},
 	}
 	for _, c := range cases {
