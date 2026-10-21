@@ -48,6 +48,7 @@ type RiskDashboardSummary struct {
 	RepeatedComplianceRisks []RepeatedComplianceRisk `json:"repeatedComplianceRisks"`
 	RepeatedCategories      []RepeatedCategory       `json:"repeatedCategories"`
 	CommonOpenCategories    []CommonOpenCategory     `json:"commonOpenCategories"`
+	ManagedServices         ManagedServicesRisks     `json:"managedServices"`
 	HighRisks               []HighRiskItem           `json:"highRisks"`
 }
 
@@ -157,6 +158,35 @@ type CommonOpenCategory struct {
 	CategoryCounts
 }
 
+// ManagedServicesRisks is the "Most Common Risks — Managed Deployments" block:
+// risks raised in MANAGED_SERVICES registers, themed by Risk Category. Zero
+// values (no customers, no themes) when the scope holds no such risks.
+type ManagedServicesRisks struct {
+	// CustomerCount is the customers holding at least one non-cancelled risk.
+	CustomerCount int `json:"customerCount"`
+	// OpenRisks and ClosedRisks count distinct risks, so they can be lower than
+	// the sum over Themes, where a multi-category risk appears under each.
+	OpenRisks   int `json:"openRisks"`
+	ClosedRisks int `json:"closedRisks"`
+	// HighOpen and HighClosed split the HIGH-level risks by status.
+	HighOpen   int                    `json:"highOpen"`
+	HighClosed int                    `json:"highClosed"`
+	Themes     []ManagedServicesTheme `json:"themes"`
+}
+
+// ManagedServicesTheme is one Risk Category's open risks across customers,
+// split by effective residual level. Customers counts distinct customers with
+// an open risk in the category; Total is the sum of High, Medium and Low.
+type ManagedServicesTheme struct {
+	CategoryID   int    `json:"categoryId"`
+	CategoryName string `json:"categoryName"`
+	Customers    int    `json:"customers"`
+	Total        int    `json:"total"`
+	High         int    `json:"high"`
+	Medium       int    `json:"medium"`
+	Low          int    `json:"low"`
+}
+
 // HighRiskItem is one row of the high-risk table, oldest identified first.
 type HighRiskItem struct {
 	ID                 int     `json:"id"`
@@ -230,4 +260,31 @@ type CategoryRegisterFact struct {
 	CategoryName string
 	Bucket       string
 	Count        int
+}
+
+// Risk levels the managed-services block splits on.
+const (
+	RiskLevelHigh   = "HIGH"
+	RiskLevelMedium = "MEDIUM"
+)
+
+// ManagedThemeFact is non-cancelled managed-services risks grouped by
+// category × customer × effective residual level × open/closed. A risk with
+// several categories appears under each; an uncategorised risk under none.
+type ManagedThemeFact struct {
+	CategoryID   int
+	CategoryName string
+	CustomerID   int
+	RiskLevel    string
+	Closed       bool
+	Count        int
+}
+
+// ManagedRiskFact is non-cancelled managed-services risks grouped by customer ×
+// effective residual level × open/closed, regardless of category.
+type ManagedRiskFact struct {
+	CustomerID int
+	RiskLevel  string
+	Closed     bool
+	Count      int
 }

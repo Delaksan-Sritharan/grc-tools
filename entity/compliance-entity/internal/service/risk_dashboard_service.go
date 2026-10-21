@@ -82,6 +82,14 @@ func (s *riskDashboardService) Summary(ctx context.Context, req domain.RiskDashb
 	if err != nil {
 		return domain.RiskDashboardSummary{}, err
 	}
+	managedThemeFacts, err := s.repo.ManagedThemeFacts(ctx, registerID, registerIDs)
+	if err != nil {
+		return domain.RiskDashboardSummary{}, err
+	}
+	managedRiskFacts, err := s.repo.ManagedRiskFacts(ctx, registerID, registerIDs)
+	if err != nil {
+		return domain.RiskDashboardSummary{}, err
+	}
 	highRisks, err := s.repo.HighRisks(ctx, registerID, registerIDs)
 	if err != nil {
 		return domain.RiskDashboardSummary{}, err
@@ -104,6 +112,7 @@ func (s *riskDashboardService) Summary(ctx context.Context, req domain.RiskDashb
 		RepeatedComplianceRisks: buildRepeatedRisks(repeatedRows),
 		RepeatedCategories:      buildRepeatedCategories(categoryFacts),
 		CommonOpenCategories:    buildCommonOpenCategories(categoryFacts),
+		ManagedServices:         buildManagedServices(managedThemeFacts, managedRiskFacts),
 		HighRisks:               highRisks,
 	}, nil
 }
@@ -420,6 +429,74 @@ func buildCommonOpenCategories(facts []domain.CategoryRegisterFact) []domain.Com
 		}
 		if a.Open != b.Open {
 			return a.Open > b.Open
+		}
+		return a.CategoryName < b.CategoryName
+	})
+	return out
+}
+
+// buildManagedServices assembles the managed-services block. Themes count open
+// risks only, most open risks first, then most customers, then category name;
+// a category with no open risk is omitted. Totals come from riskFacts so a risk
+// with several categories, or none, is still counted exactly once.
+func buildManagedServices(themeFacts []domain.ManagedThemeFact, riskFacts []domain.ManagedRiskFact) domain.ManagedServicesRisks {
+	out := domain.ManagedServicesRisks{Themes: []domain.ManagedServicesTheme{}}
+
+	customers := map[int]struct{}{}
+	for _, f := range riskFacts {
+		customers[f.CustomerID] = struct{}{}
+		if f.Closed {
+			out.ClosedRisks += f.Count
+		} else {
+			out.OpenRisks += f.Count
+		}
+		if f.RiskLevel != domain.RiskLevelHigh {
+			continue
+		}
+		if f.Closed {
+			out.HighClosed += f.Count
+		} else {
+			out.HighOpen += f.Count
+		}
+	}
+	out.CustomerCount = len(customers)
+
+	themes := map[int]*domain.ManagedServicesTheme{}
+	themeCustomers := map[int]map[int]struct{}{}
+	var order []int
+	for _, f := range themeFacts {
+		if f.Closed {
+			continue
+		}
+		t, ok := themes[f.CategoryID]
+		if !ok {
+			t = &domain.ManagedServicesTheme{CategoryID: f.CategoryID, CategoryName: f.CategoryName}
+			themes[f.CategoryID] = t
+			themeCustomers[f.CategoryID] = map[int]struct{}{}
+			order = append(order, f.CategoryID)
+		}
+		themeCustomers[f.CategoryID][f.CustomerID] = struct{}{}
+		t.Total += f.Count
+		switch f.RiskLevel {
+		case domain.RiskLevelHigh:
+			t.High += f.Count
+		case domain.RiskLevelMedium:
+			t.Medium += f.Count
+		default:
+			t.Low += f.Count
+		}
+	}
+	for _, id := range order {
+		themes[id].Customers = len(themeCustomers[id])
+		out.Themes = append(out.Themes, *themes[id])
+	}
+	sort.SliceStable(out.Themes, func(i, j int) bool {
+		a, b := out.Themes[i], out.Themes[j]
+		if a.Total != b.Total {
+			return a.Total > b.Total
+		}
+		if a.Customers != b.Customers {
+			return a.Customers > b.Customers
 		}
 		return a.CategoryName < b.CategoryName
 	})
