@@ -70,6 +70,7 @@ func (d *Deps) handleDashboard(w http.ResponseWriter, r *http.Request) {
 				RepeatedComplianceRisks: []model.RepeatedComplianceRisk{},
 				RepeatedCategories:      []model.RepeatedCategory{},
 				CommonOpenCategories:    []model.CommonOpenCategory{},
+				ManagedServices:         model.ManagedServicesRisks{Themes: []model.ManagedServicesTheme{}},
 				HighRisks:               []model.HighRiskItem{},
 			})
 			return

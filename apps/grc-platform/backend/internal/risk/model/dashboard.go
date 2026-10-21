@@ -25,8 +25,9 @@ package model
 //   - Risk level/likelihood/impact use the effective residual score: the
 //     latest risk_assessment score when one exists, else the gross score.
 //   - Every field is open-risks-only EXCEPT RegisterAnalytics.StatusLevels,
-//     RepeatedCategories and CommonOpenCategories, which also count closed
-//     risks (see their own doc comments).
+//     RepeatedCategories, CommonOpenCategories and the open/closed totals in
+//     ManagedServices, which also count
+//     closed risks (see their own doc comments).
 type DashboardSummary struct {
 	Summary                 RiskStatusSummary        `json:"summary"`
 	TreatmentByRegister     []RegisterTreatmentCount `json:"treatment_by_register"`
@@ -37,6 +38,7 @@ type DashboardSummary struct {
 	RepeatedComplianceRisks []RepeatedComplianceRisk `json:"repeated_compliance_risks"`
 	RepeatedCategories      []RepeatedCategory       `json:"repeated_categories"`
 	CommonOpenCategories    []CommonOpenCategory     `json:"common_open_categories"`
+	ManagedServices         ManagedServicesRisks     `json:"managed_services"`
 	HighRisks               []HighRiskItem           `json:"high_risks"`
 }
 
@@ -150,6 +152,32 @@ type CommonOpenCategory struct {
 	CategoryName string `json:"category_name"`
 	RegisterIDs  []int  `json:"register_ids"`
 	CategoryCounts
+}
+
+// ManagedServicesRisks backs the "Most Common Risks — Managed Deployments"
+// card: risks raised in MANAGED_SERVICES registers, themed by Risk Category.
+// OpenRisks and ClosedRisks count distinct risks; Themes count open risks only,
+// and a risk with several categories appears under each of them.
+type ManagedServicesRisks struct {
+	CustomerCount int                    `json:"customer_count"`
+	OpenRisks     int                    `json:"open_risks"`
+	ClosedRisks   int                    `json:"closed_risks"`
+	HighOpen      int                    `json:"high_open"`
+	HighClosed    int                    `json:"high_closed"`
+	Themes        []ManagedServicesTheme `json:"themes"`
+}
+
+// ManagedServicesTheme is one Risk Category's open risks across customers,
+// split by effective residual level. Customers counts distinct customers; Total
+// is High + Medium + Low.
+type ManagedServicesTheme struct {
+	CategoryID   int    `json:"category_id"`
+	CategoryName string `json:"category_name"`
+	Customers    int    `json:"customers"`
+	Total        int    `json:"total"`
+	High         int    `json:"high"`
+	Medium       int    `json:"medium"`
+	Low          int    `json:"low"`
 }
 
 // HighRiskItem is one row of the "High Severity Open Risks" table: an open

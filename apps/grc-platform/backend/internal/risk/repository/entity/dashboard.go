@@ -106,6 +106,22 @@ type entDashboard struct {
 		RegisterIDs  []int  `json:"registerIds"`
 		entCategoryCounts
 	} `json:"commonOpenCategories"`
+	ManagedServices struct {
+		CustomerCount int `json:"customerCount"`
+		OpenRisks     int `json:"openRisks"`
+		ClosedRisks   int `json:"closedRisks"`
+		HighOpen      int `json:"highOpen"`
+		HighClosed    int `json:"highClosed"`
+		Themes        []struct {
+			CategoryID   int    `json:"categoryId"`
+			CategoryName string `json:"categoryName"`
+			Customers    int    `json:"customers"`
+			Total        int    `json:"total"`
+			High         int    `json:"high"`
+			Medium       int    `json:"medium"`
+			Low          int    `json:"low"`
+		} `json:"themes"`
+	} `json:"managedServices"`
 	HighRisks []struct {
 		ID                 int     `json:"id"`
 		RiskCode           string  `json:"riskCode"`
@@ -247,6 +263,20 @@ func (r *dashboardRepository) Summary(ctx context.Context, registerID *int, regi
 		out.CommonOpenCategories = append(out.CommonOpenCategories, model.CommonOpenCategory{
 			CategoryID: cc.CategoryID, CategoryName: cc.CategoryName,
 			RegisterIDs: registerIDs, CategoryCounts: cc.toModel(),
+		})
+	}
+	out.ManagedServices = model.ManagedServicesRisks{
+		CustomerCount: e.ManagedServices.CustomerCount,
+		OpenRisks:     e.ManagedServices.OpenRisks,
+		ClosedRisks:   e.ManagedServices.ClosedRisks,
+		HighOpen:      e.ManagedServices.HighOpen,
+		HighClosed:    e.ManagedServices.HighClosed,
+		Themes:        make([]model.ManagedServicesTheme, 0, len(e.ManagedServices.Themes)),
+	}
+	for _, t := range e.ManagedServices.Themes {
+		out.ManagedServices.Themes = append(out.ManagedServices.Themes, model.ManagedServicesTheme{
+			CategoryID: t.CategoryID, CategoryName: t.CategoryName, Customers: t.Customers,
+			Total: t.Total, High: t.High, Medium: t.Medium, Low: t.Low,
 		})
 	}
 	for _, h := range e.HighRisks {
