@@ -4,10 +4,11 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from app.agent_policy import AgentPolicy, current_policy, portal_url_error, runner_version, version_tuple
 from app.auth import User, get_current_user
 from app.database import get_db
 from app.models.agent_task import AgentTask
@@ -16,7 +17,6 @@ from app.models.evidence import Evidence
 from app.models.evidence_file import EvidenceFile
 from app.models.submission import Submission
 from app.models.usage_log import UsageLog
-from app.portal_url import portal_url_error
 from app.schemas.agent_task import TaskCreate, TaskOut, TaskProgress, TaskResult
 from app.storage.blob_paths import build_control_prefix, sanitize_title
 from app.storage.blob_storage import save_file
@@ -87,6 +87,12 @@ def _authorize_task_access(task: AgentTask, user: User) -> None:
         raise HTTPException(403)
 
 
+def _check_portal_url(value: str, policy: AgentPolicy) -> None:
+    error = portal_url_error(value, policy)
+    if error:
+        raise HTTPException(status_code=400, detail=error)
+
+
 def _agent_evidence_title(task: AgentTask) -> str:
     """The Evidence title an AI-agent run gets, shared by `runner_result`
     (which sets it when the result arrives) and `upload_screenshot` (which
@@ -133,18 +139,16 @@ def create_task(
     if req.kind not in VALID_TASK_KINDS:
         raise HTTPException(status_code=400, detail=f"Kind must be one of: {', '.join(sorted(VALID_TASK_KINDS))}")
 
-    # The Runner opens a login task's prompt as-is in a real browser, and a run
-    # task's portal_url is the portal the agent is told it is on. The Runner
-    # trusts what it is handed, so both are checked here -- see
-    # app/portal_url.py.
+    # The Runner opens a login task's prompt in a real browser, and a run
+    # task's portal_url is the portal the agent is told it is on. Both must be
+    # an https URL on an approved portal -- see app/agent_policy.py. The Runner
+    # enforces the same policy in its own browser; this refuses a task early,
+    # with a message the user can act on.
+    policy = current_policy()
     if req.kind == "login":
-        error = portal_url_error(req.prompt)
-        if error:
-            raise HTTPException(status_code=400, detail=error)
+        _check_portal_url(req.prompt, policy)
     if req.portal_url and req.portal_url.strip():
-        error = portal_url_error(req.portal_url)
-        if error:
-            raise HTTPException(status_code=400, detail=error)
+        _check_portal_url(req.portal_url, policy)
 
     # Resolve the Control before inserting. Naming a control_id that doesn't
     # exist is a bad request, not a server failure: left to the foreign key
@@ -201,6 +205,19 @@ def list_tasks(
     return q.order_by(AgentTask.id.desc()).limit(limit).all()
 
 
+@router.get("/policy")
+def url_policy(user: User = Depends(get_current_user)):
+    """The URL policy every Runner enforces in its browser -- see
+    app/agent_policy.py. Signed-in callers only: the internal host names are
+    not for the public, unlike /runner-config."""
+    policy = current_policy()
+    return {
+        "allowed_domains": list(policy.allowed_domains),
+        "internal_hosts": list(policy.internal_hosts),
+        "min_runner_version": policy.min_runner_version,
+    }
+
+
 @router.get("/runner-status")
 def runner_status(user: User = Depends(get_current_user)):
     last = _last_poll.get(user.email)
@@ -235,11 +252,25 @@ def runner_heartbeat(
 # matches the literal path "next" before trying to cast it to int.
 @router.get("/tasks/next", response_model=TaskOut | None)
 def runner_next_task(
+    request: Request,
     runner_id: str = Query(...),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Runner polls this. Atomically claims one queued task (FOR UPDATE SKIP LOCKED)."""
+    # A Runner older than AGENT_MIN_RUNNER_VERSION gets no tasks. Checked
+    # before the poll is recorded, so the web app doesn't show it as online
+    # while its tasks wait. A Runner too old to send X-Runner-Version still
+    # names its version in its User-Agent.
+    minimum = current_policy().min_runner_version
+    if minimum:
+        version = runner_version(request.headers.get("x-runner-version"), request.headers.get("user-agent"))
+        if version is None or version < version_tuple(minimum):
+            raise HTTPException(
+                status_code=426,
+                detail=f"This Runner is older than {minimum}, the oldest version this server accepts. "
+                "Install the latest Runner release, then start it again.",
+            )
     _last_poll[user.email] = datetime.now(timezone.utc)
     task = (
         db.query(AgentTask)
