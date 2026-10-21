@@ -52,6 +52,20 @@ async def _load_url_policy(client: CloudClient) -> RunnerUrlPolicy:
         raise _PolicyUnavailable(f"the server's URL policy can't be used: {exc}") from exc
 
 
+_TOO_OLD_FALLBACK = (
+    "This Runner is older than the oldest version the server accepts. "
+    "Install the latest Runner release, then start it again."
+)
+
+
+def _server_detail(response: httpx.Response) -> str | None:
+    try:
+        detail = response.json().get("detail")
+    except (ValueError, AttributeError):
+        return None
+    return detail if isinstance(detail, str) and detail else None
+
+
 def _too_old_message(policy: RunnerUrlPolicy) -> str:
     return (
         f"This Runner is version {RUNNER_VERSION}; the server requires {policy.min_runner_version} or newer. "
@@ -248,6 +262,11 @@ async def run_forever(
                 print(f"[runner] Cannot reach {url} — retrying in 10s...")
                 await asyncio.sleep(10)
             except httpx.HTTPStatusError as exc:
+                # The server refuses tasks to a Runner older than its minimum
+                # version (426). Retrying can't fix that, so say why and stop.
+                if exc.response.status_code == 426:
+                    print(f"[runner] ✗ {_server_detail(exc.response) or _TOO_OLD_FALLBACK}")
+                    raise SystemExit(1)
                 print(f"[runner] HTTP {exc.response.status_code} — retrying in 5s...")
                 await asyncio.sleep(5)
             except Exception as exc:

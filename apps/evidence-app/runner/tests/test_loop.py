@@ -642,7 +642,44 @@ def test_a_task_whose_policy_cannot_be_refreshed_fails_and_asks_for_a_retry(monk
     assert guard["policies_applied"] == []
 
 
-def test_a_minimum_raised_while_running_fails_the_task_and_stops_the_runner(monkeypatch):
+def test_a_server_refusing_this_runner_version_stops_it_with_the_servers_message(monkeypatch, capsys):
+    """An admin raising the minimum while the Runner is idle: the backend
+    answers the next poll with 426 and hands out no task. Retrying can't fix
+    that, so the Runner says why and stops instead of polling forever."""
+    request = httpx.Request("GET", "https://cloud.example/api/agent/tasks/next")
+    response = httpx.Response(
+        426, json={"detail": "This Runner is older than 99.0.0, the oldest version this server accepts."}, request=request
+    )
+    calls = {}
+    monkeypatch.setattr(
+        loop, "CloudClient", _make_raising_once_client_class(httpx.HTTPStatusError("426", request=request, response=response), calls)
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        asyncio.run(loop.run_forever(cloud_url="https://cloud.example", poll_interval=0))
+
+    assert exc_info.value.code == 1
+    assert "older than 99.0.0" in capsys.readouterr().out
+    assert len(calls["get_next_task"]) == 1
+    assert guard["proxy_closed"] is True
+
+
+def test_a_426_without_a_message_still_stops_the_runner(monkeypatch, capsys):
+    request = httpx.Request("GET", "https://cloud.example/api/agent/tasks/next")
+    response = httpx.Response(426, text="Upgrade Required", request=request)
+    monkeypatch.setattr(
+        loop, "CloudClient", _make_raising_once_client_class(httpx.HTTPStatusError("426", request=request, response=response), {})
+    )
+
+    with pytest.raises(SystemExit):
+        asyncio.run(loop.run_forever(cloud_url="https://cloud.example", poll_interval=0))
+
+    assert "Install the latest Runner release" in capsys.readouterr().out
+
+
+def test_a_minimum_raised_between_claiming_and_running_a_task_fails_it_and_stops_the_runner(monkeypatch):
+    """The narrow case the per-task check covers: the Runner was new enough
+    when it claimed the task, and the minimum rose before the task ran."""
     calls = {"_policy_responses": [_POLICY_JSON, {**_POLICY_JSON, "min_runner_version": "99.0.0"}]}
     monkeypatch.setattr(loop, "CloudClient", _make_fake_client_class([{"id": 9, "kind": "run", "prompt": "x"}], calls))
 
