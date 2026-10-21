@@ -7824,6 +7824,48 @@ components:
           type: integer
         closed:
           type: integer
+    ManagedServicesTheme:
+      type: object
+      description: >-
+        One Risk Category's open managed-services risks, split by effective
+        residual level. customers counts distinct customers; total is
+        high + medium + low.
+      properties:
+        categoryId:
+          type: integer
+        categoryName:
+          type: string
+        customers:
+          type: integer
+        total:
+          type: integer
+        high:
+          type: integer
+        medium:
+          type: integer
+        low:
+          type: integer
+    ManagedServicesRisks:
+      type: object
+      description: >-
+        Risks raised in MANAGED_SERVICES registers, themed by Risk Category.
+        openRisks and closedRisks count distinct risks; themes count open risks
+        only, and a multi-category risk appears under each of its categories.
+      properties:
+        customerCount:
+          type: integer
+        openRisks:
+          type: integer
+        closedRisks:
+          type: integer
+        highOpen:
+          type: integer
+        highClosed:
+          type: integer
+        themes:
+          type: array
+          items:
+            $ref: '#/components/schemas/ManagedServicesTheme'
     HighRiskItem:
       type: object
       properties:
@@ -7883,6 +7925,8 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CommonOpenCategory'
+        managedServices:
+          $ref: '#/components/schemas/ManagedServicesRisks'
         highRisks:
           type: array
           items:
