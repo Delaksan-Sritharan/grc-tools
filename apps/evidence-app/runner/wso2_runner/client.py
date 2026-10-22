@@ -4,7 +4,7 @@ from pathlib import Path
 import httpx
 
 from wso2_runner import oauth
-from wso2_runner.config import USER_AGENT_HEADER
+from wso2_runner.config import USER_AGENT_HEADER, VERSION_HEADER
 
 
 class CloudClient:
@@ -22,11 +22,11 @@ class CloudClient:
         # The production edge behind Cloudflare 403s any request whose
         # User-Agent doesn't carry the curl/ token — see config.py's
         # USER_AGENT comment. Setting it here, as a client-level default,
-        # means all six task-queue calls below carry it without each one
-        # repeating it; httpx merges this with the per-request
-        # Authorization header each method already sends.
+        # means every call below carries it without each one repeating it;
+        # httpx merges this with the per-request Authorization header each
+        # method already sends. The version header rides along the same way.
         self._http = httpx.AsyncClient(
-            timeout=httpx.Timeout(30.0, read=120.0), headers=USER_AGENT_HEADER
+            timeout=httpx.Timeout(30.0, read=120.0), headers={**USER_AGENT_HEADER, **VERSION_HEADER}
         )
 
     def _auth_headers(self) -> dict:
@@ -34,6 +34,14 @@ class CloudClient:
         # returns immediately unless the token is actually due for refresh.
         token = oauth.get_access_token(self._org, self._client_id)
         return {"Authorization": f"Bearer {token}"}
+
+    async def get_url_policy(self) -> dict:
+        """The URL policy this Runner's browser must enforce -- see
+        url_policy.py. Raises on any failure; the caller decides what that
+        means, and never falls back to an older copy."""
+        r = await self._http.get(f"{self.base}/api/agent/policy", headers=self._auth_headers())
+        r.raise_for_status()
+        return r.json()
 
     async def get_next_task(self, runner_id: str) -> dict | None:
         r = await self._http.get(

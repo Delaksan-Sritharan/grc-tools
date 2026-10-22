@@ -15,51 +15,73 @@
 # under the License.
 
 """
-`POST /agent/tasks` refuses a portal URL a Runner should never open.
+`POST /agent/tasks` only queues a portal URL that is on the approved list.
 
-A `login` task's `prompt` is opened as-is by the Runner in a real browser, and
-a `run` task's `portal_url` names the portal the agent is told it is on. Until
-now any URL was stored, so a direct API call could queue one for the Runner to
-open. `app/portal_url.py` now applies the rules when the task is created: a
-public https page, no credentials, and no local, private, link-local or cloud
-metadata host.
+A `login` task's `prompt` is opened by the Runner in a real browser, and a
+`run` task's `portal_url` names the portal the agent is told it is on. Each
+must be an https URL, with no credentials in it, whose host is an allowed
+domain, an internal host name or a single internal address
+(`app/agent_policy.py`).
 
-The host has to be judged the way the browser that opens it will read it, so
-the numeric shorthand forms Chrome accepts (`127.1`, `0x7f.1`, `2130706433`,
-IPv6 forms carrying an IPv4 address) are covered below alongside the plain
-ones. The route tests assert on what an HTTP caller can observe: the status,
-the message, and whether a task row was written.
+The check is an allowlist, so it doesn't need to recognise disguised
+addresses: `127.1`, `2130706433` or `127.0.0.1.nip.io` are refused because
+they are not on the list, not because they are spotted as loopback. Where an
+approved name actually leads is the Runner's to check, on the address it
+resolves to.
 """
 import pytest
 
-from app.models.agent_task import AgentTask
-from app.portal_url import (
-    BLOCKED_HOST_PORTAL_URL_MESSAGE,
+from app.agent_policy import (
     CREDENTIALS_PORTAL_URL_MESSAGE,
     EMPTY_PORTAL_URL_MESSAGE,
     NON_HTTPS_PORTAL_URL_MESSAGE,
+    NOT_APPROVED_PORTAL_URL_MESSAGE,
     UNPARSEABLE_PORTAL_URL_MESSAGE,
+    build_policy,
     portal_url_error,
 )
+from app.models.agent_task import AgentTask
+
+_POLICY = build_policy("*.azure.com,github.com", "jira.internal,10.20.30.40,10.30.0.0/16", "")
 
 
 @pytest.mark.parametrize(
     "url",
     [
         "https://portal.azure.com",
-        "https://console.aws.amazon.com/iam/home#/users",
-        "https://github.com/orgs/wso2/settings",
-        "https://portal.example.com/login",
+        "https://ms.portal.azure.com/#home",
         "https://Portal.Azure.com:443/",
-        "https://8.8.8.8/",
-        "https://134744072/",  # 8.8.8.8, as a browser reads it
-        "https://[2606:4700:4700::1111]/",
-        "https://xn--mnchen-3ya.de/",  # münchen.de, as a browser sends it
+        "https://github.com/orgs/wso2/settings",
+        "https://www.github.com/",
+        "https://jira.internal/browse/SEC-1",
+        "https://10.20.30.40/",
         "  https://portal.azure.com  ",
     ],
 )
-def test_accepts_a_public_https_page(url):
-    assert portal_url_error(url) is None
+def test_an_approved_https_page_is_accepted(url):
+    assert portal_url_error(url, _POLICY) is None
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://evil.example/",
+        "https://azure.com.evil.example/",
+        "https://gist.github.com/",
+        "https://localhost/",
+        "https://127.0.0.1/",
+        "https://127.1/",
+        "https://2130706433/",
+        "https://169.254.169.254/latest/meta-data",
+        "https://127.0.0.1.nip.io/",
+        "https://[::1]/",
+        # In an internal range, but a range lets connections through, it
+        # does not approve pages: a raw address must be listed on its own.
+        "https://10.30.5.7/",
+    ],
+)
+def test_a_page_not_on_the_list_is_refused(url):
+    assert portal_url_error(url, _POLICY) == NOT_APPROVED_PORTAL_URL_MESSAGE
 
 
 @pytest.mark.parametrize(
@@ -71,104 +93,43 @@ def test_accepts_a_public_https_page(url):
         ("http://portal.azure.com", NON_HTTPS_PORTAL_URL_MESSAGE),
         ("javascript:alert(1)", NON_HTTPS_PORTAL_URL_MESSAGE),
         ("file:///etc/passwd", NON_HTTPS_PORTAL_URL_MESSAGE),
-        ("https://user:pass@example.com", CREDENTIALS_PORTAL_URL_MESSAGE),
-        ("https://@example.com", CREDENTIALS_PORTAL_URL_MESSAGE),
+        ("https://user:pass@portal.azure.com", CREDENTIALS_PORTAL_URL_MESSAGE),
+        ("https://@portal.azure.com", CREDENTIALS_PORTAL_URL_MESSAGE),
+        # A browser reads "\" as "/", so these name evil.example, not azure.com.
+        ("https://evil.example\\.azure.com", UNPARSEABLE_PORTAL_URL_MESSAGE),
+        ("https://portal.azure.com\\@evil.example", UNPARSEABLE_PORTAL_URL_MESSAGE),
+        ("https://exa\tmple.azure.com", UNPARSEABLE_PORTAL_URL_MESSAGE),
+        ("https://portal.azure.com:99999/", UNPARSEABLE_PORTAL_URL_MESSAGE),
+        ("https://[::1", UNPARSEABLE_PORTAL_URL_MESSAGE),
     ],
 )
-def test_refuses_a_non_https_or_credentialed_url(url, message):
-    assert portal_url_error(url) == message
-
-
-@pytest.mark.parametrize(
-    "url",
-    [
-        "https://localhost",
-        "https://LOCALHOST./",
-        "https://app.localhost",
-        "https://metadata.google.internal/computeMetadata/v1/",
-        "https://instance-data",
-        "https://0.0.0.0",
-        "https://10.1.2.3",
-        "https://100.64.0.1",
-        "https://127.0.0.1:8080",
-        "https://169.254.169.254/latest/meta-data",
-        "https://172.20.0.1",
-        "https://192.0.0.8",
-        "https://192.168.1.1",
-        "https://198.18.0.1",
-        # Shorthand forms a browser reads as 127.0.0.1 or 169.254.169.254.
-        "https://127.1",
-        "https://0x7f.1",
-        "https://0x7f000001",
-        "https://2130706433",
-        "https://0177.0.0.1",
-        "https://169.254.43518",
-        "https://0x",  # 0.0.0.0
-        # IPv6, and IPv6 forms that carry a blocked IPv4 address.
-        "https://[::]",
-        "https://[::1]",
-        "https://[::127.0.0.1]",
-        "https://[::ffff:127.0.0.1]",
-        "https://[::ffff:a9fe:a9fe]",
-        "https://[64:ff9b::a9fe:a9fe]",
-        "https://[64:ff9b:1::1]",
-        "https://[2002:7f00:1::]",
-        "https://[fd00::1]",
-        "https://[fe80::1]",
-    ],
-)
-def test_refuses_a_local_private_or_metadata_host(url):
-    assert portal_url_error(url) == BLOCKED_HOST_PORTAL_URL_MESSAGE
-
-
-@pytest.mark.parametrize(
-    "url",
-    [
-        "not a url",
-        "https://example.com\\@127.0.0.1",
-        "https://exa\tmple.com",
-        "https://%31%32%37.0.0.1",
-        "https://１２７.０.０.１",
-        "https://münchen.de",
-        "https://256.0.0.1",
-        "https://1.2.3.4.5",
-        "https://08.0.0.1",
-        "https://0x0x7f.1",
-        "https://example.com:99999",
-        "https://[::1",
-    ],
-)
-def test_refuses_what_a_browser_would_rewrite_or_reject(url):
-    assert portal_url_error(url) == UNPARSEABLE_PORTAL_URL_MESSAGE
+def test_a_url_that_is_not_plain_https_is_refused_with_a_message_saying_why(url, message):
+    assert portal_url_error(url, _POLICY) == message
 
 
 def _task_count(db_session) -> int:
     return db_session.query(AgentTask).count()
 
 
-def test_login_task_with_a_blocked_url_is_refused_and_not_stored(db_session, engineer_client):
+def test_login_task_for_an_unapproved_page_is_refused_and_not_stored(db_session, engineer_client):
     before = _task_count(db_session)
 
-    response = engineer_client.post(
-        "/api/agent/tasks", json={"prompt": "https://169.254.169.254/", "kind": "login"}
-    )
+    response = engineer_client.post("/api/agent/tasks", json={"prompt": "https://169.254.169.254/", "kind": "login"})
 
     assert response.status_code == 400
-    assert response.json()["detail"] == BLOCKED_HOST_PORTAL_URL_MESSAGE
+    assert response.json()["detail"] == NOT_APPROVED_PORTAL_URL_MESSAGE
     assert _task_count(db_session) == before
 
 
-def test_login_task_with_a_public_https_url_is_queued(db_session, engineer_client):
-    response = engineer_client.post(
-        "/api/agent/tasks", json={"prompt": "https://portal.azure.com/", "kind": "login"}
-    )
+def test_login_task_for_an_approved_page_is_queued(engineer_client):
+    response = engineer_client.post("/api/agent/tasks", json={"prompt": "https://portal.azure.com/", "kind": "login"})
 
     assert response.status_code == 200
     assert response.json()["prompt"] == "https://portal.azure.com/"
     assert response.json()["status"] == "queued"
 
 
-def test_run_task_with_a_blocked_portal_url_is_refused_and_not_stored(db_session, engineer_client):
+def test_run_task_with_a_plain_http_portal_url_is_refused_and_not_stored(db_session, engineer_client):
     before = _task_count(db_session)
 
     response = engineer_client.post(
@@ -203,9 +164,7 @@ def test_reset_task_is_queued_without_a_url(engineer_client):
 def test_unknown_task_kind_is_refused_and_not_stored(db_session, engineer_client):
     before = _task_count(db_session)
 
-    response = engineer_client.post(
-        "/api/agent/tasks", json={"prompt": "https://127.0.0.1/", "kind": "Login"}
-    )
+    response = engineer_client.post("/api/agent/tasks", json={"prompt": "https://127.0.0.1/", "kind": "Login"})
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Kind must be one of: login, reset, run"

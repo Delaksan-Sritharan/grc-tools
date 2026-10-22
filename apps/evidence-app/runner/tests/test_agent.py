@@ -179,3 +179,71 @@ def test_first_http_url_tolerates_none():
 )
 def test_is_azure_portal_only_matches_the_azure_portal(url, expected):
     assert agent._is_azure_portal(url) is expected
+
+
+# --- Network guard ------------------------------------------------------
+#
+# The browser must never start without the URL policy and the egress proxy
+# in place, and must be built so every connection goes through the proxy.
+# BrowserProfile/BrowserSession are swapped for recorders here; the real
+# browser path is exercised by hand against a live Chrome.
+
+
+class _RecordingProfile:
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        self.allowed_domains = kwargs.get("allowed_domains")
+
+
+class _RecordingSession:
+    def __init__(self, browser_profile):
+        self.browser_profile = browser_profile
+
+
+@pytest.fixture()
+def guard_state(monkeypatch, tmp_path):
+    from wso2_runner.url_policy import RunnerUrlPolicy
+
+    monkeypatch.setattr(agent, "_url_policy", None)
+    monkeypatch.setattr(agent, "_egress_proxy", None)
+    monkeypatch.setattr(agent, "_browser", None)
+    monkeypatch.setattr(agent, "_PROFILE_DIR", tmp_path)
+    monkeypatch.setattr(agent, "BrowserProfile", _RecordingProfile)
+    monkeypatch.setattr(agent, "BrowserSession", _RecordingSession)
+    proxy = types.SimpleNamespace(port=41234, guard_check_seen=False)
+    policy = RunnerUrlPolicy.from_json(
+        {"allowed_domains": ["*.azure.com"], "internal_hosts": ["jira.internal"], "min_runner_version": None}
+    )
+    return policy, proxy
+
+
+def test_get_browser_refuses_to_start_without_the_guard(guard_state):
+    with pytest.raises(RuntimeError, match="network guard"):
+        agent._get_browser()
+
+
+def test_get_browser_routes_every_connection_through_the_proxy(guard_state):
+    policy, proxy = guard_state
+    agent.configure_network_guard(policy, proxy)
+
+    browser = agent._get_browser()
+
+    kwargs = browser.browser_profile.kwargs
+    assert kwargs["proxy"] == {"server": "http://127.0.0.1:41234", "bypass": "<-loopback>"}
+    assert "--disable-quic" in kwargs["args"]
+    assert "--force-webrtc-ip-handling-policy=disable_non_proxied_udp" in kwargs["args"]
+    assert kwargs["allowed_domains"] == ["*.azure.com", "jira.internal"]
+
+
+def test_update_url_policy_replaces_the_open_browsers_allowlist(guard_state):
+    from wso2_runner.url_policy import RunnerUrlPolicy
+
+    policy, proxy = guard_state
+    agent.configure_network_guard(policy, proxy)
+    browser = agent._get_browser()
+
+    agent.update_url_policy(
+        RunnerUrlPolicy.from_json({"allowed_domains": ["*.github.com"], "internal_hosts": [], "min_runner_version": None})
+    )
+
+    assert browser.browser_profile.allowed_domains == ["*.github.com"]

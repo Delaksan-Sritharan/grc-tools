@@ -111,7 +111,46 @@ wso2_runner/
   env_file.py        Reads and updates ~/.wso2-runner/.env in place
   browser_install.py Installs Playwright's bundled Chromium on the "chromium" channel
   capture_check.py   `doctor`'s screen-capture sanity check
+  url_policy.py      The URL policy from the backend, and the fixed address floor
+  egress_proxy.py    Local proxy every browser connection goes through
 ```
+
+## Where the browser may go
+
+The Runner's browser is limited in two ways, both enforced on your machine:
+
+- **Approved portals.** The browser only opens pages on the domains the
+  backend's URL policy approves (`GET /api/agent/policy`). Admins manage that
+  list in the backend's settings; it is fetched when the Runner starts and
+  again before every task. If it can't be fetched, nothing runs: at startup
+  the Runner exits and asks you to start it again, and for a task, the task
+  fails and asks you to retry it. There is no cached or built-in copy.
+- **No local or private addresses.** Every connection the browser makes —
+  pages, redirects, scripts, images — goes through a small proxy the Runner
+  starts on `127.0.0.1`. The proxy resolves each name itself and refuses the
+  connection if any address is loopback, link-local, cloud metadata
+  (including AWS's IPv6 metadata address), multicast or reserved — always,
+  whatever the policy says — or a private address the policy doesn't allow.
+  A private address is allowed
+  through one of the policy's internal host names, or when it lies inside one
+  of its internal ranges. The proxy connects only to an address it checked,
+  so a name that changes its answer can't slip through. Plain-http requests
+  are refused.
+
+Before its first task, the browser fetches a test address only the proxy
+can see. If that request doesn't arrive — for example because a policy on
+the machine overrides the browser's proxy settings — the Runner refuses to
+run anything. Blocked connections are printed in the terminal as
+`[guard] Blocked …`.
+
+Internal portals are added by an admin to the backend's
+`AGENT_INTERNAL_HOSTS` (host names, addresses or ranges), not configured on
+your machine. A range lets connections reach the addresses inside it, but a
+page opened by a raw address — `https://10.20.5.7/` — needs that address
+listed on its own, because the browser can't match pages against a range.
+
+This needs a backend that serves `GET /api/agent/policy`; against an older
+backend the Runner exits at startup and says so.
 
 ## LLM providers
 

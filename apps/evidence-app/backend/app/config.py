@@ -1,6 +1,8 @@
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.agent_policy import build_policy
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -59,6 +61,21 @@ class Settings(BaseSettings):
     # today. Neon, local development and the test suite all leave this unset.
     DB_SCHEMA: str | None = None
 
+    # Where an Agent Task's browser may go, and which Runners may take tasks --
+    # see app/agent_policy.py, which also checks every value at startup.
+    # Comma-separated. AGENT_ALLOWED_DOMAINS entries are example.com or
+    # *.example.com; AGENT_INTERNAL_HOSTS entries are host names, addresses or
+    # ranges (CIDR) on the internal network; AGENT_MIN_RUNNER_VERSION
+    # (e.g. 1.1.0) stops older Runners being handed tasks, and is left empty
+    # until that version has been released.
+    #
+    # AGENT_ALLOWED_DOMAINS is required, with no default: which portals are
+    # approved is a decision for each environment, not something the code
+    # should assume. Unset or blank, the service refuses to start.
+    AGENT_ALLOWED_DOMAINS: str
+    AGENT_INTERNAL_HOSTS: str = ""
+    AGENT_MIN_RUNNER_VERSION: str = ""
+
     @model_validator(mode="after")
     def _client_ids_must_be_set_and_distinct(self):
         """Refuse to start unless the two client IDs are present and differ.
@@ -95,6 +112,13 @@ class Settings(BaseSettings):
                 "them to the same value removes the audience check that stops a "
                 "Runner token being granted admin."
             )
+        return self
+
+    @model_validator(mode="after")
+    def _agent_policy_must_parse(self):
+        """Refuse to start on a malformed Agent URL policy, rather than let a
+        typo approve too much or silently refuse every portal."""
+        build_policy(self.AGENT_ALLOWED_DOMAINS, self.AGENT_INTERNAL_HOSTS, self.AGENT_MIN_RUNNER_VERSION)
         return self
 
 

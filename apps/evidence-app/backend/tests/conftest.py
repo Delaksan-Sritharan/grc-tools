@@ -71,6 +71,9 @@ os.environ.setdefault("ASGARDEO_WEBAPP_CLIENT_ID", "test-webapp-client-id")
 os.environ.setdefault("ASGARDEO_RUNNER_CLIENT_ID", "test-runner-client-id")
 os.environ.setdefault("ASGARDEO_ADMIN_ROLE", "test-admin-role")
 os.environ.setdefault("ASGARDEO_ENGINEER_ROLE", "test-engineer-role")
+# Required too, with no default. A small test list; tests that need other
+# portals set their own.
+os.environ.setdefault("AGENT_ALLOWED_DOMAINS", "*.azure.com,*.microsoftonline.com,*.github.com")
 
 import io
 

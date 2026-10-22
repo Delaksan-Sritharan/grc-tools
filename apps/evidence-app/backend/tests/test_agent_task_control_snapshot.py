@@ -104,7 +104,7 @@ def test_login_task_stores_no_snapshot(db_session, engineer_client):
     shape as a Control-less run, not be mistaken for a deleted one."""
     response = engineer_client.post(
         "/api/agent/tasks",
-        json={"prompt": "https://portal.example.com/login", "kind": "login"},
+        json={"prompt": "https://portal.azure.com/", "kind": "login"},
     )
 
     assert response.status_code == 200
