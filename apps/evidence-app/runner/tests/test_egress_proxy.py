@@ -111,6 +111,37 @@ def test_a_private_address_is_refused_for_a_host_that_is_not_an_internal_portal(
     assert _run(scenario()).startswith("HTTP/1.1 403")
 
 
+def test_the_ec2_ipv6_metadata_address_is_refused_even_for_an_internal_name_or_range():
+    async def scenario():
+        resolver = _fake_resolver(
+            {"metadata.internal": ["fd00:ec2::254"], "fd00:ec2::254": ["fd00:ec2::254"]}, []
+        )
+        attempts = []
+
+        async def record(address, port):
+            attempts.append(address)
+            raise ConnectionRefusedError()
+
+        policy = RunnerUrlPolicy.from_json(
+            {"allowed_domains": ["*.azure.com"], "internal_hosts": ["metadata.internal", "fd00::/8"], "min_runner_version": None}
+        )
+        proxy = EgressProxy(policy, resolver, record)
+        await proxy.start()
+        try:
+            statuses = []
+            for target in ("metadata.internal:443", "[fd00:ec2::254]:80"):
+                status, _r, w = await _connect(proxy.port, target)
+                w.close()
+                statuses.append(status)
+            return statuses, attempts
+        finally:
+            await proxy.close()
+
+    statuses, attempts = _run(scenario())
+    assert [status.split()[1] for status in statuses] == ["403", "403"]
+    assert attempts == []
+
+
 def test_a_tunnel_opens_to_the_checked_address_and_carries_bytes_both_ways():
     """`rebind.test` exists in no real DNS: the tunnel can only work if the
     proxy connects to the address its resolver returned, never looking the

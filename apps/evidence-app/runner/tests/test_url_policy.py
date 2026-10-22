@@ -22,7 +22,8 @@ library reads that as "allow every page". And the fixed address floor: which
 resolved addresses a connection may reach, including the IPv6 forms that
 carry an IPv4 address, and the exceptions for private addresses, through an
 internal host name or inside an internal range. No policy entry can open
-loopback, link-local or metadata addresses.
+loopback, link-local or metadata addresses -- including AWS's IPv6 metadata
+address, which sits inside the unique-local range.
 """
 import pytest
 
@@ -94,6 +95,10 @@ def test_a_response_that_is_not_a_policy_is_refused():
         ("64:ff9b::a9fe:a9fe", "blocked"),
         ("2002:7f00:1::", "blocked"),
         ("64:ff9b:1::1", "blocked"),
+        ("fd00:ec2::254", "blocked"),
+        ("FD00:0EC2:0:0:0:0:0:0254", "blocked"),
+        ("fd00:ec2::254%en0", "blocked"),
+        ("fd00:ec2::253", "private"),
         ("10.1.2.3", "private"),
         ("172.20.0.1", "private"),
         ("192.168.1.1", "private"),
@@ -143,6 +148,33 @@ def test_no_internal_entry_opens_loopback_link_local_or_metadata():
     assert policy.connection_refusal("jira.internal", "127.0.0.1") is not None
     assert policy.connection_refusal("anything.example", "127.0.0.1") is not None
     assert policy.connection_refusal("anything.example", "169.254.169.254") is not None
+
+
+@pytest.mark.parametrize(
+    ("entry", "host"),
+    [
+        ("metadata.internal", "metadata.internal"),
+        ("fd00:ec2::254", "fd00:ec2::254"),
+        ("fd00:ec2::/32", "anything.example"),
+        ("fd00::/8", "anything.example"),
+        ("fc00::/7", "anything.example"),
+        ("::/0", "anything.example"),
+    ],
+)
+def test_no_internal_entry_opens_the_ec2_ipv6_metadata_address(entry, host):
+    policy = _policy(internal_hosts=[entry])
+
+    for address in ("fd00:ec2::254", "FD00:0EC2:0:0:0:0:0:0254", "fd00:ec2::254%en0"):
+        reason = policy.connection_refusal(host, address)
+        assert reason is not None and "metadata" in reason
+
+
+def test_an_internal_range_still_opens_its_other_addresses():
+    """The refusals above come from the floor, not from ranges failing to
+    match: the same range lets the metadata address's neighbour through."""
+    policy = _policy(internal_hosts=["fd00:ec2::/32"])
+
+    assert policy.connection_refusal("anything.example", "fd00:ec2::253") is None
 
 
 # --- Versions ------------------------------------------------------------

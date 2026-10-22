@@ -25,8 +25,9 @@ Two layers, enforced on this machine:
 - **A fixed floor on network addresses**, enforced for every connection the
   browser makes (pages, redirects, scripts, images) by the local egress proxy
   in `egress_proxy.py`, on the address a name actually resolves to. Loopback,
-  link-local (which holds the cloud metadata address), multicast and reserved
-  addresses are never reachable, whatever the policy says. A private address
+  link-local, cloud metadata (169.254.169.254, and AWS's IPv6 fd00:ec2::254),
+  multicast and reserved addresses are never reachable, whatever the policy
+  says. A private address
   is reachable only through an internal host name, or when it lies inside an
   internal range. A range is not a page approval: the browser can't match
   pages against a range, so a page opened by a raw address needs that address
@@ -56,6 +57,7 @@ _ALWAYS_BLOCKED = tuple(
         "fe80::/10",  # link-local
         "fec0::/10",  # site-local (deprecated)
         "ff00::/8",  # multicast
+        "fd00:ec2::254/128",  # AWS EC2 instance metadata over IPv6, inside the unique-local range
     )
 )
 _PRIVATE = tuple(

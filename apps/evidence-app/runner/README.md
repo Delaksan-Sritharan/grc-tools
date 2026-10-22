@@ -128,9 +128,10 @@ The Runner's browser is limited in two ways, both enforced on your machine:
 - **No local or private addresses.** Every connection the browser makes —
   pages, redirects, scripts, images — goes through a small proxy the Runner
   starts on `127.0.0.1`. The proxy resolves each name itself and refuses the
-  connection if any address is loopback, link-local (including cloud
-  metadata), multicast or reserved — always, whatever the policy says — or a
-  private address the policy doesn't allow. A private address is allowed
+  connection if any address is loopback, link-local, cloud metadata
+  (including AWS's IPv6 metadata address), multicast or reserved — always,
+  whatever the policy says — or a private address the policy doesn't allow.
+  A private address is allowed
   through one of the policy's internal host names, or when it lies inside one
   of its internal ranges. The proxy connects only to an address it checked,
   so a name that changes its answer can't slip through. Plain-http requests
