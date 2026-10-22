@@ -243,49 +243,17 @@ func (s *escalationService) Comment(ctx context.Context, riskID, escalationID in
 	return updated, nil
 }
 
-// authorizeComment decides who may comment, which depends on the risk's level:
-//
-//   - HIGH: the risk's own management_approver_id. Senior management owns the
-//     judgement call on a high risk that has already slipped its deadline.
-//   - MEDIUM / LOW: the assigner's or the action owner's line manager, as
-//     frozen on the escalation row. These don't warrant management attention,
-//     but somebody above the work still has to look.
-//
-// A compliance admin bypasses both, mirroring the identity gates on the
-// approval transitions — otherwise an escalation whose named commenter has left
-// would strand the risk permanently.
-func (s *escalationService) authorizeComment(ctx context.Context, detail *model.RiskDetail, esc *model.Escalation, callerUUID string, canOverride bool) error {
+// authorizeComment decides who may comment: only a compliance admin. The
+// Management Approver and the assigner's/action owner's leads no longer answer
+// escalations — the escalation's lead uuids are still recorded, but they grant
+// no comment right.
+func (s *escalationService) authorizeComment(_ context.Context, _ *model.RiskDetail, _ *model.Escalation, _ string, canOverride bool) error {
 	if canOverride {
 		return nil
 	}
-	if isHighRisk(detail) {
-		caller, err := s.users.GetByUUID(ctx, callerUUID)
-		if err != nil {
-			return err
-		}
-		if caller == nil || caller.ID != detail.ManagementApproverID {
-			return &apierror.Error{
-				StatusCode: http.StatusForbidden,
-				Body:       "only this risk's Management Approver may comment on a high-risk escalation",
-			}
-		}
-		return nil
-	}
-
-	// Matched on uuid, not user id: a line manager need not be a platform user
-	// — resolveLeads records their Asgardeo id directly from the identity
-	// directory, not from any row in `user`. A nil lead (SCIM couldn't resolve
-	// the manager, or none is recorded) grants nobody the right via that arm —
-	// same soft-degradation resolveLeads already applies when HR entity itself
-	// has nothing to offer.
-	for _, lead := range []*string{esc.AssignerLeadUUID, esc.ActionOwnerLeadUUID} {
-		if lead != nil && *lead == callerUUID {
-			return nil
-		}
-	}
 	return &apierror.Error{
 		StatusCode: http.StatusForbidden,
-		Body:       "only the Risk Assigner's or Action Owner's lead may comment on this escalation",
+		Body:       "only a compliance admin may comment on an escalation",
 	}
 }
 
