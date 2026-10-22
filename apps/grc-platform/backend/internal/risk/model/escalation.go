@@ -28,16 +28,15 @@ type Escalation struct {
 	RiskID               int     `json:"risk_id"`
 	NewTreatmentStrategy *string `json:"new_treatment_strategy"`
 	ActionPlanID         *int    `json:"action_plan_id"`
-	// Decision holds the management/lead comment that returns an escalated
+	// Decision holds the compliance admin's comment that returns an escalated
 	// risk to its assigner. Nil until someone comments.
 	Decision *string `json:"decision"`
 	// AssignerLeadUUID/ActionOwnerLeadUUID are the Asgardeo ids of the line
 	// managers of the assigner and action owner, resolved from the HR entity
 	// once at escalation time (via SCIM email→uuid resolution — see
-	// escalationService.managerOf) and frozen here. They decide who may
-	// comment on a medium/low escalation and who can see the risk —
-	// authorizeComment (risk/service/escalation.go) reads these two Go fields
-	// directly, but they're json:"-" deliberately: handleListEscalations is
+	// escalationService.managerOf) and frozen here. They decide who can see
+	// the risk (they grant no right to comment — only a compliance admin may).
+	// They're json:"-" deliberately: handleListEscalations is
 	// gated only on the broad RISK_VIEW_RISKS privilege, so anyone who can
 	// view an escalated risk would otherwise receive two other people's
 	// identifiers that the webapp never reads. Nil when the manager has no

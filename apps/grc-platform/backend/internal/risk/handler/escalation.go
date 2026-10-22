@@ -107,15 +107,9 @@ func (d *Deps) handleListEscalations(w http.ResponseWriter, r *http.Request) {
 // answered: a comment alone returns the risk to its assigner. The assigner may
 // then add further action plans, but nothing forces them to.
 //
-// Deliberately not gated on any privilege — requireCallerUUID below still
-// requires a valid authenticated session, but nothing more. For a medium/low
-// risk the entitled commenter is a line manager, who holds no risk role by
-// virtue of managing someone, and per authorizeComment's own comment need not
-// even be a platform user — a privilege gate would reject exactly the people
-// this endpoint exists for before the real check ever ran. That real check is
-// the identity one in the service, which matches the caller against the
-// risk's Management Approver (HIGH) or the leads frozen on the escalation row
-// (MEDIUM/LOW), by email.
+// Only a compliance admin may comment. The route itself is not privilege-gated
+// (requireCallerUUID only needs a valid session); the service enforces it via
+// canOverrideAssigneeIn, scoped to the risk's source register.
 func (d *Deps) handleEscalationComment(w http.ResponseWriter, r *http.Request) {
 	by, ok := requireCallerUUID(w, r)
 	if !ok {
@@ -236,8 +230,9 @@ func (d *Deps) escalationRecipients(ctx context.Context, riskID int) (recipients
 		slog.Warn("escalation notification: failed to list plans", "riskId", riskID, "err", err)
 	}
 
-	// Effective level, not gross — the same level the registers table shows,
-	// and the same one authorizeComment uses to decide who may respond.
+	// Effective level, not gross — the same level the registers table shows.
+	// On a HIGH risk the Management Approver is told, but only a compliance
+	// admin may comment on the escalation.
 	level := ""
 	if detail.EffectiveScore != nil {
 		level = detail.EffectiveScore.RiskLevel
