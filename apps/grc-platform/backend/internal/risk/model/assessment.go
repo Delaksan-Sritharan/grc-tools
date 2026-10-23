@@ -47,4 +47,16 @@ type CreateAssessmentRequest struct {
 	Impact           int    `json:"impact"`
 	Progress         string `json:"progress"`
 	ReassessmentDate string `json:"reassessment_date"`
+
+	// Optional corrections to the risk made while reassessing it. Assigner
+	// only (the handler enforces it), saved in the same transaction as the
+	// assessment, and never sent back through approval. A nil field leaves the
+	// risk as it is.
+	OwnerID              *int    `json:"owner_id,omitempty"`
+	ManagementApproverID *int    `json:"management_approver_id,omitempty"`
+	ImplementationDate   *string `json:"implementation_date,omitempty"` // YYYY-MM-DD
+
+	// Current is the risk as loaded by the handler, so the repository can write
+	// a change-log entry per field that actually changed. Never read from JSON.
+	Current *RiskDetail `json:"-"`
 }

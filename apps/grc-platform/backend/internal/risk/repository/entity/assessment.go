@@ -18,6 +18,7 @@ package entity
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -109,6 +110,22 @@ func (r *assessmentRepository) Create(ctx context.Context, riskID int, req model
 		"assessedBy":       assessedBy,
 		"createdBy":        assessedBy,
 	}
+	// Risk corrections ride in the same entity call so they commit atomically
+	// with the assessment. No workflow status is sent: the risk stays APPROVED.
+	if req.OwnerID != nil {
+		body["ownerId"] = *req.OwnerID
+	}
+	if req.ManagementApproverID != nil {
+		body["managementApproverId"] = *req.ManagementApproverID
+	}
+	if req.ImplementationDate != nil {
+		body["implementationDate"] = *req.ImplementationDate
+	}
+	if req.Current != nil {
+		if changeLog := assessmentChangeLog(req.Current, req); len(changeLog) > 0 {
+			body["changeLog"] = changeLog
+		}
+	}
 	var resp entAssessment
 	if err := r.c.Post(ctx, fmt.Sprintf("/risks/%d/assessments", riskID), body, &resp); err != nil {
 		return nil, fmt.Errorf("create assessment: %w", err)
@@ -130,4 +147,26 @@ func (r *assessmentRepository) ListByRiskID(ctx context.Context, riskID int) ([]
 		out = append(out, a.toModel())
 	}
 	return out, nil
+}
+
+// assessmentChangeLog records a history entry for each of owner, management
+// approver and implementation date that req actually changes. Owner and
+// approver reuse assigneeChangeLog so their entries read exactly like those
+// of an assignee correction.
+func assessmentChangeLog(current *model.RiskDetail, req model.CreateAssessmentRequest) []map[string]any {
+	entries := assigneeChangeLog(current, model.UpdateAssigneesRequest{
+		OwnerID:              req.OwnerID,
+		ManagementApproverID: req.ManagementApproverID,
+	})
+	if req.ImplementationDate != nil && *req.ImplementationDate != derefOr(current.ImplementationDate) {
+		oldJSON, _ := json.Marshal(derefOr(current.ImplementationDate))
+		newJSON, _ := json.Marshal(*req.ImplementationDate)
+		entries = append(entries, map[string]any{
+			"action":       "UPDATE",
+			"fieldChanged": "implementation_date",
+			"oldValue":     string(oldJSON),
+			"newValue":     string(newJSON),
+		})
+	}
+	return entries
 }

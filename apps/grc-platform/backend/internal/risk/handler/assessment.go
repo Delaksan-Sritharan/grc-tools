@@ -38,15 +38,16 @@ func (d *Deps) handleAssessRisk(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// Reassessment has no per-risk identity gate, so this scoped check is
-	// the whole authorisation. It is also the one write action authorised by
-	// the grant axis alone — worth remembering when adding another.
-	//
-	// Checked against both team dimensions: RISK_ASSESS is held by
-	// grc-platform-risk-assigner (scope_basis SOURCE_REGISTER — they raised
-	// it) AND grc-platform-risk-owner (scope_basis ASSIGNMENT_TEAM — it was
-	// routed to them), so either alone must be enough. See
+	// Two layers. The scoped privilege check is the grant half: RISK_ASSESS is
+	// held by grc-platform-risk-assigner (scope_basis SOURCE_REGISTER — they
+	// raised it) AND grc-platform-risk-owner (scope_basis ASSIGNMENT_TEAM — it
+	// was routed to them), so either alone must be enough. See
 	// auth.HasPrivilegeInEither.
+	//
+	// The identity half then narrows it to the people this risk names: only its
+	// Risk Owner and its Risk Assigner (or a compliance admin) may assess it,
+	// and only the assigner may use the assessment to change the owner,
+	// approver or implementation date.
 	detail, err := d.Risk.GetByID(r.Context(), id)
 	if err != nil {
 		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
@@ -55,11 +56,27 @@ func (d *Deps) handleAssessRisk(w http.ResponseWriter, r *http.Request) {
 	if !auth.RequirePrivilegeInEither(r.Context(), w, privilege.AssessRisk, detail.SourceRegisterID, detail.AssignmentTeamID) {
 		return
 	}
+	isOwner, isAssigner, ok := d.callerRiskRoles(w, r, detail)
+	if !ok {
+		return
+	}
+	if !isOwner && !isAssigner {
+		response.WriteError(w, http.StatusForbidden, "only this risk's Risk Owner or Risk Assigner may assess it")
+		return
+	}
 
 	var req model.CreateAssessmentRequest
 	if err := response.DecodeJSON(w, r, &req); err != nil {
 		return
 	}
+	// A field that matches what the risk already holds is not a change: the
+	// form may send it back untouched, and an owner must not be refused for it.
+	dropUnchangedRiskFields(&req, detail)
+	if (req.OwnerID != nil || req.ManagementApproverID != nil || req.ImplementationDate != nil) && !isAssigner {
+		response.WriteError(w, http.StatusForbidden, "only this risk's Risk Assigner may change its owner, approver or implementation date")
+		return
+	}
+	req.Current = detail
 
 	result, err := d.Assessment.Create(r.Context(), id, req, by)
 	if err != nil {
@@ -99,4 +116,37 @@ func previousLevel(ctx context.Context, d *Deps, riskID, assessmentID int) strin
 		}
 	}
 	return ""
+}
+
+// callerRiskRoles reports whether the caller is the risk's owner and/or its
+// assigner. A compliance admin in the risk's source register counts as both,
+// the same override requireRiskActor applies. A caller with no platform user
+// row is neither. ok is false once an error response has been written.
+func (d *Deps) callerRiskRoles(w http.ResponseWriter, r *http.Request, detail *model.RiskDetail) (isOwner, isAssigner, ok bool) {
+	if canOverrideAssigneeIn(r.Context(), detail.SourceRegisterID) {
+		return true, true, true
+	}
+	callerID, err := d.callerUserID(r.Context())
+	if err != nil {
+		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
+		return false, false, false
+	}
+	if callerID == nil {
+		return false, false, true
+	}
+	return *callerID == detail.OwnerID, *callerID == detail.AssignerID, true
+}
+
+// dropUnchangedRiskFields nils any owner/approver/implementation-date field
+// that equals the risk's current value.
+func dropUnchangedRiskFields(req *model.CreateAssessmentRequest, current *model.RiskDetail) {
+	if req.OwnerID != nil && *req.OwnerID == current.OwnerID {
+		req.OwnerID = nil
+	}
+	if req.ManagementApproverID != nil && *req.ManagementApproverID == current.ManagementApproverID {
+		req.ManagementApproverID = nil
+	}
+	if req.ImplementationDate != nil && current.ImplementationDate != nil && *req.ImplementationDate == *current.ImplementationDate {
+		req.ImplementationDate = nil
+	}
 }

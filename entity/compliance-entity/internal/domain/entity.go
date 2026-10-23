@@ -1511,6 +1511,18 @@ type CreateRiskAssessmentRequest struct {
 	ReassessmentDate string `json:"reassessmentDate"` // YYYY-MM-DD
 	AssessedBy       string `json:"assessedBy"`
 	CreatedBy        string `json:"createdBy"`
+
+	// Optional changes to the risk itself, applied in the same transaction as
+	// the assessment so a reassessment and the owner/date correction that came
+	// with it either both land or neither does. A nil field leaves the risk
+	// as it is. No workflow transition happens — these never trigger
+	// re-approval.
+	OwnerID              *int    `json:"ownerId"`
+	ManagementApproverID *int    `json:"managementApproverId"`
+	ImplementationDate   *string `json:"implementationDate"` // YYYY-MM-DD
+	// ChangeLog is written verbatim to risk_change_log, in order, alongside
+	// the field updates above.
+	ChangeLog []ChangeLogEntry `json:"changeLog"`
 }
 
 // ListRiskAssessmentsResponse is returned by GET /risks/{riskId}/assessments.
