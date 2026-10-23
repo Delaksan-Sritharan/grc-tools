@@ -146,7 +146,7 @@ func dropUnchangedRiskFields(req *model.CreateAssessmentRequest, current *model.
 	if req.ManagementApproverID != nil && *req.ManagementApproverID == current.ManagementApproverID {
 		req.ManagementApproverID = nil
 	}
-	if req.ImplementationDate != nil && current.ImplementationDate != nil && *req.ImplementationDate == *current.ImplementationDate {
+	if req.ImplementationDate != nil && current.ImplementationDate != nil && model.SameCalendarDate(*req.ImplementationDate, *current.ImplementationDate) {
 		req.ImplementationDate = nil
 	}
 }

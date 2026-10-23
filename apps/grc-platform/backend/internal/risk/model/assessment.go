@@ -18,6 +18,20 @@ package model
 
 import "time"
 
+// SameCalendarDate reports whether a and b name the same YYYY-MM-DD day. The
+// risk's stored date reads back as RFC3339 ("2026-11-30T00:00:00Z") while a
+// form sends it back as "2026-11-30", so comparing the raw strings would treat
+// an untouched date as a change.
+func SameCalendarDate(a, b string) bool {
+	day := func(s string) string {
+		if len(s) > len("2006-01-02") {
+			return s[:len("2006-01-02")]
+		}
+		return s
+	}
+	return day(a) == day(b)
+}
+
 // RiskAssessment represents one residual risk reassessment entry,
 // mapping to the `risk_assessment` table.
 type RiskAssessment struct {

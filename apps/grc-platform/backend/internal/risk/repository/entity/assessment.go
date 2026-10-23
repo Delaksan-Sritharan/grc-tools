@@ -158,7 +158,8 @@ func assessmentChangeLog(current *model.RiskDetail, req model.CreateAssessmentRe
 		OwnerID:              req.OwnerID,
 		ManagementApproverID: req.ManagementApproverID,
 	})
-	if req.ImplementationDate != nil && *req.ImplementationDate != derefOr(current.ImplementationDate) {
+	if req.ImplementationDate != nil &&
+		(current.ImplementationDate == nil || !model.SameCalendarDate(*req.ImplementationDate, *current.ImplementationDate)) {
 		oldJSON, _ := json.Marshal(derefOr(current.ImplementationDate))
 		newJSON, _ := json.Marshal(*req.ImplementationDate)
 		entries = append(entries, map[string]any{
