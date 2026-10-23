@@ -73,53 +73,12 @@ func TestAuthorizeComment(t *testing.T) {
 		canOverride bool
 		wantErr     bool
 	}{
-		{
-			"HIGH: the management approver may comment",
-			high, &model.Escalation{}, stubUsers{caller, 42}, false, false,
-		},
-		{
-			"HIGH: anyone else may not",
-			high, &model.Escalation{}, stubUsers{caller, 7}, false, true,
-		},
-		{
-			"HIGH: a lead is not enough",
-			high, &model.Escalation{AssignerLeadUUID: strp(caller)}, stubUsers{caller, 7}, false, true,
-		},
-		{
-			"MEDIUM: the assigner's lead may comment",
-			medium, &model.Escalation{AssignerLeadUUID: strp(caller)}, stubUsers{caller, 7}, false, false,
-		},
-		{
-			"MEDIUM: the action owner's lead may comment",
-			medium, &model.Escalation{ActionOwnerLeadUUID: strp(caller)}, stubUsers{caller, 7}, false, false,
-		},
-		{
-			// uuid matching is exact, unlike the email matching it replaced —
-			// Asgardeo ids come back in one consistent case, so there is no
-			// folding to preserve. A near-miss (wrong case, stray space) is
-			// correctly a different identity, not the same one spelled
-			// differently.
-			"MEDIUM: uuid matching is exact, not fuzzy",
-			medium, &model.Escalation{AssignerLeadUUID: strp("885AEEB0-2086-4CA4-83C9-B2A62B299967")}, stubUsers{caller, 7}, false, true,
-		},
-		{
-			"MEDIUM: the management approver is not a lead",
-			medium, &model.Escalation{}, stubUsers{caller, 42}, false, true,
-		},
-		{
-			"MEDIUM: no leads recorded means nobody but an admin",
-			medium, &model.Escalation{}, stubUsers{caller, 7}, false, true,
-		},
-		// The escape hatch: without it, an escalation whose named commenter has
-		// left the company would strand the risk permanently.
-		{
-			"compliance admin overrides on HIGH",
-			high, &model.Escalation{}, stubUsers{caller, 7}, true, false,
-		},
-		{
-			"compliance admin overrides on MEDIUM",
-			medium, &model.Escalation{}, stubUsers{caller, 7}, true, false,
-		},
+		{"HIGH: the management approver may not", high, &model.Escalation{}, stubUsers{caller, 42}, false, true},
+		{"HIGH: anyone else may not", high, &model.Escalation{}, stubUsers{caller, 7}, false, true},
+		{"MEDIUM: the assigner's lead may not", medium, &model.Escalation{AssignerLeadUUID: strp(caller)}, stubUsers{caller, 7}, false, true},
+		{"MEDIUM: the action owner's lead may not", medium, &model.Escalation{ActionOwnerLeadUUID: strp(caller)}, stubUsers{caller, 7}, false, true},
+		{"compliance admin may on HIGH", high, &model.Escalation{}, stubUsers{caller, 7}, true, false},
+		{"compliance admin may on MEDIUM", medium, &model.Escalation{}, stubUsers{caller, 7}, true, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

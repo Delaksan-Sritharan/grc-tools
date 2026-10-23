@@ -3825,7 +3825,7 @@ paths:
       tags:
       - Risk Escalations
       summary: Answer an escalation with a comment
-      description: Replaces the old MANAGEMENT action plan as the way an escalation is answered — a comment alone returns the risk to its assigner (ESCALATED → APPROVED). Deliberately not privilege-gated beyond an authenticated session; the entitled commenter for a MEDIUM/LOW risk is a line manager frozen on the escalation row at escalation time, who holds no Risk Hub privilege. The real check is an identity match in the service against the risk's Management Approver (HIGH) or the frozen leads (MEDIUM/LOW), or a compliance-admin override.
+      description: Replaces the old MANAGEMENT action plan as the way an escalation is answered — a comment alone returns the risk to its assigner (ESCALATED → APPROVED). Restricted to compliance admins (RISK_COMPLIANCE_APPROVE in the risk's source register); anyone else receives 403.
       operationId: commentOnEscalation
       parameters:
       - $ref: '#/components/parameters/RiskId'
@@ -6525,7 +6525,7 @@ components:
         decision:
           type: string
           nullable: true
-          description: The management/lead comment that returned the risk to its assigner. Nil until someone comments.
+          description: The compliance admin's comment that returned the risk to its assigner. Nil until someone comments.
         status:
           type: string
           enum:
