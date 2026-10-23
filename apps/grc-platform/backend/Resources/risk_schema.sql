@@ -199,7 +199,7 @@ CREATE TABLE IF NOT EXISTS risk_action_plan (
 -- workflow_status is the single source of truth for risk state:
 --   DRAFT                              → not yet submitted (reserved)
 --   PENDING_RISK_OWNER_APPROVAL        → new risk submitted; awaiting initial Risk Owner approval
---   PENDING_MANAGEMENT_APPROVAL        → Accept+HIGH risk; awaiting Management approval (after Owner)
+--   PENDING_MANAGEMENT_APPROVAL        → HIGH risk; awaiting Management approval (after Owner)
 --   PENDING_COMPLIANCE_REVIEW          → awaiting Compliance team approval (after Owner/Management)
 --   APPROVED                           → Compliance approved; assigner executing action plan
 --   PENDING_OWNER_COMPLETION_APPROVAL  → assigner submitted completion; awaiting Risk Owner sign-off
@@ -229,7 +229,7 @@ CREATE TABLE IF NOT EXISTS risk (
   identified_by_name       VARCHAR(255)  NULL,
   assigner_id              INT           NOT NULL,
   owner_id                 INT           NOT NULL,
-  management_approver_id   INT           NOT NULL COMMENT 'Named by the Risk Assigner at creation, on every risk regardless of level/treatment; approves PENDING_MANAGEMENT_APPROVAL and is the target an ESCALATED risk conceptually escalates to (no notification wired yet)',
+  management_approver_id   INT           NULL     COMMENT 'Required when the risk is HIGH (whatever the treatment), NULL otherwise. Named by the Risk Assigner; approves PENDING_MANAGEMENT_APPROVAL and PENDING_MANAGEMENT_CLOSURE_APPROVAL, which every HIGH risk passes through',
   impact_description       TEXT          NULL,
   gross_score_id           INT           NULL,
   treatment_strategy       ENUM('REMEDIATE','ACCEPT','TRANSFER','AVOID') NULL,
@@ -250,7 +250,7 @@ CREATE TABLE IF NOT EXISTS risk (
                                'PENDING_COMPLIANCE_REVIEW',
                                'APPROVED',
                                'PENDING_OWNER_COMPLETION_APPROVAL',
-                               -- ACCEPT + HIGH risks need the same management
+                               -- HIGH risks need the same management
                                -- sign-off on the way out as on the way in, so
                                -- closure mirrors the creation path.
                                'PENDING_MANAGEMENT_CLOSURE_APPROVAL',
