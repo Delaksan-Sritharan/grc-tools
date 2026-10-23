@@ -490,14 +490,16 @@ type EscalateRiskRequest struct {
 // NeedsManagementSignOff reports whether the risk routes through its Management
 // Approver, at both management stages (entering remediation and closure).
 //
-// Every HIGH risk does, whatever its treatment strategy. The gross score, not
-// the residual, is deliberate: gross is immutable after creation, so a
-// reassessment that lowers the residual level cannot quietly route a risk
-// around the approver who was named for it.
+// Every HIGH risk does, whatever its treatment strategy. "HIGH" means HIGH at
+// creation (gross) or HIGH now (the effective score): gross alone would let a
+// reassessment that lowers the level route a risk around the approver named
+// for it, and the effective score alone would miss a risk reassessed up to
+// HIGH, which the reassessment requires an approver for.
 //
 // A HIGH risk with no approver on record cannot happen (creation and
 // reassessment both require one), but if it ever did, routing it to a
 // stage nobody can act on would strand it, so it skips management instead.
 func (d *RiskDetail) NeedsManagementSignOff() bool {
-	return d.GrossScore != nil && d.GrossScore.RiskLevel == "HIGH" && d.ManagementApproverID > 0
+	isHigh := func(s *RiskScore) bool { return s != nil && s.RiskLevel == "HIGH" }
+	return (isHigh(d.GrossScore) || isHigh(d.EffectiveScore)) && d.ManagementApproverID > 0
 }
