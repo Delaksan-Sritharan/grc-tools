@@ -63,9 +63,10 @@ func scanAssessment(s interface{ Scan(...any) error }) (*domain.RiskAssessment, 
 // a score_id keeps the score matrix an implementation detail of this service.
 func (r *riskAssessmentRepo) CreateRiskAssessment(ctx context.Context, riskID int, req domain.CreateRiskAssessmentRequest) (*domain.RiskAssessment, error) {
 	var scoreID int
+	var level string
 	err := r.db.QueryRowContext(ctx,
-		"SELECT id FROM risk_score WHERE likelihood = ? AND impact = ?",
-		req.Likelihood, req.Impact).Scan(&scoreID)
+		"SELECT id, risk_level FROM risk_score WHERE likelihood = ? AND impact = ?",
+		req.Likelihood, req.Impact).Scan(&scoreID, &level)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, &apierror.ValidationError{
 			Msg: fmt.Sprintf("no risk score for likelihood %d and impact %d", req.Likelihood, req.Impact),
@@ -73,6 +74,24 @@ func (r *riskAssessmentRepo) CreateRiskAssessment(ctx context.Context, riskID in
 	}
 	if err != nil {
 		return nil, fmt.Errorf("risk_assessment.Create resolve score: %w", err)
+	}
+
+	// A reassessment that makes the risk HIGH needs a Management Approver: the
+	// one it already has, or the one this request names. A risk created
+	// LOW/MEDIUM has none, so it must be supplied here.
+	if level == "HIGH" && (req.ManagementApproverID == nil || *req.ManagementApproverID <= 0) {
+		var current sql.NullInt64
+		err = r.db.QueryRowContext(ctx,
+			"SELECT management_approver_id FROM risk WHERE id = ?", riskID).Scan(&current)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("risk_assessment.Create read approver: %w", err)
+		}
+		// A missing risk falls through to the insert's not-found handling.
+		if err == nil && !current.Valid {
+			return nil, &apierror.ValidationError{
+				Msg: "A Management Approver is required for a HIGH risk. Ask the Risk Assigner to set it.",
+			}
+		}
 	}
 
 	// One transaction: the assessment, the optional risk-field changes and

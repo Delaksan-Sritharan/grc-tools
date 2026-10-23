@@ -397,15 +397,27 @@ func (r *riskRepo) CreateRisk(ctx context.Context, req domain.CreateRiskRequest)
 
 	// ── 3. Resolve the gross score from likelihood/impact ─────────────────────
 	var grossScoreID int
+	var grossLevel string
 	if err = tx.QueryRowContext(ctx,
-		"SELECT id FROM risk_score WHERE likelihood = ? AND impact = ?",
-		req.Likelihood, req.Impact).Scan(&grossScoreID); err != nil {
+		"SELECT id, risk_level FROM risk_score WHERE likelihood = ? AND impact = ?",
+		req.Likelihood, req.Impact).Scan(&grossScoreID, &grossLevel); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, &apierror.ValidationError{
 				Msg: fmt.Sprintf("no risk score for likelihood %d and impact %d", req.Likelihood, req.Impact),
 			}
 		}
 		return nil, fmt.Errorf("risk.Create resolve gross score: %w", err)
+	}
+
+	// A HIGH risk must name its Management Approver, whatever the treatment;
+	// every other level may leave it empty. Checked here, next to the level
+	// lookup, so there is one place that knows both. management_approver_id is
+	// NULL in the table for a risk created without one.
+	var managementApprover any
+	if req.ManagementApproverID > 0 {
+		managementApprover = req.ManagementApproverID
+	} else if grossLevel == "HIGH" {
+		return nil, &apierror.ValidationError{Msg: "managementApproverId is required for a HIGH risk"}
 	}
 
 	// ── 4. Insert the risk ────────────────────────────────────────────────────
@@ -423,7 +435,7 @@ func (r *riskRepo) CreateRisk(ctx context.Context, req domain.CreateRiskRequest)
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING_RISK_OWNER_APPROVAL', ?, ?)`,
 		riskCode, req.RiskYear, req.RiskQuarter, req.RiskTitle, req.RiskDescription,
 		req.SourceRegisterID, req.AssignmentTeamID, req.AssignerID, req.OwnerID,
-		req.ManagementApproverID,
+		managementApprover,
 		req.TreatmentStrategy, grossScoreID, req.Progress,
 		req.ImplementationDate, req.ReassessmentDate,
 		req.ImpactDescription, req.RiskIdentifiedDate,
@@ -835,7 +847,7 @@ func scanRiskWithExtras(s scanner, extras ...any) (*domain.Risk, error) {
 	var rejectionComment, rejectionStage, ownerFirstApprovedAt sql.NullString
 	var effLevel, effColour sql.NullString
 	var template, customerName, environments, platformNames sql.NullString
-	var grossScoreID, actionPlanID, complianceApprovalBy sql.NullInt64
+	var grossScoreID, actionPlanID, complianceApprovalBy, managementApproverID sql.NullInt64
 
 	dest := []any{
 		&r.ID, &r.RiskCode, &r.RiskYear, &r.RiskQuarter, &r.RiskTitle, &desc,
@@ -843,7 +855,7 @@ func scanRiskWithExtras(s scanner, extras ...any) (*domain.Risk, error) {
 		&r.AssignmentTeamID, &r.AssignmentTeamName,
 		&r.AssignerID, &r.AssignerUUID,
 		&r.OwnerID, &r.OwnerUUID,
-		&r.ManagementApproverID, &r.ManagementApproverUUID,
+		&managementApproverID, &r.ManagementApproverUUID,
 		&r.WorkflowStatus, &treatment,
 		&grossScoreID, &grossLevel,
 		&implDate, &reassDate,
@@ -875,6 +887,8 @@ func scanRiskWithExtras(s scanner, extras ...any) (*domain.Risk, error) {
 		}
 		return nil
 	}
+	// 0 means no Management Approver (the column is NULL): user ids start at 1.
+	r.ManagementApproverID = int(managementApproverID.Int64)
 	r.RiskDescription = nullStr(desc)
 	r.TreatmentStrategy = nullStr(treatment)
 	r.GrossRiskLevel = nullStr(grossLevel)

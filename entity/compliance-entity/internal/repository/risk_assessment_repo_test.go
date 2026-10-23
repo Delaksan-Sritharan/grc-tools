@@ -24,6 +24,7 @@ import (
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 
+	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/apierror"
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/domain"
 )
 
@@ -44,9 +45,11 @@ func assessmentReq() domain.CreateRiskAssessmentRequest {
 	}
 }
 
-func expectScoreLookup(mock sqlmock.Sqlmock) {
-	mock.ExpectQuery(re("SELECT id FROM risk_score WHERE likelihood = ? AND impact = ?")).
-		WithArgs(2, 2).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(5))
+func expectScoreLookup(mock sqlmock.Sqlmock) { expectScoreLookupLevel(mock, "MEDIUM") }
+
+func expectScoreLookupLevel(mock sqlmock.Sqlmock, level string) {
+	mock.ExpectQuery(re("SELECT id, risk_level FROM risk_score WHERE likelihood = ? AND impact = ?")).
+		WithArgs(2, 2).WillReturnRows(sqlmock.NewRows([]string{"id", "risk_level"}).AddRow(5, level))
 }
 
 func expectAssessmentReadBack(mock sqlmock.Sqlmock) {
@@ -122,6 +125,67 @@ func TestCreateRiskAssessment_RollsBackWhenRiskUpdateFails(t *testing.T) {
 
 	if _, err := repo.CreateRiskAssessment(context.Background(), 42, req); err == nil {
 		t.Fatal("expected an error")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestCreateRiskAssessment_HighWithoutApproverIsRejected: a risk created
+// LOW/MEDIUM has no approver, so reassessing it to HIGH must name one.
+func TestCreateRiskAssessment_HighWithoutApproverIsRejected(t *testing.T) {
+	repo, mock := newRiskAssessmentRepoMock(t)
+	expectScoreLookupLevel(mock, "HIGH")
+	mock.ExpectQuery(re("SELECT management_approver_id FROM risk WHERE id = ?")).
+		WithArgs(42).WillReturnRows(sqlmock.NewRows([]string{"management_approver_id"}).AddRow(nil))
+
+	_, err := repo.CreateRiskAssessment(context.Background(), 42, assessmentReq())
+	var ve *apierror.ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("want a ValidationError, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestCreateRiskAssessment_HighWithExistingApprover: nothing more is needed
+// when the risk already names an approver.
+func TestCreateRiskAssessment_HighWithExistingApprover(t *testing.T) {
+	repo, mock := newRiskAssessmentRepoMock(t)
+	expectScoreLookupLevel(mock, "HIGH")
+	mock.ExpectQuery(re("SELECT management_approver_id FROM risk WHERE id = ?")).
+		WithArgs(42).WillReturnRows(sqlmock.NewRows([]string{"management_approver_id"}).AddRow(8))
+	mock.ExpectBegin()
+	mock.ExpectExec(re("INSERT INTO risk_assessment")).WillReturnResult(sqlmock.NewResult(9, 1))
+	mock.ExpectCommit()
+	expectAssessmentReadBack(mock)
+
+	if _, err := repo.CreateRiskAssessment(context.Background(), 42, assessmentReq()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestCreateRiskAssessment_HighWithApproverInRequest: the request supplies the
+// approver, so the risk row need not be read first.
+func TestCreateRiskAssessment_HighWithApproverInRequest(t *testing.T) {
+	repo, mock := newRiskAssessmentRepoMock(t)
+	approver := 8
+	req := assessmentReq()
+	req.ManagementApproverID = &approver
+	expectScoreLookupLevel(mock, "HIGH")
+	mock.ExpectBegin()
+	mock.ExpectExec(re("INSERT INTO risk_assessment")).WillReturnResult(sqlmock.NewResult(9, 1))
+	mock.ExpectExec(re("UPDATE risk SET management_approver_id = ?, updated_by = ?, updated_at = NOW() WHERE id = ?")).
+		WithArgs(8, "u-1", 42).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	expectAssessmentReadBack(mock)
+
+	if _, err := repo.CreateRiskAssessment(context.Background(), 42, req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
