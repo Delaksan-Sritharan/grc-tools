@@ -3472,7 +3472,7 @@ paths:
       tags:
       - Risk Assessment
       summary: Record a residual risk assessment
-      description: Distinct from "Submit for Approval" — stores a new risk_assessment row (likelihood, impact, progress, reassessment_date).
+      description: Distinct from "Submit for Approval" — stores a new risk_assessment row (likelihood, impact, progress, reassessment_date). Only the risk's Risk Owner or Risk Assigner (or a compliance admin in its source register) may call it, on top of RISK_ASSESS. The optional owner_id, management_approver_id and implementation_date change the risk in the same transaction, never trigger re-approval, are written to the risk's history, and may be sent by the Risk Assigner (or compliance admin) only — 403 otherwise. A value equal to the risk's current one is ignored.
       operationId: assessRisk
       parameters:
       - $ref: '#/components/parameters/RiskId'
@@ -6440,6 +6440,16 @@ components:
         reassessment_date:
           type: string
           format: date
+        owner_id:
+          type: integer
+          description: Optional. New Risk Owner. Assigner only.
+        management_approver_id:
+          type: integer
+          description: Optional. New management approver. Assigner only.
+        implementation_date:
+          type: string
+          format: date
+          description: Optional. New implementation date. Assigner only.
     # --- Risk Hub: action plans / escalations ----------------------------------
     ActionPlan:
       type: object
