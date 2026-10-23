@@ -23,31 +23,30 @@ import (
 )
 
 // needsManagementSignOff decides both management stages, so getting it wrong
-// either strands non-ACCEPT/HIGH risks at an approval nobody expects, or lets
-// an ACCEPT+HIGH risk close without the sign-off it exists to require.
+// either strands non-HIGH risks at an approval nobody expects, or lets a HIGH
+// risk close without the sign-off it exists to require. Treatment strategy does
+// not matter.
 func TestNeedsManagementSignOff(t *testing.T) {
-	strPtr := func(s string) *string { return &s }
 	score := func(level string) *model.RiskScore { return &model.RiskScore{RiskLevel: level} }
 
 	cases := []struct {
-		name      string
-		treatment *string
-		gross     *model.RiskScore
-		want      bool
+		name     string
+		gross    *model.RiskScore
+		approver int
+		want     bool
 	}{
-		{"accept + high needs sign-off", strPtr("ACCEPT"), score("HIGH"), true},
-		{"accept + medium does not", strPtr("ACCEPT"), score("MEDIUM"), false},
-		{"accept + low does not", strPtr("ACCEPT"), score("LOW"), false},
-		{"mitigate + high does not", strPtr("MITIGATE"), score("HIGH"), false},
-		{"transfer + high does not", strPtr("TRANSFER"), score("HIGH"), false},
-		// Defensive: a risk with no treatment or no gross score must not be
-		// routed to management on a nil dereference or an empty-string match.
-		{"nil treatment does not", nil, score("HIGH"), false},
-		{"nil gross score does not", strPtr("ACCEPT"), nil, false},
+		{"high needs sign-off", score("HIGH"), 8, true},
+		{"medium does not", score("MEDIUM"), 8, false},
+		{"low does not", score("LOW"), 0, false},
+		// Defensive: no gross score must not be routed to management on a nil
+		// dereference, and a HIGH risk with no approver on record would strand
+		// at a stage nobody can act on, so it skips management instead.
+		{"nil gross score does not", nil, 8, false},
+		{"high with no approver does not", score("HIGH"), 0, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			detail := &model.RiskDetail{TreatmentStrategy: c.treatment, GrossScore: c.gross}
+			detail := &model.RiskDetail{GrossScore: c.gross, ManagementApproverID: c.approver}
 			if got := needsManagementSignOff(detail); got != c.want {
 				t.Errorf("needsManagementSignOff = %v, want %v", got, c.want)
 			}

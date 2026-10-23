@@ -99,14 +99,10 @@ func (r *riskRepository) Update(ctx context.Context, id int, req model.UpdateRis
 	}
 	noteRestricted("implementation_date", derefOr(current.ImplementationDate), req.ImplementationDate)
 	noteRestricted("email_subject", derefOr(current.EmailSubject), req.EmailSubject)
-	// needsManagementSignOff (risk/service/risk.go) reads treatment_strategy
-	// live, at both the entering-remediation and closure checkpoints — an
-	// ACCEPT+HIGH risk edited to something else mid-remediation would
-	// otherwise route straight past the Management closure stage it was
-	// created to require. Restricting it forces the edit back through
-	// PENDING_AMENDMENT, which re-evaluates needsManagementSignOff against
-	// the new value at the moment it changes rather than silently deferring
-	// the mismatch to closure.
+	// Management routing no longer depends on treatment_strategy (every HIGH
+	// risk goes through its Management Approver), but editing it mid-flight
+	// still goes back through PENDING_AMENDMENT as before — left restricted so
+	// that behaviour does not change alongside the routing rule.
 	noteRestricted("treatment_strategy", derefOr(current.TreatmentStrategy), req.TreatmentStrategy)
 
 	// Everything else is free to edit, but still belongs in the history — "who

@@ -98,7 +98,7 @@ func (s *riskService) UpdateAssignees(ctx context.Context, id int, req model.Upd
 
 // OwnerApprove handles three situations:
 //   - PENDING_RISK_OWNER_APPROVAL or PENDING_AMENDMENT (initial/amendment approval):
-//     Accept+HIGH → PENDING_MANAGEMENT_APPROVAL; otherwise → PENDING_COMPLIANCE_REVIEW
+//     HIGH → PENDING_MANAGEMENT_APPROVAL; otherwise → PENDING_COMPLIANCE_REVIEW
 //   - PENDING_OWNER_COMPLETION_APPROVAL (post-remediation): → PENDING_COMPLIANCE_CLOSURE
 func (s *riskService) OwnerApprove(ctx context.Context, id int, byUserEmail string) error {
 	detail, err := s.repo.GetByID(ctx, id)
@@ -120,7 +120,7 @@ func (s *riskService) OwnerApprove(ctx context.Context, id int, byUserEmail stri
 		return s.repo.TransitionStatus(ctx, id, detail.WorkflowStatus, next, byUserEmail)
 
 	case model.StatusPendingOwnerCompletion:
-		// Closure mirrors creation: an ACCEPT + HIGH risk that needed
+		// Closure mirrors creation: a HIGH risk that needed
 		// management sign-off to start remediation needs it again to finish.
 		next := model.StatusPendingComplianceClosure
 		if needsManagementSignOff(detail) {
@@ -134,16 +134,10 @@ func (s *riskService) OwnerApprove(ctx context.Context, id int, byUserEmail stri
 }
 
 // needsManagementSignOff reports whether a risk routes through its Management
-// Approver. The rule is the same entering remediation and leaving it, so both
-// call sites share it: an ACCEPT treatment on a HIGH gross-scored risk is the
-// one combination senior management must personally endorse.
-//
-// GrossScore, not the residual score, is deliberate — gross is immutable after
-// creation, so a reassessment that lowers the residual level cannot quietly
-// route a risk around the approver who was named for it.
+// Approver; the rule lives on the model so the handlers that mirror this
+// routing for notifications and history cannot drift from it.
 func needsManagementSignOff(detail *model.RiskDetail) bool {
-	return stringVal(detail.TreatmentStrategy) == "ACCEPT" &&
-		detail.GrossScore != nil && detail.GrossScore.RiskLevel == "HIGH"
+	return detail.NeedsManagementSignOff()
 }
 
 // ManagementApprove advances a risk past its Management Approver. It serves

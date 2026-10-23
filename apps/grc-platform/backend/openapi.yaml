@@ -3472,7 +3472,7 @@ paths:
       tags:
       - Risk Assessment
       summary: Record a residual risk assessment
-      description: Distinct from "Submit for Approval" — stores a new risk_assessment row (likelihood, impact, progress, reassessment_date). Only the risk's Risk Owner or Risk Assigner (or a compliance admin in its source register) may call it, on top of RISK_ASSESS. The optional owner_id, management_approver_id and implementation_date change the risk in the same transaction, never trigger re-approval, are written to the risk's history, and may be sent by the Risk Assigner (or compliance admin) only — 403 otherwise. A value equal to the risk's current one is ignored.
+      description: Distinct from "Submit for Approval" — stores a new risk_assessment row (likelihood, impact, progress, reassessment_date). Only the risk's Risk Owner or Risk Assigner (or a compliance admin in its source register) may call it, on top of RISK_ASSESS. The optional owner_id, management_approver_id and implementation_date change the risk in the same transaction, never trigger re-approval, are written to the risk's history, and may be sent by the Risk Assigner (or compliance admin) only — 403 otherwise. A value equal to the risk's current one is ignored. A reassessment that results in a HIGH level is rejected with 400 unless the risk already has a Management Approver or the request names one.
       operationId: assessRisk
       parameters:
       - $ref: '#/components/parameters/RiskId'
@@ -5851,7 +5851,6 @@ components:
       - reassessment_date
       - assignment_team_id
       - owner_id
-      - management_approver_id
       - action_owner_id
       - action_plan_description
       - action_steps
@@ -5923,7 +5922,7 @@ components:
           type: integer
         management_approver_id:
           type: integer
-          description: Required on every risk regardless of level or treatment strategy — names who approves PENDING_MANAGEMENT_APPROVAL/PENDING_MANAGEMENT_CLOSURE_APPROVAL (ACCEPT+HIGH risks only) and who an ESCALATED HIGH risk's escalation is answered by.
+          description: Required when the risk's gross level is HIGH, whatever its treatment strategy; optional (omit or 0) for LOW and MEDIUM. Names who approves PENDING_MANAGEMENT_APPROVAL/PENDING_MANAGEMENT_CLOSURE_APPROVAL, which every HIGH risk passes through.
         action_owner_id:
           type: integer
         action_plan_description:
@@ -6154,6 +6153,7 @@ components:
           type: integer
         management_approver_id:
           type: integer
+          description: The risk's Management Approver, or 0 when it has none (only LOW and MEDIUM risks may have none).
         impact_description:
           type: string
           nullable: true
@@ -6303,6 +6303,7 @@ components:
           type: integer
         management_approver_id:
           type: integer
+          description: The risk's Management Approver, or 0 when it has none (only LOW and MEDIUM risks may have none).
         assignment_team_id:
           type: integer
         action_owner_id:
