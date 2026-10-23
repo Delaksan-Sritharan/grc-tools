@@ -21,6 +21,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/apierror"
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/domain"
@@ -74,7 +75,16 @@ func (r *riskAssessmentRepo) CreateRiskAssessment(ctx context.Context, riskID in
 		return nil, fmt.Errorf("risk_assessment.Create resolve score: %w", err)
 	}
 
-	res, err := r.db.ExecContext(ctx,
+	// One transaction: the assessment, the optional risk-field changes and
+	// their change-log rows land together or not at all. Over HTTP the caller
+	// cannot retry half of a reassessment.
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("risk_assessment.Create begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	res, err := tx.ExecContext(ctx,
 		`INSERT INTO risk_assessment (risk_id, score_id, progress, reassessment_date, assessed_by, created_by)
 		 VALUES (?, ?, ?, ?, ?, ?)`,
 		riskID, scoreID, req.Progress,
@@ -86,6 +96,49 @@ func (r *riskAssessmentRepo) CreateRiskAssessment(ctx context.Context, riskID in
 		return nil, fmt.Errorf("risk_assessment.Create: %w", err)
 	}
 	id, _ := res.LastInsertId()
+
+	sets := []string{}
+	args := []any{}
+	if req.OwnerID != nil {
+		sets = append(sets, "owner_id = ?")
+		args = append(args, *req.OwnerID)
+	}
+	if req.ManagementApproverID != nil {
+		sets = append(sets, "management_approver_id = ?")
+		args = append(args, *req.ManagementApproverID)
+	}
+	if req.ImplementationDate != nil {
+		sets = append(sets, "implementation_date = ?")
+		args = append(args, *req.ImplementationDate)
+	}
+	if len(sets) > 0 {
+		sets = append(sets, "updated_by = ?", "updated_at = NOW()")
+		args = append(args, req.CreatedBy, riskID)
+		if _, err = tx.ExecContext(ctx,
+			"UPDATE risk SET "+strings.Join(sets, ", ")+" WHERE id = ?", args...); err != nil {
+			if isFKViolation(err) {
+				return nil, &apierror.ValidationError{Msg: "ownerId or managementApproverId does not match a user"}
+			}
+			return nil, fmt.Errorf("risk_assessment.Create update risk: %w", err)
+		}
+	}
+
+	for _, e := range req.ChangeLog {
+		action := e.Action
+		if action == "" {
+			action = "UPDATE"
+		}
+		if _, err = tx.ExecContext(ctx, `
+			INSERT INTO risk_change_log (risk_id, created_by, action, field_changed, old_value, new_value, details)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			riskID, req.CreatedBy, action, e.FieldChanged, e.OldValue, e.NewValue, e.Details); err != nil {
+			return nil, fmt.Errorf("risk_assessment.Create change log: %w", err)
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		return nil, fmt.Errorf("risk_assessment.Create commit: %w", err)
+	}
 	return r.getByID(ctx, int(id))
 }
 

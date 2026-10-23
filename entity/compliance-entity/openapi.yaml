@@ -6984,6 +6984,23 @@ components:
           type: string
         createdBy:
           type: string
+        ownerId:
+          type: integer
+          nullable: true
+          description: Optional. Sets the risk's owner in the same transaction as the assessment. Omitted leaves it unchanged.
+        managementApproverId:
+          type: integer
+          nullable: true
+          description: Optional. Sets the risk's management approver in the same transaction as the assessment.
+        implementationDate:
+          type: string
+          nullable: true
+          description: Optional YYYY-MM-DD. Sets the risk's implementation date in the same transaction as the assessment.
+        changeLog:
+          type: array
+          description: Written to risk_change_log in the same transaction. No workflow transition happens.
+          items:
+            $ref: '#/components/schemas/ChangeLogEntry'
     ListRiskAssessmentsResponse:
       type: object
       properties:

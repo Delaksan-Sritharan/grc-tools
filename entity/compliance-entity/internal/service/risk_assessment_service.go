@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"time"
 
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/apierror"
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/domain"
@@ -51,6 +52,17 @@ func (s *riskAssessmentService) CreateRiskAssessment(ctx context.Context, riskID
 	}
 	if req.CreatedBy == "" {
 		return domain.RiskAssessment{}, &apierror.ValidationError{Msg: "createdBy is required"}
+	}
+	if req.OwnerID != nil && *req.OwnerID <= 0 {
+		return domain.RiskAssessment{}, &apierror.ValidationError{Msg: "ownerId must be a positive id"}
+	}
+	if req.ManagementApproverID != nil && *req.ManagementApproverID <= 0 {
+		return domain.RiskAssessment{}, &apierror.ValidationError{Msg: "managementApproverId must be a positive id"}
+	}
+	if req.ImplementationDate != nil {
+		if _, err := time.Parse("2006-01-02", *req.ImplementationDate); err != nil {
+			return domain.RiskAssessment{}, &apierror.ValidationError{Msg: "implementationDate must be in YYYY-MM-DD format"}
+		}
 	}
 	a, err := s.repo.CreateRiskAssessment(ctx, riskID, req)
 	if err != nil {
