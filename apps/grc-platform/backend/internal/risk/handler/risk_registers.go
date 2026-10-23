@@ -679,12 +679,11 @@ func (d *Deps) handleOwnerApproveRisk(w http.ResponseWriter, r *http.Request) {
 // service used rather than re-reading the risk, so the two must be kept in step
 // — see riskservice.OwnerApprove.
 func (d *Deps) notifyAfterOwnerApprove(id int, detail *model.RiskDetail, fromStatus, by string) {
-	acceptHigh := detail.TreatmentStrategy != nil && *detail.TreatmentStrategy == "ACCEPT" &&
-		detail.GrossScore != nil && detail.GrossScore.RiskLevel == "HIGH"
+	needsMgmt := detail.NeedsManagementSignOff()
 
 	switch fromStatus {
 	case model.StatusPendingOwnerApproval, model.StatusPendingAmendment:
-		if acceptHigh {
+		if needsMgmt {
 			// → PENDING_MANAGEMENT_APPROVAL
 			d.notifyRiskEvent(emailer.EventPendingMgmtApproval, id, []int{detail.ManagementApproverID}, by, "")
 			return
@@ -696,7 +695,7 @@ func (d *Deps) notifyAfterOwnerApprove(id int, detail *model.RiskDetail, fromSta
 		d.notifyComplianceAdmins(emailer.EventPendingComplianceReview, id, detail.SourceRegisterID, by, "")
 
 	case model.StatusPendingOwnerCompletion:
-		if acceptHigh {
+		if needsMgmt {
 			// → PENDING_MANAGEMENT_CLOSURE_APPROVAL
 			d.notifyRiskEvent(emailer.EventPendingMgmtClosure, id, []int{detail.ManagementApproverID}, by, "")
 			return
@@ -1083,19 +1082,18 @@ func resubmitTargetFor(rejectionStage string) string {
 // records where the risk actually went. Kept next to notifyAfterOwnerApprove,
 // which recomputes the same thing for the same reason.
 func (d *Deps) recordOwnerApprove(ctx context.Context, id int, detail *model.RiskDetail, fromStatus, by string) {
-	acceptHigh := detail.TreatmentStrategy != nil && *detail.TreatmentStrategy == "ACCEPT" &&
-		detail.GrossScore != nil && detail.GrossScore.RiskLevel == "HIGH"
+	needsMgmt := detail.NeedsManagementSignOff()
 
 	to := ""
 	switch fromStatus {
 	case model.StatusPendingOwnerApproval, model.StatusPendingAmendment:
 		to = model.StatusPendingComplianceReview
-		if acceptHigh {
+		if needsMgmt {
 			to = model.StatusPendingManagementApproval
 		}
 	case model.StatusPendingOwnerCompletion:
 		to = model.StatusPendingComplianceClosure
-		if acceptHigh {
+		if needsMgmt {
 			to = model.StatusPendingManagementClosure
 		}
 	}

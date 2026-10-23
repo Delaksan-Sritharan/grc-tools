@@ -60,7 +60,7 @@ func TestResubmitTargetFor(t *testing.T) {
 	}
 }
 
-// recordOwnerApprove recomputes OwnerApprove's ACCEPT+HIGH routing to name the
+// recordOwnerApprove recomputes OwnerApprove's HIGH routing to name the
 // destination. A wrong answer here writes a history entry claiming the risk
 // went somewhere it didn't.
 func TestRecordOwnerApproveDestination(t *testing.T) {
@@ -75,13 +75,14 @@ func TestRecordOwnerApproveDestination(t *testing.T) {
 		wantTo     string
 		wantRecord bool
 	}{
-		{"initial, ordinary", model.StatusPendingOwnerApproval, strp("MITIGATE"), score("HIGH"), model.StatusPendingComplianceReview, true},
+		{"initial, medium", model.StatusPendingOwnerApproval, strp("MITIGATE"), score("MEDIUM"), model.StatusPendingComplianceReview, true},
+		{"initial, high regardless of treatment", model.StatusPendingOwnerApproval, strp("REMEDIATE"), score("HIGH"), model.StatusPendingManagementApproval, true},
 		{"initial, accept+high", model.StatusPendingOwnerApproval, strp("ACCEPT"), score("HIGH"), model.StatusPendingManagementApproval, true},
 		{"amendment, accept+high", model.StatusPendingAmendment, strp("ACCEPT"), score("HIGH"), model.StatusPendingManagementApproval, true},
 		{"completion, ordinary", model.StatusPendingOwnerCompletion, strp("ACCEPT"), score("MEDIUM"), model.StatusPendingComplianceClosure, true},
 		{"completion, accept+high", model.StatusPendingOwnerCompletion, strp("ACCEPT"), score("HIGH"), model.StatusPendingManagementClosure, true},
-		// Defensive: a nil treatment or score must not route to management.
-		{"nil treatment", model.StatusPendingOwnerApproval, nil, score("HIGH"), model.StatusPendingComplianceReview, true},
+		// Treatment is irrelevant; a nil score must not route to management.
+		{"nil treatment, high", model.StatusPendingOwnerApproval, nil, score("HIGH"), model.StatusPendingManagementApproval, true},
 		{"nil gross", model.StatusPendingOwnerApproval, strp("ACCEPT"), nil, model.StatusPendingComplianceReview, true},
 	}
 	for _, c := range cases {
@@ -93,7 +94,7 @@ func TestRecordOwnerApproveDestination(t *testing.T) {
 				}
 			}}
 			d := &Deps{History: rec}
-			detail := &model.RiskDetail{TreatmentStrategy: c.treatment, GrossScore: c.gross}
+			detail := &model.RiskDetail{TreatmentStrategy: c.treatment, GrossScore: c.gross, ManagementApproverID: 8}
 			d.recordOwnerApprove(context.Background(), 1, detail, c.from, "by@wso2.com")
 
 			if got.To != c.wantTo {

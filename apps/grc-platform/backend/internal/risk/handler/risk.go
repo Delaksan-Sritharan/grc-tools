@@ -183,9 +183,8 @@ func validateCreateRiskRequest(req model.CreateRiskRequest) error {
 	if req.OwnerID <= 0 {
 		return errorf("owner_id is required")
 	}
-	if req.ManagementApproverID <= 0 {
-		return errorf("management_approver_id is required")
-	}
+	// management_approver_id is required only for a HIGH risk. The level comes
+	// from the likelihood/impact lookup, so the entity service enforces it.
 	if req.ActionOwnerID <= 0 {
 		return errorf("action_owner_id is required")
 	}

@@ -239,7 +239,7 @@ func (d *Deps) escalationRecipients(ctx context.Context, riskID int) (recipients
 	} else if detail.GrossScore != nil {
 		level = detail.GrossScore.RiskLevel
 	}
-	if level == "HIGH" {
+	if level == "HIGH" && detail.ManagementApproverID > 0 {
 		recipients = append(recipients, detail.ManagementApproverID)
 	}
 

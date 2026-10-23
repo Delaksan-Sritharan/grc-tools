@@ -6991,7 +6991,7 @@ components:
         managementApproverId:
           type: integer
           nullable: true
-          description: Optional. Sets the risk's management approver in the same transaction as the assessment.
+          description: Optional. Sets the risk's management approver in the same transaction as the assessment. A reassessment whose new level is HIGH is rejected with 400 unless the risk already has an approver or this names one.
         implementationDate:
           type: string
           nullable: true

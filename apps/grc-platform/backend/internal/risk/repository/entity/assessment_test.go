@@ -56,4 +56,20 @@ func TestAssessmentChangeLog(t *testing.T) {
 			t.Errorf("got %v, want none", got)
 		}
 	})
+
+	t.Run("RFC3339 current date equals the same plain date", func(t *testing.T) {
+		rfc := "2026-11-30T00:00:00Z"
+		got := assessmentChangeLog(&model.RiskDetail{ImplementationDate: &rfc},
+			model.CreateAssessmentRequest{ImplementationDate: s("2026-11-30")})
+		if len(got) != 0 {
+			t.Errorf("got %v, want none", got)
+		}
+	})
+
+	t.Run("date set on a risk with none is a change", func(t *testing.T) {
+		got := assessmentChangeLog(&model.RiskDetail{}, model.CreateAssessmentRequest{ImplementationDate: s("2026-11-30")})
+		if len(got) != 1 {
+			t.Errorf("got %v, want one entry", got)
+		}
+	})
 }

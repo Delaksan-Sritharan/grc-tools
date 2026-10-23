@@ -347,7 +347,7 @@ var eventTemplates = map[RiskEvent]eventTemplate{
 		lead:       "This risk has been approved by its Risk Owner and now needs your management approval.",
 		actorLabel: "Approved by Risk Owner",
 		actions: []roleInstruction{
-			{RoleManagementApprover, "Review this risk and approve or reject the Accept treatment."},
+			{RoleManagementApprover, "Review this risk and approve or reject it."},
 		},
 	},
 	EventComplianceApproved: {

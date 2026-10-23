@@ -617,8 +617,8 @@ type Risk struct {
 	OwnerUUID    string `json:"ownerUuid"`
 	// ManagementApproverID names the user who approves this risk during
 	// PENDING_MANAGEMENT_APPROVAL and is the target an ESCALATED risk
-	// conceptually escalates to. Required on every risk regardless of level
-	// or treatment strategy.
+	// conceptually escalates to. Required for a HIGH risk, whatever its
+	// treatment strategy; 0 on a LOW/MEDIUM risk created without one.
 	ManagementApproverID   int       `json:"managementApproverId"`
 	ManagementApproverUUID string    `json:"managementApproverUuid"`
 	WorkflowStatus         string    `json:"workflowStatus"`
@@ -1219,8 +1219,8 @@ type CreateRiskRequest struct {
 	AssignmentTeamID int     `json:"assignmentTeamId"`
 	AssignerID       int     `json:"assignerId"`
 	OwnerID          int     `json:"ownerId"`
-	// ManagementApproverID is required on every risk regardless of level or
-	// treatment strategy — see Risk.ManagementApproverID.
+	// ManagementApproverID is required when the gross level is HIGH and optional
+	// otherwise (0 or absent) — see Risk.ManagementApproverID.
 	ManagementApproverID int    `json:"managementApproverId"`
 	RiskYear             int    `json:"riskYear"`
 	RiskQuarter          string `json:"riskQuarter"` // Q1 | Q2 | Q3 | Q4

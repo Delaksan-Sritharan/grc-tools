@@ -110,7 +110,7 @@ var allowedRiskTransitions = map[string][]string{
 		"PENDING_COMPLIANCE_CLOSURE", "PENDING_MANAGEMENT_CLOSURE_APPROVAL",
 		"PENDING_REVISION", "APPROVED",
 	},
-	// ACCEPT + HIGH only: the risk's management_approver_id signs off on the
+	// HIGH risks only: the risk's management_approver_id signs off on the
 	// completed remediation before compliance closes it.
 	"PENDING_MANAGEMENT_CLOSURE_APPROVAL": {
 		"PENDING_COMPLIANCE_CLOSURE", "PENDING_REVISION", "APPROVED",
@@ -244,9 +244,8 @@ func (s *riskService) CreateRisk(ctx context.Context, req domain.CreateRiskReque
 	if req.OwnerID <= 0 {
 		return domain.Risk{}, &apierror.ValidationError{Msg: "ownerId is required"}
 	}
-	if req.ManagementApproverID <= 0 {
-		return domain.Risk{}, &apierror.ValidationError{Msg: "managementApproverId is required"}
-	}
+	// managementApproverId is required only for a HIGH risk. The level comes
+	// from the likelihood/impact lookup, so the repository enforces it.
 	if req.RiskYear <= 0 {
 		return domain.Risk{}, &apierror.ValidationError{Msg: "riskYear is required"}
 	}

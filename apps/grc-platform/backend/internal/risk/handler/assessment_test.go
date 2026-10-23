@@ -113,7 +113,7 @@ func TestHandleAssessRisk(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			current := "2026-11-30"
+			current := "2026-11-30T00:00:00Z"
 			risk := &fakeRiskSvc{byID: map[int]*model.RiskDetail{
 				1: {
 					ID: 1, SourceRegisterID: asgardeo, AssignmentTeamID: choreo,

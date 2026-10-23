@@ -91,10 +91,11 @@ type CreateRiskRequest struct {
 	// Step 3: Action Plan
 	AssignmentTeamID int `json:"assignment_team_id"`
 	OwnerID          int `json:"owner_id"`
-	// ManagementApproverID is required on every risk regardless of level or
-	// treatment strategy — it names who approves PENDING_MANAGEMENT_APPROVAL
-	// (reached only for ACCEPT+HIGH risks) and who an ESCALATED risk
-	// conceptually escalates to.
+	// ManagementApproverID is required when the risk's gross level is HIGH,
+	// whatever the treatment strategy, and optional otherwise (0 = none). It
+	// names who approves PENDING_MANAGEMENT_APPROVAL, which every HIGH risk
+	// passes through. The entity service enforces the HIGH rule, because the
+	// level comes from the likelihood/impact lookup there.
 	ManagementApproverID  int                       `json:"management_approver_id"`
 	ActionOwnerID         int                       `json:"action_owner_id"`
 	ActionPlanDescription string                    `json:"action_plan_description"`
@@ -485,3 +486,20 @@ type EscalateRiskRequest struct {
 // Answered by a comment from the risk's Management Approver (HIGH) or a
 // line manager (MEDIUM/LOW), which returns it to the assigner. See the
 // risk_escalation table.
+
+// NeedsManagementSignOff reports whether the risk routes through its Management
+// Approver, at both management stages (entering remediation and closure).
+//
+// Every HIGH risk does, whatever its treatment strategy. "HIGH" means HIGH at
+// creation (gross) or HIGH now (the effective score): gross alone would let a
+// reassessment that lowers the level route a risk around the approver named
+// for it, and the effective score alone would miss a risk reassessed up to
+// HIGH, which the reassessment requires an approver for.
+//
+// A HIGH risk with no approver on record cannot happen (creation and
+// reassessment both require one), but if it ever did, routing it to a
+// stage nobody can act on would strand it, so it skips management instead.
+func (d *RiskDetail) NeedsManagementSignOff() bool {
+	isHigh := func(s *RiskScore) bool { return s != nil && s.RiskLevel == "HIGH" }
+	return (isHigh(d.GrossScore) || isHigh(d.EffectiveScore)) && d.ManagementApproverID > 0
+}
