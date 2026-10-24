@@ -83,3 +83,29 @@ func placeholders(n int) string {
 	}
 	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
 }
+
+// riskVisibilityClause is the per-risk visibility rule SearchRisks applies,
+// for queries that reach risks through another table: the Action Owner
+// restriction, then team scoping, with an escalation lead granted the one risk
+// they are named on. Empty scope and no action owner means unrestricted.
+func riskVisibilityClause(alias string, actionOwnerID *int, escalationLeadUUID string, sourceIDs, assignmentIDs []int) (string, []any) {
+	var clause string
+	var args []any
+	if actionOwnerID != nil {
+		clause += " AND EXISTS (SELECT 1 FROM risk_action_plan ap WHERE ap.risk_id = " + alias + ".id AND ap.action_owner_id = ?)"
+		args = append(args, *actionOwnerID)
+	}
+	scopeClause, scopeArgs := scopeFilter(alias, sourceIDs, assignmentIDs)
+	if scopeClause == "" {
+		return clause, args
+	}
+	if escalationLeadUUID != "" {
+		clause += " AND ((1=1" + scopeClause + ") OR EXISTS (SELECT 1 FROM risk_escalation e" +
+			" WHERE e.risk_id = " + alias + ".id AND e.status = 'OPEN'" +
+			" AND (e.assigner_lead_uuid = ? OR e.action_owner_lead_uuid = ?)))"
+		args = append(args, scopeArgs...)
+		args = append(args, escalationLeadUUID, escalationLeadUUID)
+		return clause, args
+	}
+	return clause + scopeClause, append(args, scopeArgs...)
+}

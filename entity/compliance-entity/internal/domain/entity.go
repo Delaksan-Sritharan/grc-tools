@@ -1863,6 +1863,41 @@ type ListRiskChangeLogResponse struct {
 	Offset  int             `json:"offset"`
 }
 
+// RiskChangeLogItem is a change-log row with the risk it belongs to, for the
+// cross-risk audit trail.
+type RiskChangeLogItem struct {
+	RiskChangeLog
+	RiskCode  string `json:"riskCode"`
+	RiskTitle string `json:"riskTitle"`
+}
+
+// SearchRiskChangeLogRequest is the payload for POST /risk/changes/search.
+// Scope fields mean what they do on SearchRisksRequest: they decide which risks
+// the caller may see, and the GRC backend populates them.
+type SearchRiskChangeLogRequest struct {
+	Limit  int `json:"limit"`
+	Offset int `json:"offset"`
+	// From and To are YYYY-MM-DD, inclusive at both ends.
+	From string `json:"from"`
+	To   string `json:"to"`
+	// Actions filters on risk_change_log.action; empty means any.
+	Actions []string `json:"actions"`
+	// RiskQuery matches the risk code or title, as a substring.
+	RiskQuery              string `json:"riskQuery"`
+	ActionOwnerID          *int   `json:"actionOwnerId"`
+	EscalationLeadUUID     string `json:"escalationLeadUuid"`
+	ScopeSourceRegisterIDs []int  `json:"scopeSourceRegisterIds"`
+	ScopeAssignmentTeamIDs []int  `json:"scopeAssignmentTeamIds"`
+}
+
+// SearchRiskChangeLogResponse is returned by POST /risk/changes/search.
+type SearchRiskChangeLogResponse struct {
+	Items  []RiskChangeLogItem `json:"items"`
+	Total  int                 `json:"total"`
+	Limit  int                 `json:"limit"`
+	Offset int                 `json:"offset"`
+}
+
 // =============================================================================
 // Audit Comment (audit_comment) — threaded comments on an evidence submission
 // =============================================================================
