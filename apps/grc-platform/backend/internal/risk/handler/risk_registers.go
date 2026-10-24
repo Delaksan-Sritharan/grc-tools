@@ -542,6 +542,11 @@ func (d *Deps) handleUpdateRisk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.RiskAcceptor != "" && !model.IsValidRiskAcceptor(req.RiskAcceptor) {
+		response.WriteError(w, http.StatusBadRequest, "risk_acceptor must be "+model.RiskAcceptorCustomer+" or "+model.RiskAcceptorWSO2)
+		return
+	}
+
 	// IdentifiedByType == "" means "leave Identified By unchanged" — see the
 	// COALESCE-on-empty convention this maps onto in the repository. Only
 	// validate/resolve when the caller is actually setting it this request.

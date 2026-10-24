@@ -5933,6 +5933,12 @@ components:
             $ref: '#/components/schemas/CreateActionStepRequest'
         treatment_strategy:
           type: string
+        risk_acceptor:
+          type: string
+          enum:
+          - CUSTOMER
+          - WSO2
+          description: Who accepted the risk. Optional on create.
         progress:
           type: string
         git_issue_url:
@@ -6160,6 +6166,13 @@ components:
         treatment_strategy:
           type: string
           nullable: true
+        risk_acceptor:
+          type: string
+          enum:
+          - CUSTOMER
+          - WSO2
+          nullable: true
+          description: Who accepted the risk; null until it has been recorded.
         source_register_id:
           type: integer
         assignment_team_id:
@@ -6363,6 +6376,12 @@ components:
           type: string
         treatment_strategy:
           type: string
+        risk_acceptor:
+          type: string
+          enum:
+          - CUSTOMER
+          - WSO2
+          description: Who accepted the risk. Omit to leave unchanged; it cannot be cleared.
         assignment_team_id:
           type: integer
           nullable: true

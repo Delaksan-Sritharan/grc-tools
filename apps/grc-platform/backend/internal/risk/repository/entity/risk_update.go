@@ -107,6 +107,7 @@ func (r *riskRepository) Update(ctx context.Context, id int, req model.UpdateRis
 
 	// Everything else is free to edit, but still belongs in the history — "who
 	// moved the date" is only half the question an overdue risk raises.
+	logChange("risk_acceptor", derefOr(current.RiskAcceptor), req.RiskAcceptor)
 	logChange("risk_title", current.RiskTitle, req.RiskTitle)
 	logChange("risk_description", current.RiskDescription, req.RiskDescription)
 	logChange("impact_description", derefOr(current.ImpactDescription), req.ImpactDescription)
@@ -152,6 +153,7 @@ func (r *riskRepository) Update(ctx context.Context, id int, req model.UpdateRis
 	putIfSet("implementationDate", req.ImplementationDate)
 	putIfSet("reassessmentDate", req.ReassessmentDate)
 	putIfSet("treatmentStrategy", req.TreatmentStrategy)
+	putIfSet("riskAcceptor", req.RiskAcceptor)
 	if req.IdentifiedByName != nil {
 		body["identifiedByName"] = *req.IdentifiedByName
 	}
