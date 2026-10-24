@@ -623,6 +623,7 @@ type Risk struct {
 	ManagementApproverUUID string    `json:"managementApproverUuid"`
 	WorkflowStatus         string    `json:"workflowStatus"`
 	TreatmentStrategy      *string   `json:"treatmentStrategy"`
+	RiskAcceptor           *string   `json:"riskAcceptor"` // CUSTOMER | WSO2; nil until recorded
 	GrossScoreID           *int      `json:"grossScoreId"`
 	GrossRiskLevel         *string   `json:"grossRiskLevel"`
 	ImplementationDate     *string   `json:"implementationDate"` // YYYY-MM-DD
@@ -1230,6 +1231,7 @@ type CreateRiskRequest struct {
 	Likelihood         int     `json:"likelihood"`
 	Impact             int     `json:"impact"`
 	TreatmentStrategy  *string `json:"treatmentStrategy"`
+	RiskAcceptor       *string `json:"riskAcceptor"`       // CUSTOMER | WSO2; optional
 	ImplementationDate *string `json:"implementationDate"` // YYYY-MM-DD
 	ReassessmentDate   *string `json:"reassessmentDate"`   // YYYY-MM-DD
 	ImpactDescription  *string `json:"impactDescription"`
@@ -1288,6 +1290,7 @@ type UpdateRiskRequest struct {
 	RiskDescription        *string `json:"riskDescription"`
 	WorkflowStatus         *string `json:"workflowStatus"`
 	TreatmentStrategy      *string `json:"treatmentStrategy"`
+	RiskAcceptor           *string `json:"riskAcceptor"` // CUSTOMER | WSO2; nil leaves it unchanged
 	GrossScoreID           *int    `json:"grossScoreId"`
 	ImplementationDate     *string `json:"implementationDate"`
 	ReassessmentDate       *string `json:"reassessmentDate"`

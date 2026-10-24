@@ -53,7 +53,7 @@ const riskSelectCols = `
   r.assigner_id,         COALESCE(u_asgn.uuid,'') AS assigner_uuid,
   r.owner_id,            COALESCE(u_own.uuid,'')  AS owner_uuid,
   r.management_approver_id, COALESCE(u_mgmt.uuid,'') AS management_approver_uuid,
-  r.workflow_status, r.treatment_strategy,
+  r.workflow_status, r.treatment_strategy, r.risk_acceptor,
   r.gross_score_id, rs.risk_level AS gross_risk_level,
   DATE_FORMAT(r.implementation_date, '%Y-%m-%d'),
   DATE_FORMAT(r.reassessment_date,   '%Y-%m-%d'),
@@ -426,17 +426,17 @@ func (r *riskRepo) CreateRisk(ctx context.Context, req domain.CreateRiskRequest)
 			risk_code, risk_year, risk_quarter, risk_title, risk_description,
 			source_register_id, assignment_team_id, assigner_id, owner_id,
 			management_approver_id,
-			treatment_strategy, gross_score_id, progress,
+			treatment_strategy, risk_acceptor, gross_score_id, progress,
 			implementation_date, reassessment_date,
 			impact_description, risk_identified_date,
 			identified_by_type, identified_by_name,
 			git_issue_url, email_subject, remarks,
 			workflow_status, created_by, updated_by
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING_RISK_OWNER_APPROVAL', ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING_RISK_OWNER_APPROVAL', ?, ?)`,
 		riskCode, req.RiskYear, req.RiskQuarter, req.RiskTitle, req.RiskDescription,
 		req.SourceRegisterID, req.AssignmentTeamID, req.AssignerID, req.OwnerID,
 		managementApprover,
-		req.TreatmentStrategy, grossScoreID, req.Progress,
+		req.TreatmentStrategy, req.RiskAcceptor, grossScoreID, req.Progress,
 		req.ImplementationDate, req.ReassessmentDate,
 		req.ImpactDescription, req.RiskIdentifiedDate,
 		req.IdentifiedByType, req.IdentifiedByName,
@@ -540,6 +540,10 @@ func (r *riskRepo) UpdateRisk(ctx context.Context, id int, req domain.UpdateRisk
 	if req.TreatmentStrategy != nil {
 		sets = append(sets, "treatment_strategy = ?")
 		args = append(args, *req.TreatmentStrategy)
+	}
+	if req.RiskAcceptor != nil {
+		sets = append(sets, "risk_acceptor = ?")
+		args = append(args, *req.RiskAcceptor)
 	}
 	if req.GrossScoreID != nil {
 		sets = append(sets, "gross_score_id = ?")
@@ -840,7 +844,7 @@ func scanRisk(s scanner) (*domain.Risk, error) {
 // base column list stays defined in exactly one place.
 func scanRiskWithExtras(s scanner, extras ...any) (*domain.Risk, error) {
 	var r domain.Risk
-	var desc, treatment, grossLevel, implDate, reassDate sql.NullString
+	var desc, treatment, riskAcceptor, grossLevel, implDate, reassDate sql.NullString
 	var identifiedDate, identifiedByType, identifiedByName sql.NullString
 	var impactDesc, progress, complianceApprovalDate sql.NullString
 	var gitIssueURL, emailSubject, remarks sql.NullString
@@ -856,7 +860,7 @@ func scanRiskWithExtras(s scanner, extras ...any) (*domain.Risk, error) {
 		&r.AssignerID, &r.AssignerUUID,
 		&r.OwnerID, &r.OwnerUUID,
 		&managementApproverID, &r.ManagementApproverUUID,
-		&r.WorkflowStatus, &treatment,
+		&r.WorkflowStatus, &treatment, &riskAcceptor,
 		&grossScoreID, &grossLevel,
 		&implDate, &reassDate,
 		&r.CreatedOn, &r.UpdatedOn,
@@ -891,6 +895,7 @@ func scanRiskWithExtras(s scanner, extras ...any) (*domain.Risk, error) {
 	r.ManagementApproverID = int(managementApproverID.Int64)
 	r.RiskDescription = nullStr(desc)
 	r.TreatmentStrategy = nullStr(treatment)
+	r.RiskAcceptor = nullStr(riskAcceptor)
 	r.GrossRiskLevel = nullStr(grossLevel)
 	r.ImplementationDate = nullStr(implDate)
 	r.ReassessmentDate = nullStr(reassDate)

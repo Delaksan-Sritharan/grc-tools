@@ -6135,6 +6135,12 @@ components:
           - TRANSFER
           - AVOID
           nullable: true
+        riskAcceptor:
+          type: string
+          enum:
+          - CUSTOMER
+          - WSO2
+          nullable: true
         grossScoreId: &id020
           type: integer
           nullable: true
@@ -6343,6 +6349,12 @@ components:
           - TRANSFER
           - AVOID
           nullable: true
+        riskAcceptor:
+          type: string
+          enum:
+          - CUSTOMER
+          - WSO2
+          nullable: true
         implementationDate:
           type: string
           nullable: true
@@ -6458,6 +6470,12 @@ components:
           - ACCEPT
           - TRANSFER
           - AVOID
+          nullable: true
+        riskAcceptor:
+          type: string
+          enum:
+          - CUSTOMER
+          - WSO2
           nullable: true
         grossScoreId:
           type: integer
