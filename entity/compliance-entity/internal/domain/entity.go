@@ -689,6 +689,9 @@ type SearchRisksRequest struct {
 	// the risk itself, set once at creation/edit time.
 	TreatmentStrategyKeys []string `json:"treatmentStrategyKeys"`
 	OwnerIDs              []int    `json:"ownerIds"`
+	// CategoryIDs restricts to risks tagged with at least one of these Risk
+	// Categories (risk_category_reference).
+	CategoryIDs []int `json:"categoryIds"`
 	// ActionOwnerID restricts to risks with at least one risk_action_plan row
 	// (STANDARD or MANAGEMENT) whose action_owner_id matches — how the Action
 	// Owner's risk list is scoped to only what they're assigned to.
