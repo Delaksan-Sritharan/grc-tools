@@ -18,6 +18,9 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
+	"log/slog"
+	"strconv"
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/directory"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/model"
@@ -130,9 +133,14 @@ func (d *Deps) enrichAnalytics(ctx context.Context, sum *model.AnalyticsSummary)
 
 // enrichHistory fills each entry's actor email from the identity directory —
 // the History tab shows who did what, and the data layer only ever returns
-// the actor's uuid.
+// the actor's uuid — and swaps the user and team ids in assignee diffs for
+// names, which is what a reader can use.
 func (d *Deps) enrichHistory(ctx context.Context, entries []*model.HistoryEntry) {
-	if d.Directory == nil || len(entries) == 0 {
+	if len(entries) == 0 {
+		return
+	}
+	d.nameHistoryAssignees(ctx, entries)
+	if d.Directory == nil {
 		return
 	}
 	uuids := make([]string, 0, len(entries))
@@ -145,7 +153,133 @@ func (d *Deps) enrichHistory(ctx context.Context, entries []*model.HistoryEntry)
 	}
 	for _, e := range entries {
 		applyEmail(people, e.CreatedBy, &e.CreatedByEmail)
+		applyName(people, e.CreatedBy, &e.CreatedByName)
 	}
+}
+
+// historyUserFields hold a platform user id in their diff; assignment_team_id
+// holds a team id. Everything else in a diff is already readable.
+var historyUserFields = map[string]bool{
+	"assigner_id":            true,
+	"owner_id":               true,
+	"management_approver_id": true,
+	"action_owner_id":        true,
+}
+
+const historyTeamField = "assignment_team_id"
+
+// nameHistoryAssignees rewrites the old and new value of assignee diffs from an
+// id to the person's or team's name. The values are stored as JSON strings of
+// the id ("21"), so a resolved name goes back as a JSON string too. Anything
+// that cannot be resolved keeps its id: the client shows no value for a bare
+// number rather than a misleading one, and the entry itself is never dropped.
+func (d *Deps) nameHistoryAssignees(ctx context.Context, entries []*model.HistoryEntry) {
+	userIDs := map[int]bool{}
+	needTeams := false
+	for _, e := range entries {
+		if e.FieldChanged == nil {
+			continue
+		}
+		switch {
+		case historyUserFields[*e.FieldChanged]:
+			for _, v := range []*string{e.OldValue, e.NewValue} {
+				if id, ok := historyID(v); ok {
+					userIDs[id] = true
+				}
+			}
+		case *e.FieldChanged == historyTeamField:
+			needTeams = true
+		}
+	}
+
+	userNames := d.userNamesByID(ctx, userIDs)
+	var teamNames map[int]string
+	if needTeams && d.Team != nil {
+		teams, err := d.Team.List(ctx, model.ListTeamsFilter{IncludeInactive: true})
+		if err != nil {
+			slog.WarnContext(ctx, "risk history: list teams for names failed", "err", err)
+		}
+		teamNames = make(map[int]string, len(teams))
+		for _, t := range teams {
+			teamNames[t.ID] = t.Name
+		}
+	}
+
+	for _, e := range entries {
+		if e.FieldChanged == nil {
+			continue
+		}
+		var names map[int]string
+		switch {
+		case historyUserFields[*e.FieldChanged]:
+			names = userNames
+		case *e.FieldChanged == historyTeamField:
+			names = teamNames
+		default:
+			continue
+		}
+		e.OldValue = historyNamed(e.OldValue, names)
+		e.NewValue = historyNamed(e.NewValue, names)
+	}
+}
+
+// userNamesByID resolves platform user ids to display names: id -> uuid through
+// the user table, then uuid -> name through the identity directory. Ids it
+// cannot resolve are simply absent from the result.
+func (d *Deps) userNamesByID(ctx context.Context, ids map[int]bool) map[int]string {
+	if len(ids) == 0 || d.Users == nil || d.Directory == nil {
+		return nil
+	}
+	uuidByID := make(map[int]string, len(ids))
+	uuids := make([]string, 0, len(ids))
+	for id := range ids {
+		u, err := d.Users.GetByID(ctx, id)
+		if err != nil || u == nil || u.UUID == "" {
+			continue
+		}
+		uuidByID[id] = u.UUID
+		uuids = append(uuids, u.UUID)
+	}
+	people := d.Directory.LookupAll(ctx, uuids)
+	names := make(map[int]string, len(uuidByID))
+	for id, uuid := range uuidByID {
+		if p, ok := people[uuid]; ok && p.DisplayName != "" {
+			names[id] = p.DisplayName
+		}
+	}
+	return names
+}
+
+// historyID reads a diff value ("21", a JSON string of an id) as an int.
+func historyID(raw *string) (int, bool) {
+	if raw == nil {
+		return 0, false
+	}
+	var s string
+	if err := json.Unmarshal([]byte(*raw), &s); err != nil {
+		return 0, false
+	}
+	id, err := strconv.Atoi(s)
+	return id, err == nil
+}
+
+// historyNamed returns raw with its id replaced by names[id], or raw unchanged
+// when it is not an id or has no name.
+func historyNamed(raw *string, names map[int]string) *string {
+	id, ok := historyID(raw)
+	if !ok {
+		return raw
+	}
+	name, ok := names[id]
+	if !ok {
+		return raw
+	}
+	encoded, err := json.Marshal(name)
+	if err != nil {
+		return raw
+	}
+	out := string(encoded)
+	return &out
 }
 
 // enrichEvidence fills each file's uploader email from the identity

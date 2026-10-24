@@ -28,6 +28,7 @@ import (
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/directory"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/model"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/scim"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/user"
 )
 
 // dirServer is a stand-in identity directory that counts how many searches it
@@ -229,4 +230,85 @@ func TestEnrichDashboardAndAnalytics_NilInputsAreNoOps(t *testing.T) {
 	d.enrichAnalytics(context.Background(), nil)
 	d.enrichDashboard(context.Background(), &model.DashboardSummary{})
 	d.enrichAnalytics(context.Background(), &model.AnalyticsSummary{})
+}
+
+// idUserRepo resolves platform user ids to uuids; every other method is the
+// embedded fake's.
+type idUserRepo struct {
+	fakeUserRepo
+	uuids map[int]string
+}
+
+func (r idUserRepo) GetByID(_ context.Context, id int) (*user.User, error) {
+	if uuid, ok := r.uuids[id]; ok {
+		return &user.User{ID: id, UUID: uuid}, nil
+	}
+	return nil, nil
+}
+
+func strp(s string) *string { return &s }
+
+// Assignee diffs carry platform user ids and a team id; the history shows names
+// for the ones that resolve and keeps the id for the ones that do not.
+func TestEnrichHistory_NamesAssigneeDiffs(t *testing.T) {
+	srv := newDirServer(t, map[string]string{"owner-uuid": "Olivia Owner"})
+	d := srv.deps()
+	d.Users = idUserRepo{uuids: map[int]string{21: "owner-uuid", 22: "unknown-uuid"}}
+	d.Team = &fakeTeamService{teams: []*model.Team{{ID: 4, Name: "Asgardeo"}}}
+
+	entries := []*model.HistoryEntry{
+		{ID: 1, FieldChanged: strp("owner_id"), OldValue: strp(`"22"`), NewValue: strp(`"21"`)},
+		{ID: 2, FieldChanged: strp("assignment_team_id"), OldValue: strp(`"9"`), NewValue: strp(`"4"`)},
+		{ID: 3, FieldChanged: strp("risk_title"), OldValue: strp(`"Old"`), NewValue: strp(`"New"`)},
+		{ID: 4, FieldChanged: strp("owner_id"), OldValue: nil, NewValue: strp(`"99"`)},
+	}
+	d.enrichHistory(context.Background(), entries)
+
+	cases := []struct {
+		i        int
+		old, new string
+	}{
+		// 21 resolves; 22 has a user row whose uuid the directory does not know.
+		{0, `"22"`, `"Olivia Owner"`},
+		// 4 resolves; 9 is not a known team.
+		{1, `"9"`, `"Asgardeo"`},
+		// Not an assignee field: untouched.
+		{2, `"Old"`, `"New"`},
+	}
+	for _, c := range cases {
+		e := entries[c.i]
+		if *e.OldValue != c.old || *e.NewValue != c.new {
+			t.Errorf("entry %d = %s -> %s, want %s -> %s", e.ID, *e.OldValue, *e.NewValue, c.old, c.new)
+		}
+	}
+	// An id with no user row at all keeps its id, and a missing old value stays missing.
+	if entries[3].OldValue != nil || *entries[3].NewValue != `"99"` {
+		t.Errorf("unresolved id changed: %v -> %v", entries[3].OldValue, entries[3].NewValue)
+	}
+}
+
+// With no directory or user repository configured, history is left as recorded.
+func TestEnrichHistory_NoLookupsKeepsIDs(t *testing.T) {
+	d := &Deps{}
+	entries := []*model.HistoryEntry{{ID: 1, FieldChanged: strp("owner_id"), NewValue: strp(`"21"`)}}
+	d.enrichHistory(context.Background(), entries)
+	if *entries[0].NewValue != `"21"` {
+		t.Errorf("value = %s, want the id kept", *entries[0].NewValue)
+	}
+}
+
+// An actor the directory names but has no email for is still shown by name.
+func TestEnrichHistory_ActorNameWithoutEmail(t *testing.T) {
+	srv := newDirServer(t, map[string]string{"actor-uuid": "Alex Actor"})
+	d := srv.deps()
+	entries := []*model.HistoryEntry{{ID: 1, CreatedBy: "actor-uuid"}, {ID: 2, CreatedBy: "stranger-uuid"}}
+
+	d.enrichHistory(context.Background(), entries)
+
+	if entries[0].CreatedByName != "Alex Actor" {
+		t.Errorf("name = %q, want the directory's display name", entries[0].CreatedByName)
+	}
+	if entries[1].CreatedByName != "" || entries[1].CreatedByEmail != "" {
+		t.Errorf("an unknown actor must stay unresolved, got %q / %q", entries[1].CreatedByName, entries[1].CreatedByEmail)
+	}
 }
