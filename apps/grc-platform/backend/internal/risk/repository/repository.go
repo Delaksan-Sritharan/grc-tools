@@ -145,6 +145,9 @@ type HistoryRepository interface {
 	// Record appends one entry. Callers treat failures as non-fatal: a missing
 	// history row must never fail the action it was recording.
 	Record(ctx context.Context, riskID int, req model.RecordHistoryRequest, createdBy string) error
+	// Search returns one page of history across risks, newest-first, limited to
+	// the risks the filter's scope allows.
+	Search(ctx context.Context, filter model.AuditTrailFilter) (*model.AuditTrailPage, error)
 }
 
 // ComplianceReferenceRepository is the data-access contract for compliance references.

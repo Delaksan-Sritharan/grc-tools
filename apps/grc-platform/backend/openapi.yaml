@@ -3562,6 +3562,60 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /api/v1/risks/audit-trail:
+    get:
+      tags:
+      - Risk History
+      summary: List changes across risks (audit trail)
+      description: Newest-first history across every risk the caller can see, scoped exactly as the risk list is. Limited to risk owners (grc-platform-risk-owner) and the compliance team (grc-platform-risk-compliance-team); any other caller gets 403.
+      operationId: listRiskAuditTrail
+      parameters:
+      - name: from
+        in: query
+        description: Earliest change date, YYYY-MM-DD, inclusive.
+        schema:
+          type: string
+          format: date
+      - name: to
+        in: query
+        description: Latest change date, YYYY-MM-DD, inclusive.
+        schema:
+          type: string
+          format: date
+      - name: action
+        in: query
+        description: Comma-separated actions (UPDATE, APPROVE, ESCALATE, ...). Empty means any.
+        schema:
+          type: string
+      - name: search
+        in: query
+        description: Substring of the risk code or title.
+        schema:
+          type: string
+      - name: limit
+        in: query
+        description: Page size, 1-100. Defaults to 50.
+        schema:
+          type: integer
+      - name: offset
+        in: query
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: One page of the audit trail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RiskAuditTrailPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /api/v1/risks/{id}/action-plans:
     post:
       tags:
@@ -5832,6 +5886,9 @@ components:
       properties:
         namedOnRisk:
           type: boolean
+        canViewAuditTrail:
+          type: boolean
+          description: True for a risk owner or a compliance-team member, the only callers who may open the audit trail.
     # --- Risk Hub: risks ------------------------------------------------------
     CreateActionStepRequest:
       type: object
@@ -6970,6 +7027,28 @@ components:
           format: date
           nullable: true
         age_days:
+          type: integer
+    RiskAuditTrailEntry:
+      allOf:
+      - $ref: '#/components/schemas/HistoryEntry'
+      - type: object
+        properties:
+          risk_code:
+            type: string
+          risk_title:
+            type: string
+    RiskAuditTrailPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RiskAuditTrailEntry'
+        total:
+          type: integer
+        offset:
+          type: integer
+        limit:
           type: integer
     AnalyticsSummary:
       type: object

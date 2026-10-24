@@ -27,6 +27,8 @@ import (
 type HistoryService interface {
 	List(ctx context.Context, riskID int) ([]*model.HistoryEntry, error)
 	Record(ctx context.Context, riskID int, req model.RecordHistoryRequest, createdBy string) error
+	// Search pages through history across risks, within the filter's scope.
+	Search(ctx context.Context, filter model.AuditTrailFilter) (*model.AuditTrailPage, error)
 }
 
 type historyService struct {
@@ -52,4 +54,11 @@ func (s *historyService) Record(ctx context.Context, riskID int, req model.Recor
 		return badRequest("action is required")
 	}
 	return s.repo.Record(ctx, riskID, req, createdBy)
+}
+
+func (s *historyService) Search(ctx context.Context, filter model.AuditTrailFilter) (*model.AuditTrailPage, error) {
+	if filter.Limit <= 0 || filter.Offset < 0 {
+		return nil, badRequest("limit must be positive and offset non-negative")
+	}
+	return s.repo.Search(ctx, filter)
 }

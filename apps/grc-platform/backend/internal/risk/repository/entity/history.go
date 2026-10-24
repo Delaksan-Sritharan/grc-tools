@@ -113,3 +113,48 @@ func (r *historyRepository) Record(ctx context.Context, riskID int, req model.Re
 	}
 	return nil
 }
+
+// entAuditItem is the entity's change-log row plus its risk's code and title.
+type entAuditItem struct {
+	entHistory
+	RiskCode  string `json:"riskCode"`
+	RiskTitle string `json:"riskTitle"`
+}
+
+func (r *historyRepository) Search(ctx context.Context, f model.AuditTrailFilter) (*model.AuditTrailPage, error) {
+	body := map[string]any{
+		"limit":                  f.Limit,
+		"offset":                 f.Offset,
+		"from":                   f.From,
+		"to":                     f.To,
+		"actions":                f.Actions,
+		"riskQuery":              f.RiskQuery,
+		"actionOwnerId":          f.ActionOwnerID,
+		"escalationLeadUuid":     f.EscalationLeadUUID,
+		"scopeSourceRegisterIds": f.ScopeSourceRegisterIDs,
+		"scopeAssignmentTeamIds": f.ScopeAssignmentTeamIDs,
+	}
+	var resp struct {
+		Items  []entAuditItem `json:"items"`
+		Total  int            `json:"total"`
+		Limit  int            `json:"limit"`
+		Offset int            `json:"offset"`
+	}
+	if err := r.c.Post(ctx, "/risk/changes/search", body, &resp); err != nil {
+		return nil, fmt.Errorf("search risk history: %w", err)
+	}
+	page := &model.AuditTrailPage{
+		Items:  make([]*model.AuditTrailEntry, 0, len(resp.Items)),
+		Total:  resp.Total,
+		Limit:  resp.Limit,
+		Offset: resp.Offset,
+	}
+	for _, it := range resp.Items {
+		page.Items = append(page.Items, &model.AuditTrailEntry{
+			HistoryEntry: *it.entHistory.toModel(),
+			RiskCode:     it.RiskCode,
+			RiskTitle:    it.RiskTitle,
+		})
+	}
+	return page, nil
+}
