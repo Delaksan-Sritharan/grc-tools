@@ -324,6 +324,7 @@ func (d *Deps) riskVisibleToCaller(ctx context.Context, riskID int) (bool, error
 //   - risk_type:        comma-separated NEW | UPDATED values
 //   - treatment_strategy: comma-separated REMEDIATE | ACCEPT | TRANSFER | AVOID | UNSPECIFIED values
 //   - owner_id:          comma-separated owner user IDs
+//   - category_id:       comma-separated Risk Category IDs (a risk with any of them matches)
 //   - submitted_from/to: created_at date range (YYYY-MM-DD, inclusive)
 //   - due_from/to:       implementation_date range (YYYY-MM-DD, inclusive)
 //   - due_overdue:       "true" to additionally restrict to implementation_date < today
@@ -350,6 +351,7 @@ func (d *Deps) handleListRisks(w http.ResponseWriter, r *http.Request) {
 	filter.RiskTypes = splitCSV(q.Get("risk_type"))
 	filter.TreatmentStrategies = splitCSV(q.Get("treatment_strategy"))
 	filter.OwnerIDs = splitCSVInts(q.Get("owner_id"))
+	filter.CategoryIDs = splitCSVInts(q.Get("category_id"))
 	filter.CustomerIDs = splitCSVInts(q.Get("customer_id"))
 	filter.Environments = splitCSV(q.Get("environment"))
 	filter.PlatformIDs = splitCSVInts(q.Get("platform_id"))

@@ -181,6 +181,13 @@ func (r *riskRepository) List(ctx context.Context, filter model.ListRisksFilter)
 		"pagination":             map[string]int{"limit": filter.Limit, "offset": filter.Offset},
 	}
 
+	// Added only when set: the entity service rejects unknown fields, so sending
+	// it (even as null) on every list call would 400 all of them until the
+	// entity service that knows it is deployed.
+	if len(filter.CategoryIDs) > 0 {
+		body["categoryIds"] = filter.CategoryIDs
+	}
+
 	var resp struct {
 		Risks []entRisk `json:"risks"`
 		Total int       `json:"total"`
