@@ -244,3 +244,21 @@ func TestRunOnceRejectsOverlappingRun(t *testing.T) {
 		t.Errorf("escalated %v across the two successful runs, want risks 1 and 2", esc.escalated)
 	}
 }
+
+func TestRunOnceRecordsHistoryForEachEscalation(t *testing.T) {
+	risks := &fakeRisks{remaining: []int{1, 2, 3}}
+	esc := &fakeEscalator{risks: risks, failIDs: map[int]bool{2: true}}
+	var recorded []int
+
+	NewEscalationJob(risks, esc, nil).
+		WithHistory(func(_ context.Context, id int, by string) {
+			if by != escalatedBy {
+				t.Errorf("record by = %q, want %q", by, escalatedBy)
+			}
+			recorded = append(recorded, id)
+		}).runOnce(context.Background())
+
+	if len(recorded) != 2 || recorded[0] != 1 || recorded[1] != 3 {
+		t.Errorf("recorded = %v, want [1 3] (the failed risk must not be recorded)", recorded)
+	}
+}

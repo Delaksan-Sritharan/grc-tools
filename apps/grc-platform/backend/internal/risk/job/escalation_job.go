@@ -70,6 +70,10 @@ type EscalationJob struct {
 	// dependency so this package doesn't import the handler package (which
 	// imports services, and would cycle).
 	notify func(ctx context.Context, riskID int, by string) error
+	// record appends the ESCALATE entry to the risk's history, as a manual
+	// escalation does. Optional; set with WithHistory. A function for the same
+	// import-cycle reason as notify.
+	record func(ctx context.Context, riskID int, by string)
 	// running serializes RunOnce against itself: the scheduler's daily tick
 	// (internal/scheduler) and the manual-trigger endpoint
 	// (handler.escalationJobHandler.run) both call RunOnce on this same
@@ -93,6 +97,13 @@ func NewEscalationJob(
 	notify func(ctx context.Context, riskID int, by string) error,
 ) *EscalationJob {
 	return &EscalationJob{risks: risks, escalation: escalation, notify: notify}
+}
+
+// WithHistory sets the hook that records each automatic escalation in the
+// risk's history, so the audit trail shows them like a manual one.
+func (j *EscalationJob) WithHistory(record func(ctx context.Context, riskID int, by string)) *EscalationJob {
+	j.record = record
+	return j
 }
 
 // RunOnce performs one escalation sweep synchronously, then returns. It is the
@@ -169,6 +180,9 @@ func (j *EscalationJob) runOnce(parent context.Context) {
 			}
 			escalated++
 			progressed = true
+			if j.record != nil {
+				j.record(ctx, r.ID, escalatedBy)
+			}
 			// Notification failure doesn't affect progressed/escalated — the
 			// risk did leave APPROVED, so the query correctly won't see
 			// it again. It's counted and logged separately instead, since

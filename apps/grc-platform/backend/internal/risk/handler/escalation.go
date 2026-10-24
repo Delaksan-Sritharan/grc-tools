@@ -67,6 +67,14 @@ func (d *Deps) handleEscalateRisk(w http.ResponseWriter, r *http.Request) {
 	response.WriteJSONValue(w, http.StatusOK, escalation)
 }
 
+// RecordAutoEscalation writes the ESCALATE history entry for an escalation the
+// daily job made, matching what handleEscalateRisk records for a manual one.
+func (d *Deps) RecordAutoEscalation(ctx context.Context, riskID int, by string) {
+	d.recordEvent(ctx, riskID, by, model.HistoryEscalate, model.HistoryDetails{
+		From: model.StatusApproved, To: model.StatusEscalated,
+	})
+}
+
 // handleListEscalations serves GET /api/v1/risks/{id}/escalations. Visible to
 // anyone who can view the risk — escalation history is system-generated (see
 // model.Escalation) and shown the same as any other risk field — except an

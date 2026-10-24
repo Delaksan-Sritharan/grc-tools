@@ -215,7 +215,21 @@ func (d *Deps) handleUpdateActionPlanStep(w http.ResponseWriter, r *http.Request
 		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
 		return
 	}
+	d.recordStepUpdate(r.Context(), riskID, planID, stepID, req.Status, by)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// recordStepUpdate adds an action-step change to the risk's history. The plan
+// label is looked up best-effort: a failed lookup only drops the label.
+func (d *Deps) recordStepUpdate(ctx context.Context, riskID, planID, stepID int, status, by string) {
+	details := model.HistoryDetails{}
+	if plan, err := d.ActionPlan.GetByID(ctx, riskID, planID); err == nil {
+		details.Plan = planLabel(plan)
+	}
+	field := fmt.Sprintf("action_step %d", stepID)
+	d.recordHistory(ctx, riskID, by, model.RecordHistoryRequest{
+		Action: model.HistoryUpdate, FieldChanged: &field, NewValue: jsonString(status), Details: &details,
+	})
 }
 
 // handleCompleteActionPlan serves

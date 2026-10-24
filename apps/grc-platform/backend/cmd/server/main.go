@@ -180,7 +180,7 @@ func main() {
 	// riskDeps.TriggerEscalationJob exposes the same RunOnce behind
 	// POST /api/v1/risks/escalations/run for QA/ops — mirrors auditDeps.
 	// TriggerReminderJob. Wired before RegisterRoutes so the handler sees it.
-	escalationJob := riskjob.NewEscalationJob(riskDeps.Risk, riskDeps.Escalation, riskDeps.NotifyEscalationSync)
+	escalationJob := riskjob.NewEscalationJob(riskDeps.Risk, riskDeps.Escalation, riskDeps.NotifyEscalationSync).WithHistory(riskDeps.RecordAutoEscalation)
 	riskDeps.TriggerEscalationJob = escalationJob.RunOnce
 	// Due-date reminder sweep — the lead-up to that escalation: 15 days out, 5
 	// days out and on the day, per the risk's effective level. Constructed the

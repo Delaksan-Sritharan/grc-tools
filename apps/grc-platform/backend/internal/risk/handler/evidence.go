@@ -18,7 +18,9 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"net/http"
@@ -169,8 +171,18 @@ func (d *Deps) handleUploadRiskEvidence(w http.ResponseWriter, r *http.Request) 
 		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
 		return
 	}
+	d.recordEvidenceChange(r.Context(), riskID, by, nil, &ev.FileName)
 	d.enrichEvidence(r.Context(), []*model.RiskEvidence{ev})
 	response.WriteJSONValue(w, http.StatusCreated, ev)
+}
+
+// recordEvidenceChange adds an evidence upload (newName set) or removal
+// (oldName set) to the risk's history.
+func (d *Deps) recordEvidenceChange(ctx context.Context, riskID int, by string, oldName, newName *string) {
+	field := "evidence"
+	d.recordHistory(ctx, riskID, by, model.RecordHistoryRequest{
+		Action: model.HistoryUpdate, FieldChanged: &field, OldValue: jsonStringPtr(oldName), NewValue: jsonStringPtr(newName),
+	})
 }
 
 // handleListRiskEvidence serves GET /api/v1/risks/{id}/evidence.
@@ -225,10 +237,21 @@ func (d *Deps) handleDeleteRiskEvidence(w http.ResponseWriter, r *http.Request) 
 		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
 		return
 	}
+	// Looked up before the delete so the history can name the file; best-effort.
+	removed := fmt.Sprintf("file %d", fileID)
+	if files, err := d.Evidence.List(r.Context(), riskID); err == nil {
+		for _, f := range files {
+			if f.ID == fileID {
+				removed = f.FileName
+				break
+			}
+		}
+	}
 	if err := d.Evidence.Delete(r.Context(), riskID, fileID, actor, canOverrideAssigneeIn(r.Context(), registerID)); err != nil {
 		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
 		return
 	}
+	d.recordEvidenceChange(r.Context(), riskID, actor, &removed, nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
