@@ -1,8 +1,9 @@
 -- Updated 24/10/2026 (v1.0.6)
 --
 -- Adds risk.risk_acceptor: who accepted the risk, CUSTOMER or WSO2. Run after
--- v1.0.5, at any time: before, with or after the new compliance-entity and
--- backend, and without the webapp being live.
+-- v1.0.5 and before deploying the new compliance-entity, which selects the
+-- column on every risk read and fails without it. Deploy order: this script,
+-- then compliance-entity, then backend, then webapp.
 --
 -- Additive only: one nullable column, no default, no backfill. Every existing
 -- risk reads NULL ("not set") until it is edited. No row, index or foreign key
