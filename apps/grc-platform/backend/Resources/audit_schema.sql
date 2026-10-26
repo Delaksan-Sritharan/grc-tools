@@ -130,6 +130,7 @@ CREATE TABLE IF NOT EXISTS audit_framework_control (
 CREATE TABLE IF NOT EXISTS audit (
   id                   INT          NOT NULL AUTO_INCREMENT,
   name                 VARCHAR(200) NOT NULL,
+  display_name         VARCHAR(200) NULL,
   framework_id         INT          NOT NULL,
   product_id           INT          NOT NULL,
   period_start         DATE         NOT NULL,
