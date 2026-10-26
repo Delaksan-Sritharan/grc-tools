@@ -91,12 +91,11 @@ func (d *Deps) handleListRiskHistory(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleAuditTrail serves GET /api/v1/risks/audit-trail — history across every
-// risk the caller can see, behind Risk Hub's Analytics > Audit Trail tab.
+// risk the caller can see, behind Risk Hub's Audit Trail page.
 //
 // Limited to risk owners and the compliance team (canViewAuditTrail), then
-// scoped exactly as
-// handleListRisks scopes the register, so the trail never shows a change on a
-// risk the register would hide. Every branch fails closed: a caller who cannot
+// scoped exactly as handleListRisks scopes the register, so the trail never
+// shows a change on a risk the register would hide. Every branch fails closed: a caller who cannot
 // be scoped gets an empty page, never an unscoped one.
 func (d *Deps) handleAuditTrail(w http.ResponseWriter, r *http.Request) {
 	if _, ok := requireCallerUUID(w, r); !ok {
