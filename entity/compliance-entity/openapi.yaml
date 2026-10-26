@@ -6135,7 +6135,7 @@ components:
           - TRANSFER
           - AVOID
           nullable: true
-        riskAcceptor:
+        riskAcceptor: &id019a
           type: string
           enum:
           - CUSTOMER
@@ -7547,6 +7547,7 @@ components:
         ownerUuid: *id017
         workflowStatus: *id018
         treatmentStrategy: *id019
+        riskAcceptor: *id019a
         grossScoreId: *id020
         grossRiskLevel: *id021
         implementationDate: *id022
