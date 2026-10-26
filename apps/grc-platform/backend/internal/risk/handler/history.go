@@ -95,8 +95,8 @@ func (d *Deps) handleListRiskHistory(w http.ResponseWriter, r *http.Request) {
 //
 // Limited to risk owners and the compliance team (canViewAuditTrail), then
 // scoped exactly as handleListRisks scopes the register, so the trail never
-// shows a change on a risk the register would hide. Every branch fails closed: a caller who cannot
-// be scoped gets an empty page, never an unscoped one.
+// shows a change on a risk the register would hide. Every branch fails closed:
+// a caller who cannot be scoped gets an empty page, never an unscoped one.
 func (d *Deps) handleAuditTrail(w http.ResponseWriter, r *http.Request) {
 	if _, ok := requireCallerUUID(w, r); !ok {
 		return
@@ -133,19 +133,6 @@ func (d *Deps) handleAuditTrail(w http.ResponseWriter, r *http.Request) {
 	// Taken from the caller, never the query string: it widens visibility.
 	if user := auth.FromContext(r.Context()); user != nil {
 		filter.EscalationLeadUUID = user.Subject
-	}
-	if holdsNoGrants(r.Context()) {
-		callerUUID, _ := requireCallerUUID(w, r)
-		caller, err := d.Users.GetByUUID(r.Context(), callerUUID)
-		if err != nil {
-			response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
-			return
-		}
-		if caller == nil {
-			empty()
-			return
-		}
-		filter.ActionOwnerID = &caller.ID
 	}
 	if isTeamScopedOnly(r.Context()) {
 		teamIDs := callerGrants(r.Context()).RiskScopeIDs()
