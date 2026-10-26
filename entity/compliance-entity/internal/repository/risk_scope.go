@@ -84,10 +84,12 @@ func placeholders(n int) string {
 	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
 }
 
-// riskVisibilityClause is the per-risk visibility rule SearchRisks applies,
-// for queries that reach risks through another table: the Action Owner
+// riskVisibilityClause is the per-risk visibility rule: the Action Owner
 // restriction, then team scoping, with an escalation lead granted the one risk
 // they are named on. Empty scope and no action owner means unrestricted.
+//
+// SearchRisks and the audit trail both build their visibility from this, so a
+// change to who can see a risk applies to both.
 func riskVisibilityClause(alias string, actionOwnerID *int, escalationLeadUUID string, sourceIDs, assignmentIDs []int) (string, []any) {
 	var clause string
 	var args []any

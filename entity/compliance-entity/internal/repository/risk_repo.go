@@ -203,32 +203,20 @@ func (r *riskRepo) SearchRisks(ctx context.Context, req domain.SearchRisksReques
 			args = append(args, id)
 		}
 	}
-	if req.ActionOwnerID != nil {
-		where += " AND EXISTS (SELECT 1 FROM risk_action_plan ap WHERE ap.risk_id = r.id AND ap.action_owner_id = ?)"
-		args = append(args, *req.ActionOwnerID)
-	}
 	if req.OpenEscalationOnly {
 		where += " AND EXISTS (SELECT 1 FROM risk_escalation e WHERE e.risk_id = r.id AND e.status = 'OPEN')"
 	}
 	if req.ExcludeOpenEscalation {
 		where += " AND NOT EXISTS (SELECT 1 FROM risk_escalation e WHERE e.risk_id = r.id AND e.status = 'OPEN')"
 	}
-	if scopeClause, scopeArgs := scopeFilter("r", req.ScopeSourceRegisterIDs, req.ScopeAssignmentTeamIDs); scopeClause != "" {
-		// A lead named on an open escalation is granted access to that one risk
-		// regardless of team scoping, so the two are OR-ed rather than AND-ed.
-		// Matching is on uuid, not user id, because a lead may have no
-		// platform user row.
-		if req.EscalationLeadUUID != "" {
-			where += " AND ((1=1" + scopeClause + ") OR EXISTS (SELECT 1 FROM risk_escalation e" +
-				" WHERE e.risk_id = r.id AND e.status = 'OPEN'" +
-				" AND (e.assigner_lead_uuid = ? OR e.action_owner_lead_uuid = ?)))"
-			args = append(args, scopeArgs...)
-			args = append(args, req.EscalationLeadUUID, req.EscalationLeadUUID)
-		} else {
-			where += scopeClause
-			args = append(args, scopeArgs...)
-		}
-	}
+	// The Action Owner restriction and team scoping (with the escalation lead's
+	// one-risk grant) live in riskVisibilityClause, shared with the audit trail
+	// so the two cannot disagree about which risks a caller can see.
+	visClause, visArgs := riskVisibilityClause("r", req.ActionOwnerID, req.EscalationLeadUUID,
+		req.ScopeSourceRegisterIDs, req.ScopeAssignmentTeamIDs)
+	where += visClause
+	args = append(args, visArgs...)
+
 	// created_at is a datetime, so the bounds are widened to whole days;
 	// otherwise "submitted up to the 5th" would exclude everything after
 	// midnight on the 5th.
