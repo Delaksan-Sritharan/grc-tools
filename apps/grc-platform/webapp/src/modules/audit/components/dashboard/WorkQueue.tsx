@@ -43,6 +43,7 @@ import { useNavigate } from "react-router";
 import ControlStatusChip from "@modules/audit/components/ControlStatusChip";
 import { CONTROL_STATUS_LABELS } from "@modules/audit/utils/controlStatus";
 import type { ControlStatus } from "@modules/audit/types/audit";
+import { auditDisplayName } from "@modules/audit/utils/format";
 import type { ActionItem } from "@modules/audit/types/dashboard";
 import { useGetWorkQueue, type WorkQueueTab, type DueSort } from "@modules/audit/api/useGetWorkQueue";
 import { useGetTeams } from "@modules/audit/api/useGetTeams";
@@ -352,7 +353,7 @@ function TabPanel({ tab, canApprove, canSubmit, emptyText }: TabPanelProps): JSX
   }, [usersData, items]);
 
   const audits: FilterOption<number>[] = (auditsData?.items ?? [])
-    .map((a) => ({ id: a.id, label: a.name }))
+    .map((a) => ({ id: a.id, label: auditDisplayName(a) }))
     .sort((a, b) => a.label.localeCompare(b.label));
 
   const statusOptions: FilterOption<string>[] = tabStatuses.map((s) => ({ id: s, label: CONTROL_STATUS_LABELS[s] }));

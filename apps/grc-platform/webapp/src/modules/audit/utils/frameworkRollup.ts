@@ -15,6 +15,7 @@
 // under the License.
 
 import type { Audit, AuditControl } from "@modules/audit/types/audit";
+import { auditDisplayName } from "@modules/audit/utils/format";
 import type {
   AuditRollup,
   BlockerReason,
@@ -120,7 +121,7 @@ function buildBlockers(audit: Audit, controls: AuditControl[], today: Date): Blo
       reason,
       dueDate: control.dueDate,
       auditId: audit.id,
-      auditName: audit.name,
+      auditName: auditDisplayName(audit),
     });
   }
   return sortBlockers(rows);
@@ -210,7 +211,7 @@ export function computeAuditRollup(audit: Audit, controls: AuditControl[] | unde
 
   return {
     id: audit.id,
-    name: audit.name,
+    name: auditDisplayName(audit),
     total,
     complete: approved,
     completionPercent,
