@@ -24,6 +24,9 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/apierror"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/audit/model"
@@ -142,7 +145,7 @@ func (s *auditService) Create(ctx context.Context, req model.CreateAuditRequest,
 	if name == "" {
 		return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "name is required"}
 	}
-	if err := s.checkNameAvailable(ctx, name, 0); err != nil {
+	if err := s.checkNameAvailable(ctx, name, 0, "an audit named \""+name+"\" already exists"); err != nil {
 		return nil, err
 	}
 	req.Name = name
@@ -166,21 +169,51 @@ func composeAuditName(frameworkName, productName, periodStart string) string {
 }
 
 // checkNameAvailable enforces case-insensitive uniqueness across all audits,
-// excluding excludeID (used by Update to allow an audit to keep its own name).
+// against both their storage name and their display name, excluding excludeID
+// (used by Update to allow an audit to keep its own name).
 // This is an app-level check only — it cannot close a create/create race, but a
 // concurrent duplicate is vanishingly unlikely for a human-driven creation flow
 // and the entity is out of scope for a DB-level constraint here.
-func (s *auditService) checkNameAvailable(ctx context.Context, name string, excludeID int) error {
+func (s *auditService) checkNameAvailable(ctx context.Context, name string, excludeID int, conflictMsg string) error {
 	existing, err := s.repo.List(ctx)
 	if err != nil {
 		return err
 	}
 	for _, a := range existing {
-		if a.ID != excludeID && strings.EqualFold(a.Name, name) {
-			return &apierror.Error{StatusCode: http.StatusConflict, Body: "an audit named \"" + name + "\" already exists"}
+		if a.ID == excludeID {
+			continue
+		}
+		if strings.EqualFold(a.Name, name) || (a.DisplayName != nil && strings.EqualFold(*a.DisplayName, name)) {
+			return &apierror.Error{StatusCode: http.StatusConflict, Body: conflictMsg}
 		}
 	}
 	return nil
+}
+
+// errAuditNameExists is the 409 body for a rename that collides with another
+// audit's name or display name.
+const errAuditNameExists = "Audit name already exists"
+
+// maxDisplayNameLen matches the audit.display_name column (VARCHAR(200)).
+const maxDisplayNameLen = 200
+
+// validateDisplayName trims and validates a rename request. The display name is
+// never used in a storage path, so unlike the audit name it is not sanitized —
+// only bounded and checked for control characters.
+func validateDisplayName(raw string) (string, error) {
+	name := strings.TrimSpace(raw)
+	if name == "" {
+		return "", &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "displayName must not be empty"}
+	}
+	if utf8.RuneCountInString(name) > maxDisplayNameLen {
+		return "", &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "displayName must be at most 200 characters"}
+	}
+	for _, r := range name {
+		if unicode.IsControl(r) {
+			return "", &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "displayName must not contain control characters"}
+		}
+	}
+	return name, nil
 }
 
 func (s *auditService) Update(ctx context.Context, id int, req model.UpdateAuditRequest, updatedBy string) error {
@@ -198,12 +231,88 @@ func (s *auditService) Update(ctx context.Context, id int, req model.UpdateAudit
 	if req.Name != nil && !strings.EqualFold(strings.TrimSpace(*req.Name), a.Name) {
 		return &apierror.Error{StatusCode: http.StatusConflict, Body: "audit name is locked once created — it is used as the evidence storage path"}
 	}
+	// Rename: sets the display name only — a.Name (the storage folder) is never
+	// touched. A request that leaves the effective name as it is passes through
+	// untouched, so an unrelated broader update is never blocked by it.
+	if req.DisplayName != nil {
+		name, err := validateDisplayName(*req.DisplayName)
+		if err != nil {
+			return err
+		}
+		req.DisplayName = &name
+		if name == a.EffectiveName() {
+			req.DisplayName = nil // unchanged: nothing to write or log
+		} else {
+			if a.Status != "ACTIVE" {
+				return &apierror.Error{StatusCode: http.StatusConflict, Body: "only active audits can be edited"}
+			}
+			if err := s.checkNameAvailable(ctx, name, id, errAuditNameExists); err != nil {
+				return err
+			}
+		}
+	}
+	if err := validateAuditDetails(a, &req); err != nil {
+		return err
+	}
 	if err := s.repo.Update(ctx, id, req, updatedBy); err != nil {
 		return err
 	}
 	// Logged as a generic UPDATED entry regardless of which fields changed — no
 	// special-cased status-change event, even when Status is the only field set.
 	s.recordTrail(ctx, id, "UPDATED", updatedBy, updatedAuditFields(req))
+	return nil
+}
+
+// validateAuditDetails checks an edit of the audit period or scope description.
+// Values equal to the current ones are dropped from req (nothing to write or
+// log), so a request that leaves them as they are never trips the checks
+// below. A real change is allowed only on an ACTIVE audit, and the resulting
+// period must be well-formed with periodEnd not before periodStart.
+func validateAuditDetails(a *model.Audit, req *model.UpdateAuditRequest) error {
+	if req.PeriodStart != nil && *req.PeriodStart == a.PeriodStart {
+		req.PeriodStart = nil
+	}
+	if req.PeriodEnd != nil && *req.PeriodEnd == a.PeriodEnd {
+		req.PeriodEnd = nil
+	}
+	if req.ScopeDescription != nil {
+		scope := strings.TrimSpace(*req.ScopeDescription)
+		req.ScopeDescription = &scope
+		current := ""
+		if a.ScopeDescription != nil {
+			current = *a.ScopeDescription
+		}
+		if scope == current {
+			req.ScopeDescription = nil
+		}
+	}
+	if req.PeriodStart == nil && req.PeriodEnd == nil && req.ScopeDescription == nil {
+		return nil
+	}
+	if a.Status != "ACTIVE" {
+		return &apierror.Error{StatusCode: http.StatusConflict, Body: "only active audits can be edited"}
+	}
+	if req.PeriodStart == nil && req.PeriodEnd == nil {
+		return nil
+	}
+	start, end := a.PeriodStart, a.PeriodEnd
+	if req.PeriodStart != nil {
+		start = *req.PeriodStart
+	}
+	if req.PeriodEnd != nil {
+		end = *req.PeriodEnd
+	}
+	startDate, err := time.Parse("2006-01-02", start)
+	if err != nil {
+		return &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "periodStart must be a date in YYYY-MM-DD format"}
+	}
+	endDate, err := time.Parse("2006-01-02", end)
+	if err != nil {
+		return &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "periodEnd must be a date in YYYY-MM-DD format"}
+	}
+	if endDate.Before(startDate) {
+		return &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "periodEnd must not be before periodStart"}
+	}
 	return nil
 }
 
@@ -222,6 +331,9 @@ func updatedAuditFields(req model.UpdateAuditRequest) map[string]any {
 	}
 	if req.Status != nil {
 		details["status"] = *req.Status
+	}
+	if req.DisplayName != nil {
+		details["displayName"] = *req.DisplayName
 	}
 	return details
 }
@@ -242,6 +354,6 @@ func (s *auditService) Delete(ctx context.Context, id int, deletedBy string) err
 	// but this matches the "record before delete" ordering used for controls
 	// (where the row is a hard delete and order matters) rather than relying on
 	// that distinction holding forever.
-	s.recordTrail(ctx, id, "DELETED", deletedBy, map[string]any{"name": a.Name})
+	s.recordTrail(ctx, id, "DELETED", deletedBy, map[string]any{"name": a.EffectiveName()})
 	return s.repo.Delete(ctx, id, deletedBy)
 }

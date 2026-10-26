@@ -195,7 +195,7 @@ func (h *portalHandler) listControls(w http.ResponseWriter, r *http.Request) {
 		}
 		rows = append(rows, portalControlRow{
 			Audit: portalAuditRef{
-				ID: a.ID, Name: a.Name,
+				ID: a.ID, Name: a.EffectiveName(),
 				Product: a.Product.Name, Framework: a.Framework.Name,
 			},
 			Control: portalControlRef{

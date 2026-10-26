@@ -4832,6 +4832,11 @@ components:
           type: integer
         name:
           type: string
+          description: Evidence storage folder key; never changes after creation.
+        displayName:
+          type: string
+          nullable: true
+          description: User-facing name set by a rename; null means show name.
         framework:
           $ref: '#/components/schemas/AuditFrameworkRef'
         product:
@@ -4895,6 +4900,17 @@ components:
         name:
           type: string
           nullable: true
+        displayName:
+          type: string
+          nullable: true
+          description: >-
+            Renames an ACTIVE audit (max 200 chars, unique across audits,
+            case-insensitive). 409 "Audit name already exists" on a clash;
+            409 "only active audits can be edited" if the audit is not
+            ACTIVE; 422 if empty or invalid. The storage folder is unchanged.
+            Changing periodStart/periodEnd/scopeDescription has the same
+            ACTIVE-only rule; 422 if a date is not YYYY-MM-DD or periodEnd
+            is before periodStart. Values equal to the current ones are ignored.
         periodStart:
           type: string
           format: date

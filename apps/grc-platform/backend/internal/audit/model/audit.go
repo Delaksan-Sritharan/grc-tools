@@ -41,8 +41,12 @@ type ControlCounts struct {
 
 // Audit represents a GRC audit engagement.
 type Audit struct {
-	ID               int               `json:"id"`
+	ID int `json:"id"`
+	// Name is the evidence storage folder key and never changes after creation.
+	// DisplayName is the user-facing name set by a rename; nil means "show Name".
+	// Anything shown to people should use EffectiveName.
 	Name             string            `json:"name"`
+	DisplayName      *string           `json:"displayName"`
 	Framework        AuditFrameworkRef `json:"framework"`
 	Product          AuditProductRef   `json:"product"`
 	PeriodStart      string            `json:"periodStart"`
@@ -52,6 +56,15 @@ type Audit struct {
 	ControlCounts    ControlCounts     `json:"controlCounts"`
 	CreatedAt        time.Time         `json:"createdAt"`
 	UpdatedAt        time.Time         `json:"updatedAt"`
+}
+
+// EffectiveName is the name people see: the display name when one was set by a
+// rename, otherwise Name. Never use it to build storage paths (use Name).
+func (a *Audit) EffectiveName() string {
+	if a.DisplayName != nil && *a.DisplayName != "" {
+		return *a.DisplayName
+	}
+	return a.Name
 }
 
 // IsOngoing reports whether the audit still counts as live work. ARCHIVED is
@@ -81,6 +94,7 @@ type CreateAuditRequest struct {
 // All fields are optional; nil means "do not change".
 type UpdateAuditRequest struct {
 	Name             *string `json:"name"`
+	DisplayName      *string `json:"displayName"`
 	PeriodStart      *string `json:"periodStart"`
 	PeriodEnd        *string `json:"periodEnd"`
 	ScopeDescription *string `json:"scopeDescription"`

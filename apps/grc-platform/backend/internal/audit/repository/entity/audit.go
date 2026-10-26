@@ -47,6 +47,7 @@ func withField(body any, extra map[string]any) map[string]any {
 type entAudit struct {
 	ID               int       `json:"id"`
 	Name             string    `json:"name"`
+	DisplayName      *string   `json:"displayName"`
 	FrameworkID      int       `json:"frameworkId"`
 	FrameworkName    string    `json:"frameworkName"`
 	ProductID        int       `json:"productId"`
@@ -66,6 +67,7 @@ func (a entAudit) toModel() *model.Audit {
 	return &model.Audit{
 		ID:               a.ID,
 		Name:             a.Name,
+		DisplayName:      a.DisplayName,
 		Framework:        model.AuditFrameworkRef{ID: a.FrameworkID, Name: a.FrameworkName},
 		Product:          model.AuditProductRef{ID: a.ProductID, Name: a.ProductName},
 		PeriodStart:      a.PeriodStart,
