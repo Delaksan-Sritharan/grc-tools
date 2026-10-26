@@ -74,3 +74,27 @@ func TestJSONString(t *testing.T) {
 		t.Error("jsonStringPtr(nil) must stay nil")
 	}
 }
+
+// Status is the only value a step update records, so an update that leaves it
+// empty (a description-only edit) must not add an entry with an empty value.
+func TestRecordStepUpdate_SkipsEmptyStatus(t *testing.T) {
+	var got []model.RecordHistoryRequest
+	d := &Deps{
+		History:    &recordingHistory{onRecord: func(r model.RecordHistoryRequest) { got = append(got, r) }},
+		ActionPlan: &fakeActionPlanSvc{plans: []*model.ActionPlan{{ID: 5, RiskID: 1}}},
+	}
+
+	d.recordStepUpdate(context.Background(), 1, 5, 9, "", "by")
+	if len(got) != 0 {
+		t.Fatalf("empty status recorded %d entries, want 0", len(got))
+	}
+
+	d.recordStepUpdate(context.Background(), 1, 5, 9, "COMPLETED", "by")
+	if len(got) != 1 {
+		t.Fatalf("recorded %d entries, want 1", len(got))
+	}
+	r := got[0]
+	if r.FieldChanged == nil || *r.FieldChanged != "action_step 9" || r.NewValue == nil || *r.NewValue != `"COMPLETED"` {
+		t.Errorf("entry = field %v, new %v", r.FieldChanged, r.NewValue)
+	}
+}

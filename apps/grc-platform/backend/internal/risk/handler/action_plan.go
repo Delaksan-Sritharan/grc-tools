@@ -221,7 +221,12 @@ func (d *Deps) handleUpdateActionPlanStep(w http.ResponseWriter, r *http.Request
 
 // recordStepUpdate adds an action-step change to the risk's history. The plan
 // label is looked up best-effort: a failed lookup only drops the label.
+// Status is the only value recorded, so an update that leaves it empty (for
+// example a description-only edit) adds no entry.
 func (d *Deps) recordStepUpdate(ctx context.Context, riskID, planID, stepID int, status, by string) {
+	if status == "" {
+		return
+	}
 	details := model.HistoryDetails{}
 	if plan, err := d.ActionPlan.GetByID(ctx, riskID, planID); err == nil {
 		details.Plan = planLabel(plan)
