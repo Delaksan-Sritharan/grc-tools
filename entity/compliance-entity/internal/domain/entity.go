@@ -251,8 +251,11 @@ type SearchAuditProductsResponse struct {
 // Audit represents an audit engagement from the `audit` table.
 // Framework and product names are joined in to avoid extra round-trips.
 type Audit struct {
-	ID               int       `json:"id"`
-	Name             string    `json:"name"`
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+	// DisplayName is the user-facing name set by a rename; nil means "show Name".
+	// Name stays the evidence storage folder and is never changed by a rename.
+	DisplayName      *string   `json:"displayName"`
 	FrameworkID      int       `json:"frameworkId"`
 	FrameworkName    string    `json:"frameworkName"`
 	ProductID        int       `json:"productId"`
@@ -878,6 +881,7 @@ type CreateAuditRequest struct {
 // UpdateAuditRequest is the payload for PATCH /audits/{id}.
 type UpdateAuditRequest struct {
 	Name             *string `json:"name"`
+	DisplayName      *string `json:"displayName"` // "" clears it back to NULL
 	Status           *string `json:"status"`
 	PeriodStart      *string `json:"periodStart"`
 	PeriodEnd        *string `json:"periodEnd"`

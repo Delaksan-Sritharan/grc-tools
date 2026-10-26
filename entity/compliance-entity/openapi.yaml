@@ -4531,6 +4531,10 @@ components:
           type: integer
         name:
           type: string
+        displayName:
+          type: string
+          nullable: true
+          description: User-facing name set by a rename; null means show name.
         frameworkId:
           type: integer
         frameworkName:
@@ -4644,6 +4648,10 @@ components:
         name:
           type: string
           nullable: true
+        displayName:
+          type: string
+          nullable: true
+          description: Empty string clears it back to null.
         status:
           type: string
           nullable: true

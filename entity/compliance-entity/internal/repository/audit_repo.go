@@ -42,7 +42,7 @@ type auditRepo struct{ db *sql.DB }
 func NewAuditRepository(db *sql.DB) AuditRepository { return &auditRepo{db: db} }
 
 const auditSelectCols = `
-  a.id, a.name,
+  a.id, a.name, a.display_name,
   a.framework_id, f.name AS framework_name,
   a.product_id,   p.name AS product_name,
   DATE_FORMAT(a.period_start, '%Y-%m-%d'), DATE_FORMAT(a.period_end, '%Y-%m-%d'),
@@ -92,8 +92,9 @@ func (r *auditRepo) SearchAudits(ctx context.Context, req domain.SearchAuditsReq
 	where := "WHERE 1=1"
 
 	if req.SearchQuery != "" {
-		where += " AND a.name LIKE ?"
-		args = append(args, "%"+likeEscape(req.SearchQuery)+"%")
+		where += " AND (a.name LIKE ? OR a.display_name LIKE ?)"
+		like := "%" + likeEscape(req.SearchQuery) + "%"
+		args = append(args, like, like)
 	}
 	if len(req.StatusKeys) > 0 {
 		placeholders := strings.Repeat("?,", len(req.StatusKeys))
@@ -195,6 +196,15 @@ func (r *auditRepo) UpdateAudit(ctx context.Context, id int, req domain.UpdateAu
 		sets = append(sets, "name = ?")
 		args = append(args, *req.Name)
 	}
+	if req.DisplayName != nil {
+		// An empty string clears the override, so the audit shows its name again.
+		sets = append(sets, "display_name = ?")
+		displayName := sql.NullString{}
+		if v := strings.TrimSpace(*req.DisplayName); v != "" {
+			displayName = sql.NullString{String: v, Valid: true}
+		}
+		args = append(args, displayName)
+	}
 	if req.Status != nil {
 		sets = append(sets, "status = ?")
 		args = append(args, *req.Status)
@@ -243,9 +253,9 @@ type scanner interface {
 
 func scanAudit(s scanner) (*domain.Audit, error) {
 	var a domain.Audit
-	var scopeDesc sql.NullString
+	var scopeDesc, displayName sql.NullString
 	err := s.Scan(
-		&a.ID, &a.Name,
+		&a.ID, &a.Name, &displayName,
 		&a.FrameworkID, &a.FrameworkName,
 		&a.ProductID, &a.ProductName,
 		&a.PeriodStart, &a.PeriodEnd,
@@ -255,6 +265,9 @@ func scanAudit(s scanner) (*domain.Audit, error) {
 	)
 	if err != nil {
 		return nil, err
+	}
+	if displayName.Valid {
+		a.DisplayName = &displayName.String
 	}
 	if scopeDesc.Valid {
 		a.ScopeDescription = &scopeDesc.String
