@@ -260,6 +260,13 @@ func (r *riskRepo) SearchRisks(ctx context.Context, req domain.SearchRisksReques
 			args = append(args, id)
 		}
 	}
+	if len(req.CategoryIDs) > 0 {
+		where += " AND EXISTS (SELECT 1 FROM risk_category_reference rc WHERE rc.risk_id = r.id AND rc.category_id IN (" +
+			placeholders(len(req.CategoryIDs)) + "))"
+		for _, id := range req.CategoryIDs {
+			args = append(args, id)
+		}
+	}
 	if len(req.EnvironmentKeys) > 0 {
 		where += " AND EXISTS (SELECT 1 FROM risk_environment_reference e WHERE e.risk_id = r.id AND e.environment IN (" +
 			placeholders(len(req.EnvironmentKeys)) + "))"

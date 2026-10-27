@@ -3062,6 +3062,11 @@ paths:
         description: Comma-separated owner user IDs.
         schema:
           type: string
+      - name: category_id
+        in: query
+        description: Comma-separated Risk Category IDs; a risk tagged with any of them matches.
+        schema:
+          type: string
       - name: customer_id
         in: query
         description: Comma-separated customer IDs (Managed Services risks).

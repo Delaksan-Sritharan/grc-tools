@@ -151,6 +151,9 @@ type ListRisksFilter struct {
 	// ACCEPT / TRANSFER / AVOID / UNSPECIFIED (empty = all).
 	TreatmentStrategies []string
 	OwnerIDs            []int // owner_id values to include (empty = all)
+	// CategoryIDs restricts to risks tagged with any of these Risk Categories
+	// (empty = all).
+	CategoryIDs []int
 	// Register-template filters (empty = all). A risk whose template lacks the
 	// field never matches.
 	CustomerIDs    []int
