@@ -289,6 +289,23 @@ func (s *Set) scopeIDsWithBasis(scopeType, basis string, registerCapableOnly boo
 	return out
 }
 
+// HasRole reports whether the caller holds any grant of one of the named roles,
+// at any scope. For the few features limited to named roles rather than to a
+// privilege several roles share; everything else should ask about a privilege.
+func (s *Set) HasRole(roles ...string) bool {
+	if s == nil {
+		return false
+	}
+	for _, g := range s.grants {
+		for _, r := range roles {
+			if g.RoleName == r {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // IsEmpty reports whether the caller holds no grants at all.
 //
 // Such a caller is not necessarily unauthorised: they reach exactly the risks

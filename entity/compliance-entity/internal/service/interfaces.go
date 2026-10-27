@@ -288,6 +288,8 @@ type RiskEscalationService interface {
 type RiskChangeLogService interface {
 	CreateRiskChangeLog(ctx context.Context, riskID int, req domain.CreateRiskChangeLogRequest) (domain.RiskChangeLog, error)
 	ListRiskChangeLog(ctx context.Context, riskID int, limit, offset int) (domain.ListRiskChangeLogResponse, error)
+	// SearchRiskChangeLog lists changes across risks within the request's scope.
+	SearchRiskChangeLog(ctx context.Context, req domain.SearchRiskChangeLogRequest) (domain.SearchRiskChangeLogResponse, error)
 }
 
 // DashboardService defines the read query for the audit dashboard.

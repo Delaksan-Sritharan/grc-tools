@@ -19,6 +19,7 @@ package service
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/apierror"
 	"github.com/wso2-open-operations/grc-tools/entity/compliance-entity/internal/domain"
@@ -82,4 +83,29 @@ func (s *riskChangeLogService) ListRiskChangeLog(ctx context.Context, riskID int
 		entries = []domain.RiskChangeLog{}
 	}
 	return domain.ListRiskChangeLogResponse{Changes: entries, Total: total, Limit: p.Limit, Offset: p.Offset}, nil
+}
+
+func (s *riskChangeLogService) SearchRiskChangeLog(ctx context.Context, req domain.SearchRiskChangeLogRequest) (domain.SearchRiskChangeLogResponse, error) {
+	for i, a := range req.Actions {
+		req.Actions[i] = strings.ToUpper(a)
+		if !validChangeLogActions[req.Actions[i]] {
+			return domain.SearchRiskChangeLogResponse{}, &apierror.ValidationError{Msg: "invalid action: " + a}
+		}
+	}
+	for field, v := range map[string]string{"from": req.From, "to": req.To} {
+		if v == "" {
+			continue
+		}
+		if _, err := time.Parse("2006-01-02", v); err != nil {
+			return domain.SearchRiskChangeLogResponse{}, &apierror.ValidationError{Msg: field + " must be YYYY-MM-DD"}
+		}
+	}
+	p := domain.Pagination{Limit: req.Limit, Offset: req.Offset}
+	normalizePagination(&p)
+	req.Limit, req.Offset = p.Limit, p.Offset
+	items, total, err := s.repo.SearchRiskChangeLog(ctx, req)
+	if err != nil {
+		return domain.SearchRiskChangeLogResponse{}, err
+	}
+	return domain.SearchRiskChangeLogResponse{Items: items, Total: total, Limit: p.Limit, Offset: p.Offset}, nil
 }

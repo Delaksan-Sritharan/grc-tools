@@ -380,6 +380,7 @@ func NewRouter(db *sql.DB, store *storage.Service) http.Handler {
 	// Risk change log (audit trail for risks; append-only)
 	mux.HandleFunc("POST /risks/{riskId}/changes", riskChangeLogH.CreateRiskChangeLog)
 	mux.HandleFunc("GET /risks/{riskId}/changes", riskChangeLogH.ListRiskChangeLog)
+	mux.HandleFunc("POST /risk/changes/search", riskChangeLogH.SearchRiskChangeLog)
 
 	// Risk evidence files (nested under risks)
 	mux.HandleFunc("POST /risks/{riskId}/evidence", riskEvidenceH.CreateRiskEvidence)

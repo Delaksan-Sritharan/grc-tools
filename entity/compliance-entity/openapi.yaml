@@ -2540,6 +2540,28 @@ paths:
                 $ref: '#/components/schemas/RiskAnalyticsSummary'
         '400': *id002
         '500': *id001
+  /risk/changes/search:
+    post:
+      tags:
+      - Risk Change Log
+      summary: Search the change log across risks
+      description: Newest-first changes joined to their risk's code and title, limited to the risks the request's scope allows.
+      operationId: searchRiskChangeLog
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchRiskChangeLogRequest'
+      responses:
+        '200':
+          description: One page of changes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchRiskChangeLogResponse'
+        '400': *id002
+        '500': *id001
   /risks/search:
     post:
       tags:
@@ -6907,6 +6929,61 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/RiskChangeLog'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+    SearchRiskChangeLogRequest:
+      type: object
+      properties:
+        limit:
+          type: integer
+        offset:
+          type: integer
+        from:
+          type: string
+          description: YYYY-MM-DD, inclusive.
+        to:
+          type: string
+          description: YYYY-MM-DD, inclusive.
+        actions:
+          type: array
+          items:
+            type: string
+        riskQuery:
+          type: string
+          description: Substring of the risk code or title.
+        actionOwnerId:
+          type: integer
+          nullable: true
+        escalationLeadUuid:
+          type: string
+        scopeSourceRegisterIds:
+          type: array
+          items:
+            type: integer
+        scopeAssignmentTeamIds:
+          type: array
+          items:
+            type: integer
+    RiskChangeLogItem:
+      allOf:
+      - $ref: '#/components/schemas/RiskChangeLog'
+      - type: object
+        properties:
+          riskCode:
+            type: string
+          riskTitle:
+            type: string
+    SearchRiskChangeLogResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RiskChangeLogItem'
         total:
           type: integer
         limit:

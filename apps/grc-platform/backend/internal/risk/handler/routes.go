@@ -209,6 +209,8 @@ func RegisterRoutes(mux routeguard.Router, deps Deps) {
 
 	// Analytics — module-level aggregate view, same rationale as dashboard.
 	mux.HandleFunc("GET /api/v1/risks/analytics/summary", d.handleAnalyticsSummary)
+	// Audit trail — history across risks, behind Risk Hub's Audit Trail page.
+	mux.HandleFunc("GET /api/v1/risks/audit-trail", d.handleAuditTrail)
 
 	// Action plans (additional plans added by the Risk Assigner; step
 	// completion by the plan's Action Owner)

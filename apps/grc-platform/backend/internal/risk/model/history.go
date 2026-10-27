@@ -62,8 +62,11 @@ type HistoryEntry struct {
 	// resolved — directory unreachable, uuid not backfilled, or the daily
 	// escalation job's "system" sentinel — in which case the client falls back
 	// to CreatedBy, same convention as the backend's own describeActor.
-	CreatedByEmail string    `json:"created_by_email,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
+	CreatedByEmail string `json:"created_by_email,omitempty"`
+	// CreatedByName is the same person's display name, for when the directory
+	// has a name but no email on file. Same fallback contract as CreatedByEmail.
+	CreatedByName string    `json:"created_by_name,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // HistoryDetails is the payload recorded alongside a workflow event. Every
@@ -97,4 +100,36 @@ type RecordHistoryRequest struct {
 	OldValue     *string
 	NewValue     *string
 	Details      *HistoryDetails
+}
+
+// AuditTrailEntry is a history entry together with the risk it belongs to, for
+// the cross-risk audit trail.
+type AuditTrailEntry struct {
+	HistoryEntry
+	RiskCode  string `json:"risk_code"`
+	RiskTitle string `json:"risk_title"`
+}
+
+// AuditTrailFilter selects a page of the cross-risk audit trail. The scope
+// fields are set from the caller's grants, never from the request.
+type AuditTrailFilter struct {
+	From      string   // YYYY-MM-DD, inclusive
+	To        string   // YYYY-MM-DD, inclusive
+	Actions   []string // empty means any action
+	RiskQuery string   // matches risk code or title
+	Limit     int
+	Offset    int
+
+	ActionOwnerID          *int
+	EscalationLeadUUID     string
+	ScopeSourceRegisterIDs []int
+	ScopeAssignmentTeamIDs []int
+}
+
+// AuditTrailPage is one page of the cross-risk audit trail.
+type AuditTrailPage struct {
+	Items  []*AuditTrailEntry `json:"items"`
+	Total  int                `json:"total"`
+	Offset int                `json:"offset"`
+	Limit  int                `json:"limit"`
 }

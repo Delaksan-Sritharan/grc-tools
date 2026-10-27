@@ -21,7 +21,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/apierror"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/model"
@@ -115,6 +117,57 @@ func (r *riskRepository) Update(ctx context.Context, id int, req model.UpdateRis
 	logChange("remarks", derefOr(current.Remarks), req.Remarks)
 	logChange("git_issue_url", derefOr(current.GitIssueURL), req.GitIssueURL)
 	logChange("reassessment_date", derefOr(current.ReassessmentDate), req.ReassessmentDate)
+	// The stored date reads back as RFC3339 and the form sends YYYY-MM-DD, so
+	// compare calendar days or every edit would log an unchanged date.
+	logChange("risk_identified_date", calendarDay(derefOr(current.RiskIdentifiedDate)), calendarDay(req.RiskIdentifiedDate))
+	logChange("identified_by_type", derefOr(current.IdentifiedByType), req.IdentifiedByType)
+	if req.IdentifiedByName != nil {
+		logChange("identified_by_name", derefOr(current.IdentifiedByName), *req.IdentifiedByName)
+	}
+	// email_subject is the one field the entity overwrites unconditionally, so
+	// an empty value really does clear it; logChange skips empty values, which
+	// is right for every field the entity leaves alone when omitted.
+	if req.EmailSubject == "" && derefOr(current.EmailSubject) != "" {
+		oldJSON, _ := json.Marshal(derefOr(current.EmailSubject))
+		changeLog = append(changeLog, map[string]any{
+			"action":       "UPDATE",
+			"fieldChanged": "email_subject",
+			"oldValue":     string(oldJSON),
+			"newValue":     `""`,
+		})
+	}
+	// Ids and lists below are logged as ids: names would need a lookup per
+	// value, and the risk drawer already hides id-valued diffs behind the
+	// field label. Only a supplied value counts, as for every field above.
+	if req.GrossScoreID != nil {
+		var cur int
+		if current.GrossScore != nil {
+			cur = current.GrossScore.ID
+		}
+		logChange("gross_score_id", strconv.Itoa(cur), strconv.Itoa(*req.GrossScoreID))
+	}
+	if req.ComplianceReferenceIDs != nil {
+		logChange("compliance_reference_ids", joinIDs(idsOf(current.ComplianceReferences, func(r model.ComplianceReference) int { return r.ID })), joinIDs(req.ComplianceReferenceIDs))
+	}
+	if req.RiskCategoryIDs != nil {
+		logChange("risk_category_ids", joinIDs(idsOf(current.RiskCategories, func(c model.RiskCategory) int { return c.ID })), joinIDs(req.RiskCategoryIDs))
+	}
+	if req.PlatformIDs != nil {
+		logChange("platform_ids", joinIDs(idsOf(current.Platforms, func(r model.LookupRef) int { return r.ID })), joinIDs(req.PlatformIDs))
+	}
+	if req.ProductIDs != nil {
+		logChange("product_ids", joinIDs(idsOf(current.Products, func(r model.LookupRef) int { return r.ID })), joinIDs(req.ProductIDs))
+	}
+	if req.DeploymentTypeID != nil {
+		var cur int
+		if current.DeploymentType != nil {
+			cur = current.DeploymentType.ID
+		}
+		logChange("deployment_type_id", strconv.Itoa(cur), strconv.Itoa(*req.DeploymentTypeID))
+	}
+	if req.Environments != nil {
+		logChange("environments", joinStrings(current.Environments), joinStrings(req.Environments))
+	}
 	changeLog = append(changeLog, assigneeChangeLog(current, model.UpdateAssigneesRequest{
 		AssignerID:           req.AssignerID,
 		OwnerID:              req.OwnerID,
@@ -126,9 +179,22 @@ func (r *riskRepository) Update(ctx context.Context, id int, req model.UpdateRis
 	stepsChanged := actionStepsChanged(current, req)
 	if stepsChanged {
 		restrictedChanged = true
+		var oldDescs, newDescs []string
+		if current.ActionPlan != nil {
+			for _, st := range current.ActionPlan.Steps {
+				oldDescs = append(oldDescs, derefOr(st.Description))
+			}
+		}
+		for _, st := range req.ActionSteps {
+			newDescs = append(newDescs, st.Description)
+		}
+		oldJSON, _ := json.Marshal(strings.Join(oldDescs, " | "))
+		newJSON, _ := json.Marshal(strings.Join(newDescs, " | "))
 		changeLog = append(changeLog, map[string]any{
 			"action":       "UPDATE",
 			"fieldChanged": "action_steps",
+			"oldValue":     string(oldJSON),
+			"newValue":     string(newJSON),
 		})
 	}
 
@@ -366,6 +432,40 @@ func actionStepsChanged(current *model.RiskDetail, req model.UpdateRiskRequest) 
 		}
 	}
 	return false
+}
+
+// joinIDs renders an id set order-independently, so the same set sent in a
+// different order is not logged as a change.
+func joinIDs(ids []int) string {
+	sorted := append([]int(nil), ids...)
+	sort.Ints(sorted)
+	parts := make([]string, len(sorted))
+	for i, id := range sorted {
+		parts[i] = strconv.Itoa(id)
+	}
+	return strings.Join(parts, ", ")
+}
+
+func joinStrings(vals []string) string {
+	sorted := append([]string(nil), vals...)
+	sort.Strings(sorted)
+	return strings.Join(sorted, ", ")
+}
+
+func idsOf[T any](items []T, id func(T) int) []int {
+	ids := make([]int, len(items))
+	for i, it := range items {
+		ids[i] = id(it)
+	}
+	return ids
+}
+
+// calendarDay is the YYYY-MM-DD part of a date or RFC3339 timestamp.
+func calendarDay(s string) string {
+	if len(s) >= 10 {
+		return s[:10]
+	}
+	return s
 }
 
 // derefOr returns the pointed-to string, or "".

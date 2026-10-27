@@ -119,6 +119,9 @@ type recordingHistory struct {
 func (r *recordingHistory) List(context.Context, int) ([]*model.HistoryEntry, error) {
 	return nil, nil
 }
+func (r *recordingHistory) Search(context.Context, model.AuditTrailFilter) (*model.AuditTrailPage, error) {
+	return &model.AuditTrailPage{}, nil
+}
 func (r *recordingHistory) Record(_ context.Context, _ int, req model.RecordHistoryRequest, _ string) error {
 	if r.onRecord != nil {
 		r.onRecord(req)

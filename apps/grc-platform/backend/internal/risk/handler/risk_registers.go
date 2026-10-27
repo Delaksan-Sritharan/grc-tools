@@ -745,7 +745,7 @@ func (d *Deps) handleManagementApproveRisk(w http.ResponseWriter, r *http.Reques
 		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
 		return
 	}
-	d.recordEvent(r.Context(), id, by, model.HistoryApprove, model.HistoryDetails{Role: "Management"})
+	d.recordEvent(r.Context(), id, by, model.HistoryApprove, managementApproveDetails(detail.WorkflowStatus))
 	// Both management stages hand off to a compliance stage, whose recipient
 	// is a role rather than a named individual — which event depends on
 	// which stage this was, captured before the transition above. Not
@@ -758,6 +758,17 @@ func (d *Deps) handleManagementApproveRisk(w http.ResponseWriter, r *http.Reques
 	}
 	d.notifyComplianceAdmins(complianceEvent, id, detail.SourceRegisterID, by, "")
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// managementApproveDetails is the history payload for a management approval,
+// given the status the risk was in beforehand: either management stage hands
+// off to its compliance counterpart.
+func managementApproveDetails(from string) model.HistoryDetails {
+	to := model.StatusPendingComplianceReview
+	if from == model.StatusPendingManagementClosure {
+		to = model.StatusPendingComplianceClosure
+	}
+	return model.HistoryDetails{Role: "Management", From: from, To: to}
 }
 
 // handleApproveRisk serves POST /api/v1/risks/{id}/approve.

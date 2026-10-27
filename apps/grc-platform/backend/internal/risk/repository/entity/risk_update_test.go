@@ -61,6 +61,7 @@ func (f *fakeRiskEntity) serve(t *testing.T) *riskRepository {
 				"assignmentTeamId":     3,
 				"sourceRegisterId":     2,
 				"emailSubject":         "Subject",
+				"riskIdentifiedDate":   "2026-01-02",
 			}
 			if f.acceptor != "" {
 				detail["riskAcceptor"] = f.acceptor
@@ -352,5 +353,46 @@ func TestUpdateLeavesRiskAcceptorAlone(t *testing.T) {
 	patch := updateWithAcceptor(t, "WSO2", "")
 	if _, sent := patch["riskAcceptor"]; sent {
 		t.Errorf("riskAcceptor was sent: %v", patch["riskAcceptor"])
+	}
+}
+
+// Fields the edit supplies are logged once they differ; ones it omits are not,
+// and a reordered id set is not a change.
+func TestUpdateLogsIdentifiedAndListFieldChanges(t *testing.T) {
+	f := &fakeRiskEntity{status: model.StatusPendingOwnerApproval, createdBy: "3f1c9a2e-user-uuid", createdOn: time.Now()}
+	req := model.UpdateRiskRequest{
+		RiskTitle:          "Title",
+		RiskDescription:    "Description",
+		EmailSubject:       "Subject",
+		RiskIdentifiedDate: "2026-02-02",
+		IdentifiedByType:   "TOOL",
+		RiskCategoryIDs:    []int{4, 2},
+		Environments:       []string{"DR"},
+	}
+	if err := f.serve(t).Update(context.Background(), 7, req, "editor-uuid"); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	got := strings.Join(changedFields(t, f.patch), ",")
+	want := "environments,identified_by_type,risk_category_ids,risk_identified_date"
+	if got != want {
+		t.Errorf("changeLog fields = %s, want %s", got, want)
+	}
+}
+
+// The stored date reads back as RFC3339 and the form sends YYYY-MM-DD; the same
+// day must not be logged as a change, a different day must.
+func TestUpdateIdentifiedDateComparesCalendarDays(t *testing.T) {
+	for _, c := range []struct {
+		sent string
+		want string
+	}{{"2026-01-02", ""}, {"2026-01-03", "risk_identified_date"}} {
+		f := &fakeRiskEntity{status: model.StatusPendingOwnerApproval, createdBy: "3f1c9a2e-user-uuid", createdOn: time.Now()}
+		req := model.UpdateRiskRequest{RiskTitle: "Title", RiskDescription: "Description", EmailSubject: "Subject", RiskIdentifiedDate: c.sent}
+		if err := f.serve(t).Update(context.Background(), 7, req, "editor-uuid"); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+		if got := strings.Join(changedFields(t, f.patch), ","); got != c.want {
+			t.Errorf("sent %s: changeLog fields = %q, want %q", c.sent, got, c.want)
+		}
 	}
 }

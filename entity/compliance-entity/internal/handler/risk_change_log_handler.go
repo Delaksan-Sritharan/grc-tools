@@ -74,3 +74,18 @@ func (h *RiskChangeLogHandler) ListRiskChangeLog(w http.ResponseWriter, r *http.
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
 }
+
+// SearchRiskChangeLog handles POST /risk/changes/search.
+func (h *RiskChangeLogHandler) SearchRiskChangeLog(w http.ResponseWriter, r *http.Request) {
+	var req domain.SearchRiskChangeLogRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	resp, err := h.svc.SearchRiskChangeLog(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}

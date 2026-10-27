@@ -28,6 +28,11 @@ import (
 // named as an action plan's action_owner_id on at least one risk.
 type riskInvolvementResponse struct {
 	NamedOnRisk bool `json:"namedOnRisk"`
+	// CanViewAuditTrail is whether the caller may open Risk Hub > Audit Trail,
+	// which is limited to named roles (see canViewAuditTrail) and so cannot be
+	// read off the privilege list. The frontend turns it into a synthetic
+	// RISK_VIEW_AUDIT_TRAIL privilege, like NamedOnRisk becomes RISK_VIEW_RISKS.
+	CanViewAuditTrail bool `json:"canViewAuditTrail"`
 }
 
 // handleMyRiskInvolvement serves GET /api/v1/risks/me/involvement.
@@ -56,7 +61,7 @@ func (d *Deps) handleMyRiskInvolvement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := riskInvolvementResponse{}
+	resp := riskInvolvementResponse{CanViewAuditTrail: canViewAuditTrail(r.Context())}
 	// No platform user row means they cannot be any plan's action_owner_id, so
 	// the honest answer is false without touching the risk store.
 	if callerID != nil {
