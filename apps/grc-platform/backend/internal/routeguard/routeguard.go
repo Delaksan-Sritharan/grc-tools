@@ -169,6 +169,7 @@ var externalVisible = map[string]bool{
 	"GET /api/v1/risks/employees/search":                            false,
 	"GET /api/v1/risks/next-sequence-id":                            false,
 	"GET /api/v1/risks":                                             false,
+	"GET /api/v1/risks/export":                                      false,
 	"POST /api/v1/risks":                                            false,
 	"GET /api/v1/risks/{id}":                                        false,
 	"PUT /api/v1/risks/{id}":                                        false,

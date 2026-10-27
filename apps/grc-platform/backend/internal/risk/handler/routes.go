@@ -185,6 +185,7 @@ func RegisterRoutes(mux routeguard.Router, deps Deps) {
 	// Risks
 	mux.HandleFunc("GET /api/v1/risks/next-sequence-id", d.handleNextSequenceID)
 	mux.HandleFunc("GET /api/v1/risks", d.handleListRisks)
+	mux.HandleFunc("GET /api/v1/risks/export", d.handleExportRisks)
 	mux.HandleFunc("POST /api/v1/risks", d.handleCreateRisk)
 	mux.HandleFunc("GET /api/v1/risks/{id}", d.handleGetRisk)
 	mux.HandleFunc("PUT /api/v1/risks/{id}", d.handleUpdateRisk)
