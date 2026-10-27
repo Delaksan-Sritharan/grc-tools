@@ -101,6 +101,7 @@ type CreateRiskRequest struct {
 	ActionPlanDescription string                    `json:"action_plan_description"`
 	ActionSteps           []CreateActionStepRequest `json:"action_steps"`
 	TreatmentStrategy     string                    `json:"treatment_strategy"`
+	RiskAcceptor          string                    `json:"risk_acceptor,omitempty"` // CUSTOMER | WSO2; optional
 	Progress              string                    `json:"progress,omitempty"`
 	GitIssueURL           string                    `json:"git_issue_url,omitempty"`
 	EmailSubject          string                    `json:"email_subject"`
@@ -269,6 +270,7 @@ type RiskDetail struct {
 	ManagementApproverID   int     `json:"management_approver_id"`
 	ImpactDescription      *string `json:"impact_description"`
 	TreatmentStrategy      *string `json:"treatment_strategy"`
+	RiskAcceptor           *string `json:"risk_acceptor"` // CUSTOMER | WSO2; nil until recorded
 	SourceRegisterID       int     `json:"source_register_id"`
 	AssignmentTeamID       int     `json:"assignment_team_id"`
 	Progress               *string `json:"progress"`
@@ -422,6 +424,7 @@ type UpdateRiskRequest struct {
 	GitIssueURL            string  `json:"git_issue_url,omitempty"`
 	Remarks                string  `json:"remarks,omitempty"`
 	TreatmentStrategy      string  `json:"treatment_strategy,omitempty"`
+	RiskAcceptor           string  `json:"risk_acceptor,omitempty"` // CUSTOMER | WSO2; empty leaves it unchanged
 	AssignmentTeamID       *int    `json:"assignment_team_id,omitempty"`
 	ActionPlanDescription  string  `json:"action_plan_description,omitempty"`
 	ActionOwnerID          *int    `json:"action_owner_id,omitempty"`

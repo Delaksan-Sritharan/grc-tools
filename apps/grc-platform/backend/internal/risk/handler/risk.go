@@ -208,6 +208,9 @@ func validateCreateRiskRequest(req model.CreateRiskRequest) error {
 	if req.TreatmentStrategy == "" {
 		return errorf("treatment_strategy is required")
 	}
+	if req.RiskAcceptor != "" && !model.IsValidRiskAcceptor(req.RiskAcceptor) {
+		return errorf("risk_acceptor must be %s or %s", model.RiskAcceptorCustomer, model.RiskAcceptorWSO2)
+	}
 	if len(req.ActionSteps) == 0 {
 		return errorf("at least one action step is required")
 	}

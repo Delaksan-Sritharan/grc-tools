@@ -54,6 +54,7 @@ type entRisk struct {
 	ManagementApproverUUID string    `json:"managementApproverUuid"`
 	WorkflowStatus         string    `json:"workflowStatus"`
 	TreatmentStrategy      *string   `json:"treatmentStrategy"`
+	RiskAcceptor           *string   `json:"riskAcceptor"`
 	GrossScoreID           *int      `json:"grossScoreId"`
 	ImplementationDate     *string   `json:"implementationDate"`
 	ReassessmentDate       *string   `json:"reassessmentDate"`
@@ -295,6 +296,7 @@ func (r *riskRepository) GetByID(ctx context.Context, id int) (*model.RiskDetail
 		ManagementApproverID:   e.ManagementApproverID,
 		ImpactDescription:      e.ImpactDescription,
 		TreatmentStrategy:      e.TreatmentStrategy,
+		RiskAcceptor:           e.RiskAcceptor,
 		SourceRegisterID:       e.SourceRegisterID,
 		AssignmentTeamID:       e.AssignmentTeamID,
 		Progress:               e.Progress,
@@ -430,6 +432,7 @@ func (r *riskRepository) Create(ctx context.Context, req model.CreateRiskRequest
 		"likelihood":             req.Likelihood,
 		"impact":                 req.Impact,
 		"treatmentStrategy":      nullableString(req.TreatmentStrategy),
+		"riskAcceptor":           nullableString(req.RiskAcceptor),
 		"implementationDate":     nullableString(req.ImplementationDate),
 		"reassessmentDate":       nullableString(req.ReassessmentDate),
 		"impactDescription":      nullableString(req.ImpactDescription),

@@ -39,6 +39,7 @@ type fakeRiskEntity struct {
 	createdOn time.Time
 	noPlan    bool           // serve the risk without a STANDARD action plan
 	approved  bool           // serve the risk as already owner-approved
+	acceptor  string         // serve the risk with this risk_acceptor; empty means not set
 	patch     map[string]any // nil until a PATCH arrives
 }
 
@@ -60,6 +61,9 @@ func (f *fakeRiskEntity) serve(t *testing.T) *riskRepository {
 				"assignmentTeamId":     3,
 				"sourceRegisterId":     2,
 				"emailSubject":         "Subject",
+			}
+			if f.acceptor != "" {
+				detail["riskAcceptor"] = f.acceptor
 			}
 			if f.approved {
 				detail["ownerFirstApprovedAt"] = "2026-09-01"
@@ -304,5 +308,49 @@ func TestUpdate_TemplateFieldsDroppedAfterOwnerApproval(t *testing.T) {
 		if _, ok := f.patch[key]; ok {
 			t.Errorf("patch body carries %s after owner approval: %v", key, f.patch[key])
 		}
+	}
+}
+
+func updateWithAcceptor(t *testing.T, current, sent string) map[string]any {
+	t.Helper()
+	f := &fakeRiskEntity{status: model.StatusApproved, createdBy: "3f1c9a2e-user-uuid", createdOn: time.Now(), acceptor: current}
+	req := model.UpdateRiskRequest{RiskTitle: "Title", RiskDescription: "Description", EmailSubject: "Subject", RiskAcceptor: sent}
+	if err := f.serve(t).Update(context.Background(), 7, req, "editor-uuid"); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	return f.patch
+}
+
+// Setting the acceptor on a risk that has none is sent, logged, and does not
+// move an APPROVED risk back for re-approval.
+func TestUpdateSetsRiskAcceptor(t *testing.T) {
+	patch := updateWithAcceptor(t, "", "CUSTOMER")
+	if patch["riskAcceptor"] != "CUSTOMER" {
+		t.Errorf("riskAcceptor = %v, want CUSTOMER", patch["riskAcceptor"])
+	}
+	if got := strings.Join(changedFields(t, patch), ","); got != "risk_acceptor" {
+		t.Errorf("changeLog fields = %s, want risk_acceptor", got)
+	}
+	if status, ok := patch["workflowStatus"]; ok {
+		t.Errorf("workflowStatus = %v, want it left alone", status)
+	}
+}
+
+func TestUpdateChangesRiskAcceptor(t *testing.T) {
+	patch := updateWithAcceptor(t, "CUSTOMER", "WSO2")
+	if got := strings.Join(changedFields(t, patch), ","); got != "risk_acceptor" {
+		t.Errorf("changeLog fields = %s, want risk_acceptor", got)
+	}
+}
+
+// An unchanged acceptor is not logged; an omitted one is not sent, so the
+// stored value is left alone.
+func TestUpdateLeavesRiskAcceptorAlone(t *testing.T) {
+	if got := changedFields(t, updateWithAcceptor(t, "WSO2", "WSO2")); len(got) != 0 {
+		t.Errorf("unchanged acceptor logged %v", got)
+	}
+	patch := updateWithAcceptor(t, "WSO2", "")
+	if _, sent := patch["riskAcceptor"]; sent {
+		t.Errorf("riskAcceptor was sent: %v", patch["riskAcceptor"])
 	}
 }

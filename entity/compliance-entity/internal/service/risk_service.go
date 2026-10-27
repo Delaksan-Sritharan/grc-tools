@@ -153,6 +153,7 @@ func isValidRiskTransition(from, to string) bool {
 // rejected by MySQL as a truncated value, while every real REMEDIATE row was
 // refused — the validator had it exactly backwards.
 var validTreatmentStrategies = map[string]bool{"REMEDIATE": true, "ACCEPT": true, "TRANSFER": true, "AVOID": true}
+var validRiskAcceptors = map[string]bool{"CUSTOMER": true, "WSO2": true}
 var validIdentifiedByTypes = map[string]bool{"EMPLOYEE": true, "EXTERNAL_PERSON": true, "TOOL": true}
 
 // validRiskLevels mirrors the distinct risk_score.risk_level values;
@@ -267,6 +268,13 @@ func (s *riskService) CreateRisk(ctx context.Context, req domain.CreateRiskReque
 	if req.TreatmentStrategy != nil {
 		up := strings.ToUpper(*req.TreatmentStrategy)
 		req.TreatmentStrategy = &up
+	}
+	if req.RiskAcceptor != nil {
+		up := strings.ToUpper(*req.RiskAcceptor)
+		if !validRiskAcceptors[up] {
+			return domain.Risk{}, &apierror.ValidationError{Msg: "riskAcceptor must be CUSTOMER or WSO2"}
+		}
+		req.RiskAcceptor = &up
 	}
 	if req.IdentifiedByType != nil && !validIdentifiedByTypes[strings.ToUpper(*req.IdentifiedByType)] {
 		return domain.Risk{}, &apierror.ValidationError{Msg: "identifiedByType must be EMPLOYEE, EXTERNAL_PERSON, or TOOL"}
@@ -391,6 +399,13 @@ func (s *riskService) UpdateRisk(ctx context.Context, id int, req domain.UpdateR
 	if req.TreatmentStrategy != nil {
 		up := strings.ToUpper(*req.TreatmentStrategy)
 		req.TreatmentStrategy = &up
+	}
+	if req.RiskAcceptor != nil {
+		up := strings.ToUpper(*req.RiskAcceptor)
+		if !validRiskAcceptors[up] {
+			return domain.Risk{}, &apierror.ValidationError{Msg: "riskAcceptor must be CUSTOMER or WSO2"}
+		}
+		req.RiskAcceptor = &up
 	}
 	if err := normalizeTemplateInput(req.PlatformIDs, req.ProductIDs, nil, req.DeploymentTypeID, req.Environments); err != nil {
 		return domain.Risk{}, err

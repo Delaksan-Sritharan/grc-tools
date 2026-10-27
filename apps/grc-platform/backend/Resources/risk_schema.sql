@@ -233,6 +233,7 @@ CREATE TABLE IF NOT EXISTS risk (
   impact_description       TEXT          NULL,
   gross_score_id           INT           NULL,
   treatment_strategy       ENUM('REMEDIATE','ACCEPT','TRANSFER','AVOID') NULL,
+  risk_acceptor            ENUM('CUSTOMER','WSO2') NULL COMMENT 'Who accepted the risk. NULL until recorded: risks that predate the column carry NULL',
   action_plan_id           INT           NULL,
   assignment_team_id       INT           NOT NULL,
   progress                 TEXT          NULL,

@@ -95,3 +95,15 @@ const (
 	IdentifiedByExternalPerson = "EXTERNAL_PERSON"
 	IdentifiedByTool           = "TOOL"
 )
+
+// The two values for the risk_acceptor column.
+const (
+	RiskAcceptorCustomer = "CUSTOMER"
+	RiskAcceptorWSO2     = "WSO2"
+)
+
+// IsValidRiskAcceptor reports whether v is a value the risk_acceptor column
+// accepts.
+func IsValidRiskAcceptor(v string) bool {
+	return v == RiskAcceptorCustomer || v == RiskAcceptorWSO2
+}
