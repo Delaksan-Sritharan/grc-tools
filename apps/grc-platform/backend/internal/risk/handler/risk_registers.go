@@ -341,9 +341,51 @@ func (d *Deps) handleListRisks(w http.ResponseWriter, r *http.Request) {
 	if _, ok := requireCallerUUID(w, r); !ok {
 		return
 	}
+	filter, empty, ok := d.buildListFilter(w, r)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	filter.Limit = 50
+	if l := q.Get("limit"); l != "" {
+		if v, err := strconv.Atoi(l); err == nil && v > 0 && v <= 200 {
+			filter.Limit = v
+		}
+	}
+	if o := q.Get("offset"); o != "" {
+		if v, err := strconv.Atoi(o); err == nil && v >= 0 {
+			filter.Offset = v
+		}
+	}
+	if empty {
+		response.WriteJSONValue(w, http.StatusOK, model.RiskListPage{
+			Items:  []*model.RiskListItem{},
+			Total:  0,
+			Offset: filter.Offset,
+			Limit:  filter.Limit,
+		})
+		return
+	}
+
+	page, err := d.Risk.List(r.Context(), filter)
+	if err != nil {
+		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
+		return
+	}
+	d.enrichListItems(r.Context(), page.Items)
+	response.WriteJSONValue(w, http.StatusOK, page)
+}
+
+// buildListFilter parses the list filters from the query string and applies the
+// caller's access scoping. It is shared by handleListRisks and handleExportRisks
+// so the two can never disagree about what a caller may see. Pagination is left
+// to the caller.
+//
+// ok=false means a response has already been written. empty=true means the
+// caller is scoped to nothing and must be served an empty result.
+func (d *Deps) buildListFilter(w http.ResponseWriter, r *http.Request) (filter model.ListRisksFilter, empty, ok bool) {
 	q := r.URL.Query()
 
-	var filter model.ListRisksFilter
 	filter.Statuses = splitCSV(q.Get("statuses"))
 	filter.TeamIDs = splitCSVInts(q.Get("team_id"))
 	filter.Levels = splitCSV(q.Get("level"))
@@ -368,18 +410,6 @@ func (d *Deps) handleListRisks(w http.ResponseWriter, r *http.Request) {
 		filter.EscalationLeadUUID = user.Subject
 	}
 
-	filter.Limit = 50
-	if l := q.Get("limit"); l != "" {
-		if v, err := strconv.Atoi(l); err == nil && v > 0 && v <= 200 {
-			filter.Limit = v
-		}
-	}
-	if o := q.Get("offset"); o != "" {
-		if v, err := strconv.Atoi(o); err == nil && v >= 0 {
-			filter.Offset = v
-		}
-	}
-
 	// Zero-grant scoping: a caller holding no role anywhere sees only the risks
 	// they are personally named on. An Action Owner may be any employee, with
 	// no grants at all, so this is an ordinary state rather than a broken one.
@@ -395,26 +425,20 @@ func (d *Deps) handleListRisks(w http.ResponseWriter, r *http.Request) {
 	// cannot be resolved would hand them the entire register, so an
 	// unresolvable caller gets an empty page, never an unscoped one.
 	if holdsNoGrants(r.Context()) {
-		callerUUID, ok := requireCallerUUID(w, r)
-		if !ok {
-			return
+		callerUUID, authed := requireCallerUUID(w, r)
+		if !authed {
+			return filter, false, false
 		}
 		caller, err := d.Users.GetByUUID(r.Context(), callerUUID)
 		if err != nil {
 			response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
-			return
+			return filter, false, false
 		}
 		if caller == nil {
 			// Authenticated but with no platform user row: they cannot be any
 			// plan's action_owner_id, so an empty page is the truthful scoped
 			// result rather than an error.
-			response.WriteJSONValue(w, http.StatusOK, model.RiskListPage{
-				Items:  []*model.RiskListItem{},
-				Total:  0,
-				Offset: filter.Offset,
-				Limit:  filter.Limit,
-			})
-			return
+			return filter, true, true
 		}
 		filter.ActionOwnerID = &caller.ID
 	}
@@ -433,25 +457,13 @@ func (d *Deps) handleListRisks(w http.ResponseWriter, r *http.Request) {
 			// caution), and an audit-only caller whose grants are all
 			// AUDIT_TEAM-scoped — RiskScopeIDs drops those, so they carry no
 			// RISK_TEAM id here even though isTeamScopedOnly is true.
-			response.WriteJSONValue(w, http.StatusOK, model.RiskListPage{
-				Items:  []*model.RiskListItem{},
-				Total:  0,
-				Offset: filter.Offset,
-				Limit:  filter.Limit,
-			})
-			return
+			return filter, true, true
 		}
 		filter.ScopeSourceRegisterIDs = teamIDs
 		filter.ScopeAssignmentTeamIDs = teamIDs
 	}
 
-	page, err := d.Risk.List(r.Context(), filter)
-	if err != nil {
-		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
-		return
-	}
-	d.enrichListItems(r.Context(), page.Items)
-	response.WriteJSONValue(w, http.StatusOK, page)
+	return filter, false, true
 }
 
 // handleGetRisk serves GET /api/v1/risks/{id}.
