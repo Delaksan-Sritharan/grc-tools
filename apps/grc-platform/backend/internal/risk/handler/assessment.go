@@ -47,7 +47,7 @@ func (d *Deps) handleAssessRisk(w http.ResponseWriter, r *http.Request) {
 	// The identity half then narrows it to the people this risk names: only its
 	// Risk Owner and its Risk Assigner (or a compliance admin) may assess it,
 	// and only the assigner may use the assessment to change the owner,
-	// approver or implementation date.
+	// approver, implementation date, assigner or action owner.
 	detail, err := d.Risk.GetByID(r.Context(), id)
 	if err != nil {
 		response.MapServiceError(r.Context(), w, err, response.ErrMsgInternal)
@@ -72,8 +72,16 @@ func (d *Deps) handleAssessRisk(w http.ResponseWriter, r *http.Request) {
 	// A field that matches what the risk already holds is not a change: the
 	// form may send it back untouched, and an owner must not be refused for it.
 	dropUnchangedRiskFields(&req, detail)
-	if (req.OwnerID != nil || req.ManagementApproverID != nil || req.ImplementationDate != nil) && !isAssigner {
-		response.WriteError(w, http.StatusForbidden, "only this risk's Risk Assigner may change its owner, approver or implementation date")
+	if (req.OwnerID != nil || req.ManagementApproverID != nil || req.ImplementationDate != nil ||
+		req.AssignerID != nil || req.ActionOwnerID != nil) && !isAssigner {
+		response.WriteError(w, http.StatusForbidden, "only this risk's Risk Assigner may change its owner, approver, implementation date, assigner or action owner")
+		return
+	}
+	// The entity writes an Action Owner onto the risk's own plan and silently
+	// writes nothing when there is none — refuse rather than report a change
+	// that never happened.
+	if req.ActionOwnerID != nil && detail.ActionPlan == nil {
+		response.WriteError(w, http.StatusConflict, "this risk has no action plan to set an Action Owner on")
 		return
 	}
 	req.Current = detail
@@ -137,7 +145,7 @@ func (d *Deps) callerRiskRoles(w http.ResponseWriter, r *http.Request, detail *m
 	return *callerID == detail.OwnerID, *callerID == detail.AssignerID, true
 }
 
-// dropUnchangedRiskFields nils any owner/approver/implementation-date field
+// dropUnchangedRiskFields nils any owner/approver/implementation-date/assigner/action-owner field
 // that equals the risk's current value.
 func dropUnchangedRiskFields(req *model.CreateAssessmentRequest, current *model.RiskDetail) {
 	if req.OwnerID != nil && *req.OwnerID == current.OwnerID {
@@ -145,6 +153,13 @@ func dropUnchangedRiskFields(req *model.CreateAssessmentRequest, current *model.
 	}
 	if req.ManagementApproverID != nil && *req.ManagementApproverID == current.ManagementApproverID {
 		req.ManagementApproverID = nil
+	}
+	if req.AssignerID != nil && *req.AssignerID == current.AssignerID {
+		req.AssignerID = nil
+	}
+	if req.ActionOwnerID != nil && current.ActionPlan != nil &&
+		current.ActionPlan.ActionOwnerID != nil && *req.ActionOwnerID == *current.ActionPlan.ActionOwnerID {
+		req.ActionOwnerID = nil
 	}
 	if req.ImplementationDate != nil && current.ImplementationDate != nil && model.SameCalendarDate(*req.ImplementationDate, *current.ImplementationDate) {
 		req.ImplementationDate = nil

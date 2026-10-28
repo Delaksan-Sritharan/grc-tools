@@ -69,6 +69,10 @@ type CreateAssessmentRequest struct {
 	OwnerID              *int    `json:"owner_id,omitempty"`
 	ManagementApproverID *int    `json:"management_approver_id,omitempty"`
 	ImplementationDate   *string `json:"implementation_date,omitempty"` // YYYY-MM-DD
+	// AssignerID hands the risk to another Risk Assigner. ActionOwnerID is the
+	// owner of the risk's own action plan, so it needs a plan to exist.
+	AssignerID    *int `json:"assigner_id,omitempty"`
+	ActionOwnerID *int `json:"action_owner_id,omitempty"`
 
 	// Current is the risk as loaded by the handler, so the repository can write
 	// a change-log entry per field that actually changed. Never read from JSON.

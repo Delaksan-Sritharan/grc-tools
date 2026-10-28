@@ -66,6 +66,12 @@ func (s *riskAssessmentService) Create(ctx context.Context, riskID int, req mode
 	if req.ManagementApproverID != nil && *req.ManagementApproverID <= 0 {
 		return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "management_approver_id must be a positive id"}
 	}
+	if req.AssignerID != nil && *req.AssignerID <= 0 {
+		return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "assigner_id must be a positive id"}
+	}
+	if req.ActionOwnerID != nil && *req.ActionOwnerID <= 0 {
+		return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "action_owner_id must be a positive id"}
+	}
 	if req.ImplementationDate != nil {
 		if _, err := time.Parse("2006-01-02", *req.ImplementationDate); err != nil {
 			return nil, &apierror.Error{StatusCode: http.StatusUnprocessableEntity, Body: "implementation_date must be in YYYY-MM-DD format"}
