@@ -26,6 +26,8 @@ import (
 	"testing"
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/model"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/grant"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/privilege"
 )
 
 // pagedRiskSvc serves its items by the filter's Limit/Offset, like the real
@@ -66,6 +68,23 @@ func parseExport(t *testing.T, rec *httptest.ResponseRecorder) [][]string {
 	return rows
 }
 
+// complianceGlobal is what Compliance Admin and Compliance Team hold that
+// matters here: org-wide read (see shared_seed_data.sql).
+var complianceGlobal = map[string]bool{privilege.ViewRisks: true, privilege.ViewAllRisks: true}
+
+// complianceTeamGrantOn is a Risk Compliance Team grant scoped to one register,
+// which the role allows ("Grant GLOBAL for org-wide oversight, or scope to
+// specific registers").
+func complianceTeamGrantOn(registerID int) grant.Grant {
+	return grant.Grant{
+		RoleName:      "risk-compliance-team",
+		ScopeType:     grant.ScopeRiskTeam,
+		ScopeID:       registerID,
+		ScopeBasis:    "SOURCE_REGISTER",
+		ScopeTeamType: grant.TeamSourceRegister,
+	}
+}
+
 func exportDeps(risk *pagedRiskSvc) *Deps {
 	return &Deps{Risk: risk, Users: fakeUserRepo{uuid: "test-caller-uuid", id: 7}}
 }
@@ -75,7 +94,7 @@ func exportDeps(risk *pagedRiskSvc) *Deps {
 func TestHandleExportRisks_AllPages(t *testing.T) {
 	risk := &pagedRiskSvc{items: makeItems(450)}
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/risks/export?limit=5&offset=100", nil).
-		WithContext(contextForGrants(t, map[string]bool{"RISK_VIEW_RISKS": true}, nil))
+		WithContext(contextForGrants(t, complianceGlobal, nil))
 	rec := httptest.NewRecorder()
 
 	exportDeps(risk).handleExportRisks(rec, req)
@@ -115,7 +134,7 @@ func TestHandleExportRisks_FiltersPassedThrough(t *testing.T) {
 	risk := &pagedRiskSvc{items: makeItems(250)}
 	req := httptest.NewRequest(http.MethodGet,
 		"/api/v1/risks/export?statuses=APPROVED&level=HIGH,MEDIUM&treatment_strategy=ACCEPT&team_id=3&search=abc", nil).
-		WithContext(contextForGrants(t, map[string]bool{"RISK_VIEW_RISKS": true}, nil))
+		WithContext(contextForGrants(t, complianceGlobal, nil))
 	rec := httptest.NewRecorder()
 
 	exportDeps(risk).handleExportRisks(rec, req)
@@ -131,18 +150,22 @@ func TestHandleExportRisks_FiltersPassedThrough(t *testing.T) {
 	}
 }
 
-// TestHandleExportRisks_TeamScoped: export applies the same team scoping as the
-// list, on every page.
+// TestHandleExportRisks_TeamScoped: a Compliance Team member scoped to one
+// register may export, and gets that register's risks only — the same team
+// scoping as the list, on every page.
 func TestHandleExportRisks_TeamScoped(t *testing.T) {
 	risk := &pagedRiskSvc{items: makeItems(250)}
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/risks/export", nil).
-		WithContext(contextForRealGrants(t, ownerGrantOn(asgardeo)))
+		WithContext(contextForRealGrants(t, complianceTeamGrantOn(asgardeo)))
 	rec := httptest.NewRecorder()
 
 	exportDeps(risk).handleExportRisks(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if len(risk.calls) != 2 {
+		t.Fatalf("List called %d times, want 2", len(risk.calls))
 	}
 	for i, f := range risk.calls {
 		if !containsInt(f.ScopeSourceRegisterIDs, asgardeo) {
@@ -151,31 +174,51 @@ func TestHandleExportRisks_TeamScoped(t *testing.T) {
 	}
 }
 
-// TestHandleExportRisks_ActionOwnerNoGrants: a caller with no grants is scoped
-// to risks they own an action plan on, exactly as in the list.
-func TestHandleExportRisks_ActionOwnerNoGrants(t *testing.T) {
-	risk := &pagedRiskSvc{items: makeItems(3)}
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/risks/export", nil).
-		WithContext(contextForGrants(t, nil, nil))
-	rec := httptest.NewRecorder()
+// TestHandleExportRisks_OnlyComplianceMayExport: every other caller is refused
+// before anything is queried or written — including callers the list serves,
+// such as an Action Owner holding no grants at all.
+func TestHandleExportRisks_OnlyComplianceMayExport(t *testing.T) {
+	for name, ctx := range map[string]context.Context{
+		"risk owner":       contextForRealGrants(t, ownerGrantOn(asgardeo)),
+		"risk assigner":    contextForGrants(t, map[string]bool{privilege.ViewRisks: true, privilege.CreateRisk: true, privilege.UpdateRisk: true}, nil),
+		"management":       contextForGrants(t, map[string]bool{privilege.ManagementApproveRisk: true}, nil),
+		"action owner":     contextForGrants(t, nil, nil), // no grants at all
+		"audit-only":       contextForRealGrants(t, auditGrantOn(3)),
+		"view risks alone": contextForGrants(t, map[string]bool{privilege.ViewRisks: true}, nil),
+	} {
+		t.Run(name, func(t *testing.T) {
+			risk := &pagedRiskSvc{items: makeItems(3)}
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/risks/export", nil).WithContext(ctx)
+			rec := httptest.NewRecorder()
 
-	exportDeps(risk).handleExportRisks(rec, req)
+			exportDeps(risk).handleExportRisks(rec, req)
 
-	if len(risk.calls) == 0 || risk.calls[0].ActionOwnerID == nil || *risk.calls[0].ActionOwnerID != 7 {
-		t.Fatalf("export was not scoped to the caller: %+v", risk.calls)
+			if rec.Code != http.StatusForbidden {
+				t.Errorf("status = %d, want 403", rec.Code)
+			}
+			if strings.Contains(rec.Header().Get("Content-Type"), "text/csv") || strings.Contains(rec.Body.String(), "R-1") {
+				t.Error("a refused caller received CSV data")
+			}
+			if len(risk.calls) != 0 {
+				t.Errorf("service queried %d times for a refused caller", len(risk.calls))
+			}
+		})
 	}
 }
 
-// TestHandleExportRisks_NoGrantsNoUserRow: an unresolvable caller gets a
-// header-only file and the service is never queried — never an unscoped export.
-func TestHandleExportRisks_NoGrantsNoUserRow(t *testing.T) {
+// TestHandleExportRisks_ComplianceScopedToNothing: a Compliance Team grant that
+// carries no risk team (an AUDIT_TEAM-scoped one) passes the gate but is scoped
+// to nothing, so the file is header-only and the service is never queried —
+// never an unscoped export.
+func TestHandleExportRisks_ComplianceScopedToNothing(t *testing.T) {
 	risk := &pagedRiskSvc{items: makeItems(3)}
-	d := &Deps{Risk: risk, Users: fakeUserRepo{uuid: "somebody-else"}}
+	g := complianceTeamGrantOn(0)
+	g.ScopeType, g.ScopeID = grant.ScopeAuditTeam, 3
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/risks/export", nil).
-		WithContext(contextForGrants(t, nil, nil))
+		WithContext(contextForRealGrants(t, g))
 	rec := httptest.NewRecorder()
 
-	d.handleExportRisks(rec, req)
+	exportDeps(risk).handleExportRisks(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
@@ -192,7 +235,7 @@ func TestHandleExportRisks_NoGrantsNoUserRow(t *testing.T) {
 func TestHandleExportRisks_TooManyRows(t *testing.T) {
 	risk := &pagedRiskSvc{items: makeItems(10), total: exportMaxRows + 1}
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/risks/export", nil).
-		WithContext(contextForGrants(t, map[string]bool{"RISK_VIEW_RISKS": true}, nil))
+		WithContext(contextForGrants(t, complianceGlobal, nil))
 	rec := httptest.NewRecorder()
 
 	exportDeps(risk).handleExportRisks(rec, req)
