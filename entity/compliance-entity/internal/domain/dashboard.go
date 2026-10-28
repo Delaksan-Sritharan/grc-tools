@@ -65,6 +65,10 @@ type AuditDashboardRequest struct {
 	// client-supplied team filter: reusing one would let a team lead widen
 	// their own visibility by naming another team.
 	ScopeTeamIDs []int `json:"scopeTeamIds"`
+	// AuditIDs optionally narrows every stat, chart and list to these audits;
+	// nil/empty = all audits. A display filter only — row scope is applied
+	// independently and is never widened by it.
+	AuditIDs []int `json:"auditIds"`
 }
 
 // AuditStats are the audit-count summary tiles.
@@ -107,6 +111,31 @@ type TeamStatusCount struct {
 	Count  int    `json:"count"`
 }
 
+// Assignee roles for AssigneeStatusCount.
+const (
+	AssigneeRoleAuditor    = "auditor"
+	AssigneeRoleOwner      = "owner"
+	AssigneeRoleCompliance = "compliance"
+)
+
+// AssigneeStatusOverdue is the pseudo-status on an owner's row counting their
+// past-due controls, independent of lifecycle status.
+const AssigneeStatusOverdue = "OVERDUE"
+
+// AssigneeStatusCount is one assignee's control count for a single status —
+// feeds the Auditor / Process Owner / Compliance team views. For auditor and
+// owner rows the assignee is a uuid/type pair (the `user` table stores no
+// name; the GRC backend resolves it). For compliance rows the assignee is the
+// audit team awaiting internal review, since reviews are not assigned to a person.
+type AssigneeStatusCount struct {
+	Role             string `json:"role"`
+	Assignee         string `json:"assignee"`
+	AssigneeUUID     string `json:"assigneeUuid"`
+	AssigneeUserType string `json:"assigneeUserType"`
+	Status           string `json:"status"`
+	Count            int    `json:"count"`
+}
+
 // DashboardControlItem is a single control entry used in both "My Action Items"
 // and "Overdue Controls" dashboard lists. The two lists share the same shape.
 type DashboardControlItem struct {
@@ -140,6 +169,8 @@ const (
 	// internal review and validation alike) — a role-agnostic "everything still
 	// open, assigned to me" view, unlike Pending/Validation which are single stages.
 	WorkQueueTabAllPending WorkQueueTab = "all-pending"
+	// WorkQueueTabCompleted lists controls in the terminal COMPLETE status.
+	WorkQueueTabCompleted WorkQueueTab = "completed"
 )
 
 // WorkQueueRequest is the body of POST /audit/work-queue/search.
@@ -180,15 +211,20 @@ type WorkQueuePage struct {
 
 // DashboardData is the full audit dashboard payload.
 type DashboardData struct {
-	AuditStats             AuditStats             `json:"auditStats"`
-	Stats                  DashboardStats         `json:"stats"`
-	StatusDistribution     []StatusCount          `json:"statusDistribution"`
-	TeamCompletion         []TeamCompletion       `json:"teamCompletion"`
-	TeamStatusDistribution []TeamStatusCount      `json:"teamStatusDistribution"`
-	ActionItems            []DashboardControlItem `json:"actionItems"`
-	DueSoonItems           []DashboardControlItem `json:"dueSoonItems"`
-	PendingCount           int                    `json:"pendingCount"`
-	ValidationCount        int                    `json:"validationCount"`
+	AuditStats             AuditStats        `json:"auditStats"`
+	Stats                  DashboardStats    `json:"stats"`
+	StatusDistribution     []StatusCount     `json:"statusDistribution"`
+	TeamCompletion         []TeamCompletion  `json:"teamCompletion"`
+	TeamStatusDistribution []TeamStatusCount `json:"teamStatusDistribution"`
+	// AssigneeStatusDistribution backs the role progress views (additive field).
+	AssigneeStatusDistribution []AssigneeStatusCount  `json:"assigneeStatusDistribution"`
+	ActionItems                []DashboardControlItem `json:"actionItems"`
+	DueSoonItems               []DashboardControlItem `json:"dueSoonItems"`
+	PendingCount               int                    `json:"pendingCount"`
+	ValidationCount            int                    `json:"validationCount"`
+	// CompletedCount is the count of in-scope controls in the terminal COMPLETE
+	// status — see WorkQueueTabCompleted.
+	CompletedCount int `json:"completedCount"`
 	// AllPendingCount is the count of controls in any non-terminal status,
 	// regardless of role/stage — see WorkQueueTabAllPending.
 	AllPendingCount int                    `json:"allPendingCount"`
