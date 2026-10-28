@@ -239,12 +239,23 @@ func controlExportFileName(auditName string, now time.Time) string {
 // exportControls handles GET /api/v1/audits/{id}/controls/export.
 //
 // Takes the audit detail page's current view as query params and returns every
-// matching control as CSV. Visibility is exactly that of listControls and
-// getAudit: ViewAudits, the caller's row scope, and a 404 (never an empty file)
-// for an audit outside that scope.
+// matching control as CSV. Restricted to the Compliance Admin and Compliance
+// Team. Row visibility is then that of listControls and getAudit: ViewAudits,
+// the caller's row scope, and a 404 (never an empty file) for an audit outside
+// that scope.
 func (h *controlHandler) exportControls(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if !auth.RequirePrivilege(ctx, w, privilege.ViewAudits) {
+		return
+	}
+	// ReviewEvidence stands in for "is Compliance Admin or Compliance Team": among
+	// the seeded roles only grc-platform-audit-compliance-admin and
+	// grc-platform-audit-compliance-team hold it (Management, the internal team
+	// and external auditors do not). Testing the privilege rather than a role
+	// name keeps this consistent with the rest of the module, which never checks
+	// one. It is GLOBAL-only (globalOnlyPrivileges in the entity's grant service),
+	// so the unscoped check is the right one.
+	if !auth.RequirePrivilege(ctx, w, privilege.ReviewEvidence) {
 		return
 	}
 	auditID, ok := parseIntParam(w, r, "id")

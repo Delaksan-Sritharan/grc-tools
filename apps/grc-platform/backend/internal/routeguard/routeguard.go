@@ -74,8 +74,10 @@ var externalVisible = map[string]bool{
 	"GET /api/v1/audits/{id}/trail": false,
 
 	// ── Audit Hub: controls ──────────────────────────────────────────────────
-	"GET /api/v1/audits/{id}/controls":             true,
-	"GET /api/v1/audits/{id}/controls/export":      true, // same rows and scope as the list above
+	"GET /api/v1/audits/{id}/controls": true,
+	// Compliance Admin / Compliance Team only (AUDIT_REVIEW_EVIDENCE); an
+	// external auditor is refused, so it is not external-visible.
+	"GET /api/v1/audits/{id}/controls/export":      false,
 	"GET /api/v1/audits/{id}/controls/{controlId}": true,
 	// The control History tab — same internal-only history as the audit-wide
 	// Activity Log above.
