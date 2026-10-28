@@ -51,6 +51,23 @@ export interface TeamStatusCount {
   count: number;
 }
 
+/** Which capacity an assignee holds on a control, for the role progress views. */
+export type AssigneeRole = "auditor" | "owner" | "compliance";
+
+/**
+ * One assignee's control count for a single status. Status "OVERDUE" is a
+ * pseudo-status: the assignee's past-due controls, counted independently of
+ * their lifecycle status. For role "compliance" the assignee is the audit team.
+ */
+export interface AssigneeStatusCount {
+  role: AssigneeRole;
+  assignee: string;
+  /** Stable person id for auditor/owner rows ("" when the control has no one assigned). */
+  assigneeUuid?: string;
+  status: string;
+  count: number;
+}
+
 export interface ActionItem {
   controlId: number;
   auditId: number;
@@ -86,6 +103,10 @@ export interface DashboardData {
   teamCompletion: TeamCompletion[];
   /** Optional: absent until the entity/backend ship the additive field. */
   teamStatusDistribution?: TeamStatusCount[];
+  /** Optional: absent from an older entity; the role progress views then stay hidden. */
+  assigneeStatusDistribution?: AssigneeStatusCount[];
+  /** Controls in the terminal COMPLETE status. Absent from older backends; treat as 0. */
+  completedCount?: number;
   actionItems: ActionItem[];
   /** Action items due within 7 days — fetched independently so LIMIT on actionItems doesn't affect this. */
   dueSoonItems: ActionItem[];
