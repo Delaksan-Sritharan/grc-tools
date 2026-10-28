@@ -17,9 +17,7 @@
 package handler
 
 import (
-	"encoding/csv"
 	"log/slog"
-	"mime"
 	"net/http"
 	"strings"
 	"time"
@@ -27,6 +25,7 @@ import (
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/response"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/model"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/auth"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/csvexport"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/privilege"
 )
 
@@ -94,18 +93,8 @@ func (d *Deps) handleExportRisks(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Best effort: ResponseWriters that can't extend the deadline keep the server's.
-	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(exportWriteTimeout))
-
 	fileName := "risk-report-" + time.Now().UTC().Format("2006-01-02") + ".csv"
-	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": fileName}))
-	w.WriteHeader(http.StatusOK)
-
-	// UTF-8 BOM so Excel reads non-ASCII names correctly.
-	_, _ = w.Write([]byte("\xEF\xBB\xBF"))
-	cw := csv.NewWriter(w)
+	cw := csvexport.Begin(w, fileName, exportWriteTimeout)
 	_ = cw.Write(riskExportHeader)
 
 	flusher, _ := w.(http.Flusher)
@@ -136,50 +125,21 @@ func (d *Deps) handleExportRisks(w http.ResponseWriter, r *http.Request) {
 // riskExportRecord renders one risk as a CSV row.
 func riskExportRecord(it *model.RiskListItem) []string {
 	return []string{
-		csvCell(it.RiskCode),
-		csvCell(it.RiskTitle),
-		csvCell(it.SourceRegisterName),
-		csvCell(it.RiskLevel),
-		csvCell(it.WorkflowStatus),
-		csvCell(it.RiskType),
-		csvCell(derefString(it.TreatmentStrategy)),
-		csvCell(it.OwnerName),
-		csvCell(it.AssignerName),
-		csvCell(exportDate(derefString(it.ImplementationDate))),
-		csvCell(exportDate(it.CreatedAt)),
-		csvCell(derefString(it.CustomerName)),
-		csvCell(strings.Join(it.PlatformNames, "; ")),
-		csvCell(strings.Join(it.Environments, "; ")),
-		csvCell(derefString(it.RejectionStage)),
-		csvCell(derefString(it.RejectionComment)),
+		csvexport.SafeCell(it.RiskCode),
+		csvexport.SafeCell(it.RiskTitle),
+		csvexport.SafeCell(it.SourceRegisterName),
+		csvexport.SafeCell(it.RiskLevel),
+		csvexport.SafeCell(it.WorkflowStatus),
+		csvexport.SafeCell(it.RiskType),
+		csvexport.SafeCell(csvexport.Deref(it.TreatmentStrategy)),
+		csvexport.SafeCell(it.OwnerName),
+		csvexport.SafeCell(it.AssignerName),
+		csvexport.SafeCell(csvexport.Date(csvexport.Deref(it.ImplementationDate))),
+		csvexport.SafeCell(csvexport.Date(it.CreatedAt)),
+		csvexport.SafeCell(csvexport.Deref(it.CustomerName)),
+		csvexport.SafeCell(strings.Join(it.PlatformNames, "; ")),
+		csvexport.SafeCell(strings.Join(it.Environments, "; ")),
+		csvexport.SafeCell(csvexport.Deref(it.RejectionStage)),
+		csvexport.SafeCell(csvexport.Deref(it.RejectionComment)),
 	}
-}
-
-// csvCell neutralises spreadsheet formula injection: a cell that starts with a
-// formula trigger is prefixed with a quote so Excel/Sheets treat it as text.
-// Risk titles and rejection comments are user-authored, so this matters.
-func csvCell(s string) string {
-	if s != "" && strings.ContainsRune("=+-@\t\r", rune(s[0])) {
-		return "'" + s
-	}
-	return s
-}
-
-// exportDate trims an RFC3339 timestamp to YYYY-MM-DD, leaving anything that
-// doesn't parse as it came.
-func exportDate(s string) string {
-	if s == "" {
-		return ""
-	}
-	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
-		return t.UTC().Format("2006-01-02")
-	}
-	return s
-}
-
-func derefString(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
 }

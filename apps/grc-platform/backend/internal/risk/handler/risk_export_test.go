@@ -270,14 +270,3 @@ func TestRiskExportRecord(t *testing.T) {
 		}
 	}
 }
-
-func TestCSVCell(t *testing.T) {
-	for in, want := range map[string]string{
-		"": "", "plain": "plain", "=1+1": "'=1+1", "+1": "'+1", "-1": "'-1", "@x": "'@x",
-		"\tx": "'\tx", "\rx": "'\rx", "a=b": "a=b",
-	} {
-		if got := csvCell(in); got != want {
-			t.Errorf("csvCell(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
