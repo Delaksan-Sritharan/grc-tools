@@ -651,7 +651,7 @@ paths:
       - Audit Controls
       summary: Export an audit's controls as CSV
       description: |-
-        Returns the controls the audit detail page is showing as a CSV file, for every matching control rather than one page. Visibility is that of listAuditControls: the caller's row scope applies, and an audit outside it is a 404.
+        Returns the controls the audit detail page is showing as a CSV file, for every matching control rather than one page. Restricted to the Compliance Admin and Compliance Team (AUDIT_REVIEW_EVIDENCE); every other caller gets a 403. Row visibility is then that of listAuditControls: the caller's row scope applies, and an audit outside it is a 404.
 
         The parameters describe the page's current view. A `tab` takes precedence, as on the page: when it is given, `search` and the column filters are ignored. Otherwise `search` and the column filters apply, ANDed across parameters and ORed within one. Repeat a parameter to give several values (`?team=A&team=B`); team and person names can contain commas, so they are not comma-separated.
 
