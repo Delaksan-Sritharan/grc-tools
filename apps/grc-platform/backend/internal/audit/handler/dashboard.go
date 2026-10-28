@@ -18,6 +18,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -177,6 +178,46 @@ func deriveWorkQueueClass(ctx context.Context) model.WorkQueueClass {
 	}
 }
 
+// parseAuditIDs reads the repeatable auditIds display filter, ignoring values
+// that are not integers. It narrows results only — row-level scope is derived
+// server-side and is never widened by this input.
+func parseAuditIDs(vals []string) []int {
+	var ids []int
+	for _, v := range vals {
+		if id, err := strconv.Atoi(v); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+// maxDashboardAuditIDs bounds the dashboard's auditIds filter. The webapp sends
+// at most one id; the cap only stops a hand-built request from turning into an
+// unbounded IN (...) clause in the entity's SQL.
+const maxDashboardAuditIDs = 50
+
+// parseAuditIDsStrict is parseAuditIDs for the dashboard endpoint: a value that
+// is not a positive integer, or more than maxDashboardAuditIDs of them, is an
+// error rather than being silently dropped, so a malformed filter is reported
+// instead of quietly returning the unfiltered dashboard.
+func parseAuditIDsStrict(vals []string) ([]int, error) {
+	if len(vals) > maxDashboardAuditIDs {
+		return nil, errors.New("too many auditIds")
+	}
+	ids := make([]int, 0, len(vals))
+	for _, v := range vals {
+		id, err := strconv.Atoi(v)
+		if err != nil || id <= 0 {
+			return nil, errors.New("invalid auditIds")
+		}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	return ids, nil
+}
+
 func (h *dashboardHandler) getDashboard(w http.ResponseWriter, r *http.Request) {
 	if !auth.RequirePrivilege(r.Context(), w, privilege.ViewAudits) {
 		return
@@ -190,6 +231,12 @@ func (h *dashboardHandler) getDashboard(w http.ResponseWriter, r *http.Request) 
 	f.ViewScope, f.WorkQueueScope = deriveScopes(r.Context())
 	f.ScopeTeamIDs = managedTeamIDs(auth.Grants(r.Context()))
 	f.WorkQueueClass = deriveWorkQueueClass(r.Context())
+	auditIDs, err := parseAuditIDsStrict(r.URL.Query()["auditIds"])
+	if err != nil {
+		response.WriteError(w, http.StatusBadRequest, "Invalid auditIds filter.")
+		return
+	}
+	f.AuditIDs = auditIDs
 
 	data, err := h.svc.Get(r.Context(), f)
 	if err != nil {
@@ -240,11 +287,7 @@ func (h *dashboardHandler) getWorkQueue(w http.ResponseWriter, r *http.Request) 
 			f.OwnerIDs = append(f.OwnerIDs, id)
 		}
 	}
-	for _, v := range q["auditIds"] {
-		if id, err := strconv.Atoi(v); err == nil {
-			f.AuditIDs = append(f.AuditIDs, id)
-		}
-	}
+	f.AuditIDs = parseAuditIDs(q["auditIds"])
 	for _, v := range q["statuses"] {
 		if v != "" {
 			f.Statuses = append(f.Statuses, v)

@@ -49,7 +49,31 @@ func (s *dashboardService) Get(ctx context.Context, f model.DashboardFilter) (*m
 		return nil, err
 	}
 	s.enrichProcessOwners(ctx, data.ActionItems, data.DueSoonItems, data.OverdueControls)
+	s.enrichAssignees(ctx, data.AssigneeStatusDistribution)
 	return data, nil
+}
+
+// enrichAssignees resolves auditor/owner rows' AssigneeUUID to a display name
+// in one batched directory lookup. Best-effort, like enrichProcessOwners.
+func (s *dashboardService) enrichAssignees(ctx context.Context, rows []model.AssigneeStatusCount) {
+	if s.directory == nil {
+		return
+	}
+	uuidTypes := map[string]string{}
+	for _, r := range rows {
+		if r.AssigneeUUID != "" {
+			uuidTypes[r.AssigneeUUID] = r.AssigneeUserType
+		}
+	}
+	if len(uuidTypes) == 0 {
+		return
+	}
+	people := s.directory.LookupAllTyped(ctx, uuidTypes)
+	for i, r := range rows {
+		if p, ok := people[r.AssigneeUUID]; ok {
+			rows[i].Assignee = p.DisplayName
+		}
+	}
 }
 
 func (s *dashboardService) GetWorkQueuePage(ctx context.Context, f model.DashboardFilter, tab model.WorkQueueTab, page, limit int) (*model.WorkQueuePage, error) {
