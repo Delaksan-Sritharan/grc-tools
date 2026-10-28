@@ -23,7 +23,7 @@ import { useGetAudit } from "@modules/audit/api/useGetAudit";
 import { useGetControls } from "@modules/audit/api/useGetControls";
 import { useGetAuditActivity, activityLogPageSize } from "@modules/audit/api/useGetAuditActivity";
 import type { TrailEntry, TrailDetails } from "@modules/audit/api/useGetTrail";
-import { formatTimestamp } from "@modules/audit/utils/format";
+import { auditDisplayName, formatTimestamp } from "@modules/audit/utils/format";
 import { auditPaths } from "@modules/audit/paths";
 
 const ACTION_LABELS: Record<TrailEntry["action"], string> = {
@@ -47,6 +47,7 @@ function describeDetails(d: TrailDetails | null | undefined): string {
   if (!d) return "";
   const parts: string[] = [];
   if (d.name) parts.push(`"${d.name}"`);
+  if (d.displayName) parts.push(`renamed to "${d.displayName}"`);
   if (d.controlNumber) parts.push(`control ${d.controlNumber}`);
   if (d.from && d.to) parts.push(`${d.from} → ${d.to}`);
   if (d.status) parts.push(`status: ${d.status}`);
@@ -112,7 +113,7 @@ export default function AuditActivityLogPage(): JSX.Element {
         onClick={handleBack}
         sx={{ mb: 2, textTransform: "none", color: "text.secondary", pl: 0 }}
       >
-        {audit?.name ?? "Audit"}
+        {audit ? auditDisplayName(audit) : "Audit"}
       </Button>
 
       <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 2, flexWrap: "wrap", gap: 1 }}>
