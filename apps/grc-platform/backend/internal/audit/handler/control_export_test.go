@@ -98,7 +98,14 @@ func newExportHandler(controls []*model.AuditControl, inScope bool) (*controlHan
 	return &controlHandler{svc: svc, auditSvc: stubExportAuditService{inScope: inScope}, trail: trail}, svc, trail
 }
 
-var viewAll = map[string]bool{privilege.ViewAudits: true, privilege.ViewAllAudits: true}
+// complianceTeam is what Compliance Admin and Compliance Team hold that matters
+// here: org-wide read, and internal review (see shared_seed_data.sql).
+var complianceTeam = map[string]bool{
+	privilege.ViewAudits: true, privilege.ViewAllAudits: true,
+	privilege.ReviewEvidence: true, privilege.SubmitEvidence: true,
+}
+
+var viewAll = complianceTeam
 
 func exportAs(t *testing.T, h *controlHandler, userID int, global map[string]bool, query string) *httptest.ResponseRecorder {
 	t.Helper()
@@ -249,19 +256,48 @@ func TestExportControls_RejectsAnUnknownTab(t *testing.T) {
 	}
 }
 
-// An external auditor is listed under their own scope, so the file holds only
-// the controls they were assigned — the same rows the page shows them.
-func TestExportControls_ExternalAuditorIsScoped(t *testing.T) {
+// A caller who holds ReviewEvidence but not org-wide read is listed under their
+// own row scope, so the file holds only the controls the page would show them.
+func TestExportControls_IsScopedToTheCaller(t *testing.T) {
 	h, svc, _ := newExportHandler(sampleControls(), true)
-	auditor := map[string]bool{privilege.ViewAudits: true, privilege.ValidateEvidence: true}
+	team := map[string]bool{privilege.ViewAudits: true, privilege.ReviewEvidence: true, privilege.SubmitEvidence: true}
 
-	rec := exportAs(t, h, visAuditorUserID, auditor, "")
+	rec := exportAs(t, h, 7, team, "")
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
-	if svc.scope != model.ScopeAssigned || svc.userID != visAuditorUserID {
-		t.Errorf("listed with scope %v / user %d, want assigned / %d", svc.scope, svc.userID, visAuditorUserID)
+	if svc.scope != model.ScopeOwned || svc.userID != 7 {
+		t.Errorf("listed with scope %v / user %d, want owned / 7", svc.scope, svc.userID)
+	}
+}
+
+// Only Compliance Admin and Compliance Team may export. Every other audit role
+// is refused before anything is listed, logged or written.
+func TestExportControls_OnlyComplianceMayExport(t *testing.T) {
+	for name, privs := range map[string]map[string]bool{
+		"management": {privilege.ViewAudits: true, privilege.ViewAllAudits: true, privilege.ViewInternalComments: true},
+		"internal team": {privilege.ViewAudits: true, privilege.SubmitEvidence: true,
+			privilege.AddComment: true, privilege.ViewInternalComments: true},
+		"external auditor": {privilege.ViewAudits: true, privilege.ValidateEvidence: true,
+			privilege.SelectSample: true, privilege.AddComment: true},
+		"no audit privileges": {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h, svc, trail := newExportHandler(sampleControls(), true)
+
+			rec := exportAs(t, h, visAuditorUserID, privs, "")
+
+			if rec.Code != http.StatusForbidden {
+				t.Errorf("status = %d, want 403", rec.Code)
+			}
+			if strings.Contains(rec.Body.String(), "CA-01") || strings.Contains(rec.Header().Get("Content-Type"), "text/csv") {
+				t.Error("a refused caller received CSV data")
+			}
+			if svc.calls != 0 || len(trail.recorded) != 0 {
+				t.Errorf("list calls = %d, trail entries = %d, want none", svc.calls, len(trail.recorded))
+			}
+		})
 	}
 }
 
@@ -269,25 +305,15 @@ func TestExportControls_ExternalAuditorIsScoped(t *testing.T) {
 // would confirm the audit exists — and nothing is listed.
 func TestExportControls_AuditOutOfScope(t *testing.T) {
 	h, svc, trail := newExportHandler(sampleControls(), false)
-	auditor := map[string]bool{privilege.ViewAudits: true, privilege.ValidateEvidence: true}
+	team := map[string]bool{privilege.ViewAudits: true, privilege.ReviewEvidence: true, privilege.SubmitEvidence: true}
 
-	rec := exportAs(t, h, 999, auditor, "")
+	rec := exportAs(t, h, 999, team, "")
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
 	}
 	if svc.calls != 0 || len(trail.recorded) != 0 {
 		t.Errorf("list calls = %d, trail entries = %d, want none", svc.calls, len(trail.recorded))
-	}
-}
-
-func TestExportControls_NeedsViewAudits(t *testing.T) {
-	h, svc, _ := newExportHandler(sampleControls(), true)
-
-	rec := exportAs(t, h, 1, map[string]bool{privilege.SubmitEvidence: true}, "")
-
-	if rec.Code != http.StatusForbidden || svc.calls != 0 {
-		t.Errorf("status = %d, list calls = %d", rec.Code, svc.calls)
 	}
 }
 
