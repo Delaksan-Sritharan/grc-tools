@@ -133,7 +133,7 @@ func TestHandleExportRisks_AllPages(t *testing.T) {
 func TestHandleExportRisks_FiltersPassedThrough(t *testing.T) {
 	risk := &pagedRiskSvc{items: makeItems(250)}
 	req := httptest.NewRequest(http.MethodGet,
-		"/api/v1/risks/export?statuses=APPROVED&level=HIGH,MEDIUM&treatment_strategy=ACCEPT&team_id=3&search=abc", nil).
+		"/api/v1/risks/export?statuses=APPROVED&level=HIGH,MEDIUM&treatment_strategy=ACCEPT&team_id=3&category_id=4,5&search=abc", nil).
 		WithContext(contextForGrants(t, complianceGlobal, nil))
 	rec := httptest.NewRecorder()
 
@@ -144,7 +144,8 @@ func TestHandleExportRisks_FiltersPassedThrough(t *testing.T) {
 	}
 	for i, f := range risk.calls {
 		if strings.Join(f.Statuses, ",") != "APPROVED" || strings.Join(f.Levels, ",") != "HIGH,MEDIUM" ||
-			strings.Join(f.TreatmentStrategies, ",") != "ACCEPT" || len(f.TeamIDs) != 1 || f.TeamIDs[0] != 3 || f.Search != "abc" {
+			strings.Join(f.TreatmentStrategies, ",") != "ACCEPT" || len(f.TeamIDs) != 1 || f.TeamIDs[0] != 3 || f.Search != "abc" ||
+			len(f.CategoryIDs) != 2 || f.CategoryIDs[0] != 4 || f.CategoryIDs[1] != 5 {
 			t.Errorf("call %d lost a filter: %+v", i, f)
 		}
 	}
