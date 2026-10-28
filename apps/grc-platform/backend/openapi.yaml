@@ -3395,6 +3395,11 @@ paths:
           enum:
           - 'true'
           - 'false'
+      - name: category_id
+        in: query
+        description: Comma-separated Risk Category IDs; a risk tagged with any of them matches.
+        schema:
+          type: string
       - name: treatment_strategy
         in: query
         description: Comma-separated REMEDIATE | ACCEPT | TRANSFER | AVOID | UNSPECIFIED values.
