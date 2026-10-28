@@ -59,6 +59,12 @@ func (s *riskAssessmentService) CreateRiskAssessment(ctx context.Context, riskID
 	if req.ManagementApproverID != nil && *req.ManagementApproverID <= 0 {
 		return domain.RiskAssessment{}, &apierror.ValidationError{Msg: "managementApproverId must be a positive id"}
 	}
+	if req.AssignerID != nil && *req.AssignerID <= 0 {
+		return domain.RiskAssessment{}, &apierror.ValidationError{Msg: "assignerId must be a positive id"}
+	}
+	if req.ActionOwnerID != nil && *req.ActionOwnerID <= 0 {
+		return domain.RiskAssessment{}, &apierror.ValidationError{Msg: "actionOwnerId must be a positive id"}
+	}
 	if req.ImplementationDate != nil {
 		if _, err := time.Parse("2006-01-02", *req.ImplementationDate); err != nil {
 			return domain.RiskAssessment{}, &apierror.ValidationError{Msg: "implementationDate must be in YYYY-MM-DD format"}

@@ -130,15 +130,33 @@ func (r *riskAssessmentRepo) CreateRiskAssessment(ctx context.Context, riskID in
 		sets = append(sets, "implementation_date = ?")
 		args = append(args, *req.ImplementationDate)
 	}
+	if req.AssignerID != nil {
+		sets = append(sets, "assigner_id = ?")
+		args = append(args, *req.AssignerID)
+	}
 	if len(sets) > 0 {
 		sets = append(sets, "updated_by = ?", "updated_at = NOW()")
 		args = append(args, req.CreatedBy, riskID)
 		if _, err = tx.ExecContext(ctx,
 			"UPDATE risk SET "+strings.Join(sets, ", ")+" WHERE id = ?", args...); err != nil {
 			if isFKViolation(err) {
-				return nil, &apierror.ValidationError{Msg: "ownerId or managementApproverId does not match a user"}
+				return nil, &apierror.ValidationError{Msg: "assignerId, ownerId or managementApproverId does not match a user"}
 			}
 			return nil, fmt.Errorf("risk_assessment.Create update risk: %w", err)
+		}
+	}
+	// The risk's own plan is its first STANDARD one — the same pick as
+	// risk.Update, so the owner written here is the one the risk shows.
+	if req.ActionOwnerID != nil {
+		if _, err = tx.ExecContext(ctx, `
+			UPDATE risk_action_plan SET action_owner_id = ?, updated_by = ?, updated_at = NOW()
+			WHERE risk_id = ? AND plan_type = 'STANDARD'
+			ORDER BY id LIMIT 1`,
+			*req.ActionOwnerID, req.CreatedBy, riskID); err != nil {
+			if isFKViolation(err) {
+				return nil, &apierror.ValidationError{Msg: "actionOwnerId does not match a user"}
+			}
+			return nil, fmt.Errorf("risk_assessment.Create update action plan: %w", err)
 		}
 	}
 

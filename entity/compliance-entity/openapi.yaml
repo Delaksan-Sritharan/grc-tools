@@ -7091,6 +7091,14 @@ components:
           type: string
           nullable: true
           description: Optional YYYY-MM-DD. Sets the risk's implementation date in the same transaction as the assessment.
+        assignerId:
+          type: integer
+          nullable: true
+          description: Optional. Sets the risk's Risk Assigner in the same transaction as the assessment. Omitted leaves it unchanged.
+        actionOwnerId:
+          type: integer
+          nullable: true
+          description: Optional. Sets the owner of the risk's own (first STANDARD) action plan in the same transaction as the assessment. Writes nothing if the risk has no such plan, so the caller checks first. Omitted leaves it unchanged.
         changeLog:
           type: array
           description: Written to risk_change_log in the same transaction. No workflow transition happens.
