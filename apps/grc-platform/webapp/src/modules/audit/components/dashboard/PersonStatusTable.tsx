@@ -57,7 +57,7 @@ export default function PersonStatusTable({
 }: PersonStatusTableProps): JSX.Element {
   const [program, setProgram] = useState(ALL_PROGRAMS);
   const [page, setPage] = useState(0);
-  const { data, isLoading, isError } = useGetDashboard(auditIdsFor(program));
+  const { data, isLoading, isError, isPlaceholderData } = useGetDashboard(auditIdsFor(program));
 
   const distribution = data?.assigneeStatusDistribution;
   const rows = distribution ? toMatrix(groupByAssignee(distribution, role, statuses), statuses) : [];
@@ -134,7 +134,7 @@ export default function PersonStatusTable({
       title={title}
       action={<AuditProgramFilter audits={audits} value={program} onChange={(v) => { setProgram(v); setPage(0); }} />}
     >
-      {body}
+      <Box sx={{ opacity: isPlaceholderData ? 0.5 : 1, transition: "opacity 150ms" }}>{body}</Box>
     </SectionCard>
   );
 }

@@ -46,7 +46,7 @@ interface RoleProgressCardProps {
 // sitting in the tracked statuses, filterable by audit program.
 export default function RoleProgressCard({ title, role, statuses, audits }: RoleProgressCardProps): JSX.Element {
   const [program, setProgram] = useState(ALL_PROGRAMS);
-  const { data, isLoading, isError } = useGetDashboard(auditIdsFor(program));
+  const { data, isLoading, isError, isPlaceholderData } = useGetDashboard(auditIdsFor(program));
 
   const distribution = data?.assigneeStatusDistribution;
   const rows = distribution ? groupByAssignee(distribution, role, statuses) : [];
@@ -96,7 +96,7 @@ export default function RoleProgressCard({ title, role, statuses, audits }: Role
           </Box>
         ))}
       </Box>
-      {body}
+      <Box sx={{ opacity: isPlaceholderData ? 0.5 : 1, transition: "opacity 150ms" }}>{body}</Box>
     </SectionCard>
   );
 }

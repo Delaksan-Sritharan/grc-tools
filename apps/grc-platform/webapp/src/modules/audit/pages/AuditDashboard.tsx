@@ -64,12 +64,14 @@ const TAB_FRAMEWORKS = "frameworks";
 function PhaseCard({ audits }: { audits: Audit[] }): JSX.Element {
   const [program, setProgram] = useState(ALL_PROGRAMS);
   const [selectedPhase, setSelectedPhase] = useState<ControlPhase | null>(null);
-  const { data, isLoading } = useGetDashboard(auditIdsFor(program));
+  const { data, isLoading, isPlaceholderData } = useGetDashboard(auditIdsFor(program));
   const distribution = data?.statusDistribution ?? [];
   return (
     <SectionCard title="Controls by Phase" action={<AuditProgramFilter audits={audits} value={program} onChange={setProgram} />}>
       {isLoading ? <Skeleton variant="rectangular" height={240} sx={{ borderRadius: 1 }} /> : (
-        <PhaseDonut data={distribution} onPhaseClick={setSelectedPhase} />
+        <Box sx={{ opacity: isPlaceholderData ? 0.5 : 1, transition: "opacity 150ms" }}>
+          <PhaseDonut data={distribution} onPhaseClick={setSelectedPhase} />
+        </Box>
       )}
       <PhaseInsightDialog phase={selectedPhase} statusDistribution={distribution} onClose={() => setSelectedPhase(null)} />
     </SectionCard>
@@ -79,14 +81,16 @@ function PhaseCard({ audits }: { audits: Audit[] }): JSX.Element {
 function TeamCard({ audits }: { audits: Audit[] }): JSX.Element {
   const [program, setProgram] = useState(ALL_PROGRAMS);
   const [selectedTeam, setSelectedTeam] = useState<{ team: TeamCompletion; color: string } | null>(null);
-  const { data, isLoading } = useGetDashboard(auditIdsFor(program));
+  const { data, isLoading, isPlaceholderData } = useGetDashboard(auditIdsFor(program));
   return (
     <SectionCard title="Team Progress" action={<AuditProgramFilter audits={audits} value={program} onChange={setProgram} />}>
       {isLoading ? <Skeleton variant="rectangular" height={240} sx={{ borderRadius: 1 }} /> : (
-        <TeamProgress
-          data={data?.teamCompletion ?? []}
-          onTeamClick={(team, color) => setSelectedTeam({ team, color })}
-        />
+        <Box sx={{ opacity: isPlaceholderData ? 0.5 : 1, transition: "opacity 150ms" }}>
+          <TeamProgress
+            data={data?.teamCompletion ?? []}
+            onTeamClick={(team, color) => setSelectedTeam({ team, color })}
+          />
+        </Box>
       )}
       <TeamInsightDialog
         team={selectedTeam?.team ?? null}
