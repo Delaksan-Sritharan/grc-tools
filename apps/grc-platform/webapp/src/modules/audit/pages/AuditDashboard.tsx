@@ -14,7 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Alert, Box, Paper, Skeleton, Typography } from "@wso2/oxygen-ui";
+import { Alert, Box, Skeleton, useTheme } from "@wso2/oxygen-ui";
+import { AlertTriangle, CheckCircle, ClipboardList, Clock, Inbox, ShieldCheck, Upload } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 import { useRef, useState } from "react";
 import { useSearchParams } from "react-router";
@@ -26,38 +27,84 @@ import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
 import TabBar, { type TabOption } from "@components/tab-bar/TabBar";
 import AuditProgressList from "@modules/audit/components/dashboard/AuditProgressList";
 import HeroBand from "@modules/audit/components/dashboard/HeroBand";
-import KpiCards from "@modules/audit/components/dashboard/KpiCards";
+import {
+  isQueueTabVisible,
+  QUEUE_TAB_ALL_PENDING,
+  QUEUE_TAB_AWAITING,
+  QUEUE_TAB_COMPLETED,
+  QUEUE_TAB_DUE_SOON,
+  QUEUE_TAB_OVERDUE,
+  QUEUE_TAB_PENDING,
+  QUEUE_TAB_VALIDATION,
+} from "@modules/audit/utils/workQueueTabs";
+import KpiCards, { type KpiItem } from "@modules/audit/components/dashboard/KpiCards";
 import PhaseDonut from "@modules/audit/components/dashboard/PhaseDonut";
+import AuditProgramFilter from "@modules/audit/components/dashboard/AuditProgramFilter";
+import { ALL_PROGRAMS, auditIdsFor } from "@modules/audit/utils/assigneeProgress";
+import PersonStatusTable from "@modules/audit/components/dashboard/PersonStatusTable";
+import RoleProgressCard from "@modules/audit/components/dashboard/RoleProgressCard";
+import SectionCard from "@modules/audit/components/dashboard/SectionCard";
 import PhaseInsightDialog from "@modules/audit/components/dashboard/PhaseInsightDialog";
 import TeamProgress from "@modules/audit/components/dashboard/TeamProgress";
 import TeamInsightDialog from "@modules/audit/components/dashboard/TeamInsightDialog";
-import WorkQueue, {
-  QUEUE_TAB_ALL_PENDING,
-  QUEUE_TAB_AWAITING,
-  QUEUE_TAB_OVERDUE,
-} from "@modules/audit/components/dashboard/WorkQueue";
+import WorkQueue from "@modules/audit/components/dashboard/WorkQueue";
 import FrameworkReadinessTab from "@modules/audit/components/dashboard/framework/FrameworkReadinessTab";
 import type { ControlPhase } from "@modules/audit/utils/controlStatus";
+import type { Audit } from "@modules/audit/types/audit";
 import type { TeamCompletion } from "@modules/audit/types/dashboard";
 
 const TAB_OVERVIEW = "overview";
 const TAB_FRAMEWORKS = "frameworks";
 
-// ── Section card ──────────────────────────────────────────────────────────────
+// ── Filtered chart cards ──────────────────────────────────────────────────────
+// Each card owns its audit-program filter and fetches the dashboard for just
+// that selection (react-query shares the unfiltered "All programs" result), so
+// phase and team numbers can be viewed per audit independently.
 
-function SectionCard({ title, children }: { title: string; children: React.ReactNode }): JSX.Element {
+function PhaseCard({ audits }: { audits: Audit[] }): JSX.Element {
+  const [program, setProgram] = useState(ALL_PROGRAMS);
+  const [selectedPhase, setSelectedPhase] = useState<ControlPhase | null>(null);
+  const { data, isLoading } = useGetDashboard(auditIdsFor(program));
+  const distribution = data?.statusDistribution ?? [];
   return (
-    // height: 100% + flex column lets grid rows stretch all cards equally;
-    // children with flex-basis 0 (AuditProgressList/TeamProgress) then fill
-    // whatever height the tallest card (e.g. the detailed donut) sets.
-    <Paper variant="outlined" sx={{ borderRadius: 2, overflow: "hidden", height: "100%", display: "flex", flexDirection: "column" }}>
-      <Box sx={{ px: 2.5, py: 1.5, borderBottom: 1, borderColor: "divider" }}>
-        <Typography variant="subtitle1" fontWeight={700}>{title}</Typography>
-      </Box>
-      <Box sx={{ p: 2.5, flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>{children}</Box>
-    </Paper>
+    <SectionCard title="Controls by Phase" action={<AuditProgramFilter audits={audits} value={program} onChange={setProgram} />}>
+      {isLoading ? <Skeleton variant="rectangular" height={240} sx={{ borderRadius: 1 }} /> : (
+        <PhaseDonut data={distribution} onPhaseClick={setSelectedPhase} />
+      )}
+      <PhaseInsightDialog phase={selectedPhase} statusDistribution={distribution} onClose={() => setSelectedPhase(null)} />
+    </SectionCard>
   );
 }
+
+function TeamCard({ audits }: { audits: Audit[] }): JSX.Element {
+  const [program, setProgram] = useState(ALL_PROGRAMS);
+  const [selectedTeam, setSelectedTeam] = useState<{ team: TeamCompletion; color: string } | null>(null);
+  const { data, isLoading } = useGetDashboard(auditIdsFor(program));
+  return (
+    <SectionCard title="Team Progress" action={<AuditProgramFilter audits={audits} value={program} onChange={setProgram} />}>
+      {isLoading ? <Skeleton variant="rectangular" height={240} sx={{ borderRadius: 1 }} /> : (
+        <TeamProgress
+          data={data?.teamCompletion ?? []}
+          onTeamClick={(team, color) => setSelectedTeam({ team, color })}
+        />
+      )}
+      <TeamInsightDialog
+        team={selectedTeam?.team ?? null}
+        color={selectedTeam?.color ?? "#1E88E5"}
+        teamStatusDistribution={data?.teamStatusDistribution ?? []}
+        onClose={() => setSelectedTeam(null)}
+      />
+    </SectionCard>
+  );
+}
+
+// Statuses each role's view tracks — the conditions the stakeholders asked for.
+const AUDITOR_STATUSES = ["EVIDENCE_UNDER_VALIDATION", "POPULATION_UNDER_VALIDATION"] as const;
+const OWNER_STATUSES = [
+  "POPULATION_PENDING", "EVIDENCE_PENDING", "EVIDENCE_NEED_CLARIFICATION",
+  "POPULATION_NEED_CLARIFICATION", "OVERDUE",
+] as const;
+const COMPLIANCE_STATUSES = ["EVIDENCE_INTERNAL_REVIEW", "POPULATION_INTERNAL_REVIEW"] as const;
 
 // ── Skeleton ──────────────────────────────────────────────────────────────────
 
@@ -83,6 +130,7 @@ function DashboardSkeleton(): JSX.Element {
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function AuditDashboard(): JSX.Element {
+  const theme = useTheme();
   const { can } = useAuditPrivileges();
   const { data, isLoading, isError } = useGetDashboard();
   const { data: auditsData } = useGetAudits();
@@ -114,9 +162,6 @@ export default function AuditDashboard(): JSX.Element {
   const [queueTab, setQueueTab] = useState(QUEUE_TAB_AWAITING);
   const [queueHighlight, setQueueHighlight] = useState(false);
 
-  // Chart drill-downs.
-  const [selectedPhase, setSelectedPhase] = useState<ControlPhase | null>(null);
-  const [selectedTeam, setSelectedTeam] = useState<{ team: TeamCompletion; color: string } | null>(null);
 
   const jumpToQueue = (tab: number) => {
     setQueueTab(tab);
@@ -135,7 +180,7 @@ export default function AuditDashboard(): JSX.Element {
     );
   }
 
-  const { auditStats, stats, statusDistribution, teamCompletion } = data;
+  const { auditStats, stats } = data;
 
   // Privilege-driven gating (never role names).
   const canSubmit = can(AuditPrivilege.SubmitEvidence);
@@ -155,6 +200,49 @@ export default function AuditDashboard(): JSX.Element {
   const pendingCount = data.pendingCount ?? 0;
   const validationCount = data.validationCount ?? 0;
   const allPendingCount = data.allPendingCount ?? 0;
+  // An entity that predates completedCount still reports stats.completedControls.
+  const completedCount = data.completedCount ?? stats.completedControls;
+  const audits = auditsData?.items ?? [];
+
+  const access = { canViewAll, canApprove, canSubmit, canValidate };
+  const neutral = theme.palette.grey[500];
+  const kpiDefs: (KpiItem & { tab: number })[] = [
+    {
+      tab: QUEUE_TAB_ALL_PENDING, key: "all-pending", icon: <ClipboardList size={22} />, iconColor: theme.palette.primary.main,
+      value: allPendingCount, label: "All Pending", sub: `of ${stats.totalControls} total controls`,
+    },
+    {
+      tab: QUEUE_TAB_AWAITING, key: "awaiting", icon: <Inbox size={22} />, iconColor: theme.palette.warning.main,
+      value: stats.totalActionItems ?? 0, label: queueTitle, sub: "click to view",
+      valueColor: (stats.totalActionItems ?? 0) > 0 ? theme.palette.warning.main : undefined,
+    },
+    {
+      tab: QUEUE_TAB_DUE_SOON, key: "due-soon", icon: <Clock size={22} />, iconColor: theme.palette.info.main,
+      value: dueSoonCount, label: "Due Soon", sub: "next 7 days",
+    },
+    {
+      tab: QUEUE_TAB_PENDING, key: "pending", icon: <Upload size={22} />, iconColor: theme.palette.warning.main,
+      value: pendingCount, label: "Pending Submission", sub: "awaiting owners",
+    },
+    {
+      tab: QUEUE_TAB_VALIDATION, key: "validation", icon: <ShieldCheck size={22} />, iconColor: theme.palette.secondary.main,
+      value: validationCount, label: "Under Validation", sub: "awaiting auditors",
+    },
+    {
+      tab: QUEUE_TAB_OVERDUE, key: "overdue", icon: <AlertTriangle size={22} />,
+      iconColor: stats.overdueControls > 0 ? theme.palette.error.main : neutral,
+      value: stats.overdueControls, label: "Overdue", sub: stats.overdueControls > 0 ? "needs attention" : "all on schedule",
+      valueColor: stats.overdueControls > 0 ? theme.palette.error.main : undefined,
+    },
+    {
+      tab: QUEUE_TAB_COMPLETED, key: "completed", icon: <CheckCircle size={22} />, iconColor: theme.palette.success.main,
+      value: completedCount, label: "Completed", sub: `${stats.completionPercent.toFixed(1)}% of scope`,
+      valueColor: theme.palette.success.main,
+    },
+  ];
+  const kpiItems: KpiItem[] = kpiDefs
+    .filter((d) => isQueueTabVisible(d.tab, access))
+    .map(({ tab, ...item }) => ({ ...item, onClick: () => jumpToQueue(tab) }));
 
   const userName =
     (claims?.given_name as string | undefined) ??
@@ -185,36 +273,27 @@ export default function AuditDashboard(): JSX.Element {
         onQueueClick={() => jumpToQueue(QUEUE_TAB_AWAITING)}
       />
 
-      {/* ② KPI cards */}
-      <KpiCards
-        totalControls={stats.totalControls}
-        completedControls={stats.completedControls}
-        completionPercent={stats.completionPercent}
-        overdueControls={stats.overdueControls}
-        awaitingCount={awaitingCount}
-        awaitingLabel={queueTitle}
-        onTotalClick={() => jumpToQueue(QUEUE_TAB_ALL_PENDING)}
-        onAwaitingClick={() => jumpToQueue(QUEUE_TAB_AWAITING)}
-        onOverdueClick={() => jumpToQueue(QUEUE_TAB_OVERDUE)}
-      />
+      {/* ② KPI cards — one per work-queue tab, each jumping to its tab */}
+      <KpiCards items={kpiItems} />
 
       {/* ③ Charts row */}
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "1fr 1fr 1fr" }, gap: 2 }}>
-        <SectionCard title="Controls by Phase">
-          <PhaseDonut data={statusDistribution} onPhaseClick={setSelectedPhase} />
-        </SectionCard>
+        <PhaseCard audits={audits} />
         <SectionCard title="Audit Progress">
-          <AuditProgressList audits={auditsData?.items ?? []} />
+          <AuditProgressList audits={audits} />
         </SectionCard>
-        <SectionCard title="Team Progress">
-          <TeamProgress
-            data={teamCompletion}
-            onTeamClick={(team, color) => setSelectedTeam({ team, color })}
-          />
-        </SectionCard>
+        <TeamCard audits={audits} />
       </Box>
 
-      {/* ④ Work queue — tabbed (awaiting you / due soon / overdue). Also shown
+      {/* ④ Role progress views — auditor and compliance as cards, process owner
+          as a full-width table (one row per person, a column per status). */}
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "1fr 1fr" }, gap: 2 }}>
+        <RoleProgressCard title="Auditor Team" role="auditor" statuses={AUDITOR_STATUSES} audits={audits} />
+        <RoleProgressCard title="Compliance Team" role="compliance" statuses={COMPLIANCE_STATUSES} audits={audits} />
+      </Box>
+      <PersonStatusTable title="Process Owner Team" role="owner" statuses={OWNER_STATUSES} personLabel="Process Owner" audits={audits} />
+
+      {/* ⑤ Work queue — tabbed (awaiting you / due soon / overdue). Also shown
           read-only for viewers without submit/review since the overdue tab is
           the monitoring view (their awaiting tab will simply be empty). */}
       <Box
@@ -233,6 +312,7 @@ export default function AuditDashboard(): JSX.Element {
             totalValidationItems={validationCount}
             totalOverdueControls={stats.overdueControls}
             totalAllPendingItems={allPendingCount}
+            totalCompletedItems={completedCount}
             canViewAll={canViewAll}
             canApprove={canApprove}
             canSubmit={canSubmit}
@@ -243,19 +323,6 @@ export default function AuditDashboard(): JSX.Element {
           />
         </SectionCard>
       </Box>
-
-      {/* Drill-down dialogs */}
-      <PhaseInsightDialog
-        phase={selectedPhase}
-        statusDistribution={statusDistribution}
-        onClose={() => setSelectedPhase(null)}
-      />
-      <TeamInsightDialog
-        team={selectedTeam?.team ?? null}
-        color={selectedTeam?.color ?? "#1E88E5"}
-        teamStatusDistribution={data.teamStatusDistribution ?? []}
-        onClose={() => setSelectedTeam(null)}
-      />
 
         </>
       )}
