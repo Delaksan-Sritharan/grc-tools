@@ -95,7 +95,7 @@ type Deps struct {
 // RegisterRoutes mounts all Audit Hub routes onto mux.
 func RegisterRoutes(mux routeguard.Router, deps Deps) {
 	ah := &auditHandler{svc: deps.Audit}
-	ch := &controlHandler{svc: deps.Control, notify: &deps}
+	ch := &controlHandler{svc: deps.Control, auditSvc: deps.Audit, trail: deps.Trail, notify: &deps}
 	tlh := &trailHandler{svc: deps.Trail, controlSvc: deps.Control, auditSvc: deps.Audit, directory: deps.Directory}
 	fh := &frameworkHandler{svc: deps.Framework}
 	uh := &userHandler{svc: deps.User, directory: deps.Directory, grants: deps.Grants}
@@ -145,6 +145,7 @@ func RegisterRoutes(mux routeguard.Router, deps Deps) {
 	// Control CRUD + status transitions.
 	// Note: /bulk must be registered before /{controlId} so the router matches it first.
 	mux.HandleFunc("GET /api/v1/audits/{id}/controls", ch.listControls)
+	mux.HandleFunc("GET /api/v1/audits/{id}/controls/export", ch.exportControls)
 	mux.HandleFunc("POST /api/v1/audits/{id}/controls", ch.addControl)
 	mux.HandleFunc("POST /api/v1/audits/{id}/controls/bulk", ch.bulkAddControls)
 	mux.HandleFunc("GET /api/v1/audits/{id}/controls/{controlId}", ch.getControl)
