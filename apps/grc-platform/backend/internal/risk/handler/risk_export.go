@@ -26,6 +26,8 @@ import (
 
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/response"
 	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/risk/model"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/auth"
+	"github.com/wso2-open-operations/grc-tools/apps/grc-platform/backend/internal/shared/privilege"
 )
 
 const (
@@ -53,9 +55,18 @@ var riskExportHeader = []string{
 // caller scoping, and returns every matching risk as CSV instead of one page.
 // limit and offset are ignored.
 func (d *Deps) handleExportRisks(w http.ResponseWriter, r *http.Request) {
-	// Same stance as handleListRisks: no privilege gate, visibility is decided
-	// entirely by buildListFilter's scoping, and each branch fails closed.
 	if _, ok := requireCallerUUID(w, r); !ok {
+		return
+	}
+	// Unlike the list, the export is limited to Compliance: RISK_VIEW_ALL_RISKS is
+	// held only by grc-platform-risk-compliance-admin and
+	// grc-platform-risk-compliance-team among the seeded roles. A Compliance Team
+	// grant can be scoped to specific registers, so this check is unscoped (it
+	// passes for a holder at any scope) and the rows are then narrowed to the
+	// caller's own scope by buildListFilter, exactly as in the list — the gate
+	// decides who may export, never which risks they see. Each scoping branch
+	// still fails closed.
+	if !auth.RequirePrivilege(r.Context(), w, privilege.ViewAllRisks) {
 		return
 	}
 	filter, empty, ok := d.buildListFilter(w, r)
