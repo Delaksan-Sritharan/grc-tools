@@ -3187,7 +3187,7 @@ paths:
       tags:
       - Risks
       summary: Export risks as CSV
-      description: Same filters and caller scoping as listRisks, but returns every matching risk as a CSV file rather than one page. limit and offset are ignored. Responds 422 when more than 50,000 risks match; narrow the filters.
+      description: Same filters as listRisks, but returns every matching risk as a CSV file rather than one page. limit and offset are ignored. Restricted to the Compliance Admin and Compliance Team (RISK_VIEW_ALL_RISKS); every other caller gets a 403. The rows are then limited to what the caller may see in the list, so a Compliance Team member scoped to certain registers exports only those. Responds 422 when more than 50,000 risks match; narrow the filters.
       operationId: exportRisks
       parameters:
       - name: statuses
@@ -3294,6 +3294,8 @@ paths:
                 type: string
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '422':
           description: More than 50,000 risks match; narrow the filters and try again
           content:
