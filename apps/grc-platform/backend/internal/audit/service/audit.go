@@ -254,6 +254,9 @@ func (s *auditService) Update(ctx context.Context, id int, req model.UpdateAudit
 	if err := validateAuditDetails(a, &req); err != nil {
 		return err
 	}
+	if req.DisplayName == nil && req.PeriodStart == nil && req.PeriodEnd == nil && req.ScopeDescription == nil && req.Status == nil {
+		return nil // every supplied value matched the current one: nothing to write or log
+	}
 	if err := s.repo.Update(ctx, id, req, updatedBy); err != nil {
 		return err
 	}

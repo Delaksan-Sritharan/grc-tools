@@ -127,8 +127,8 @@ func TestRenameSameNameIsNoOp(t *testing.T) {
 	if err := svc.Update(context.Background(), 1, model.UpdateAuditRequest{DisplayName: ptr("Test")}, "u"); err != nil {
 		t.Fatalf("no-op rename: %v", err)
 	}
-	if repo.updated == nil || repo.updated.DisplayName != nil {
-		t.Fatalf("no-op must not write displayName, got %+v", repo.updated)
+	if repo.updated != nil {
+		t.Fatalf("no-op must not write to the repo, got %+v", repo.updated)
 	}
 }
 
@@ -218,7 +218,7 @@ func TestEditUnchangedPeriodAndScopeIsNoOp(t *testing.T) {
 	if err := svc.Update(context.Background(), 1, req, "u"); err != nil {
 		t.Fatalf("no-op: %v", err)
 	}
-	if repo.updated == nil || repo.updated.PeriodStart != nil || repo.updated.PeriodEnd != nil || repo.updated.ScopeDescription != nil {
+	if repo.updated != nil {
 		t.Fatalf("unchanged fields must not be written: %+v", repo.updated)
 	}
 }
