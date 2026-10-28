@@ -645,6 +645,126 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /api/v1/audits/{id}/controls/export:
+    get:
+      tags:
+      - Audit Controls
+      summary: Export an audit's controls as CSV
+      description: |-
+        Returns the controls the audit detail page is showing as a CSV file, for every matching control rather than one page. Visibility is that of listAuditControls: the caller's row scope applies, and an audit outside it is a 404.
+
+        The parameters describe the page's current view. A `tab` takes precedence, as on the page: when it is given, `search` and the column filters are ignored. Otherwise `search` and the column filters apply, ANDed across parameters and ORed within one. Repeat a parameter to give several values (`?team=A&team=B`); team and person names can contain commas, so they are not comma-separated.
+
+        The columns are fixed. A successful export is recorded in the audit's activity log as `EXPORTED`.
+      operationId: exportAuditControls
+      parameters:
+      - $ref: '#/components/parameters/AuditId'
+      - name: tab
+        in: query
+        description: The page's tab. Omit for All.
+        schema:
+          type: string
+          enum:
+          - allPending
+          - approved
+          - inProgress
+          - overdue
+      - name: search
+        in: query
+        description: Case-insensitive match on control number and description.
+        schema:
+          type: string
+      - name: status
+        in: query
+        description: Control status values, or the pseudo-value OVERDUE (evidence due date passed and not complete).
+        style: form
+        explode: true
+        schema:
+          type: array
+          items:
+            type: string
+      - name: requirement_type
+        in: query
+        description: DESIGN or OE.
+        style: form
+        explode: true
+        schema:
+          type: array
+          items:
+            type: string
+      - name: control_type
+        in: query
+        description: CONFIG or NON_CONFIG.
+        style: form
+        explode: true
+        schema:
+          type: array
+          items:
+            type: string
+      - name: scope
+        in: query
+        description: COMMON or PRODUCT_SPECIFIC.
+        style: form
+        explode: true
+        schema:
+          type: array
+          items:
+            type: string
+      - name: team
+        in: query
+        description: Team display names. An empty value matches controls with no team.
+        style: form
+        explode: true
+        schema:
+          type: array
+          items:
+            type: string
+      - name: auditor
+        in: query
+        description: Auditor POC display names. An empty value matches controls with no auditor.
+        style: form
+        explode: true
+        schema:
+          type: array
+          items:
+            type: string
+      - name: owner
+        in: query
+        description: Process owner display names. An empty value matches controls with no owner.
+        style: form
+        explode: true
+        schema:
+          type: array
+          items:
+            type: string
+      responses:
+        '200':
+          description: CSV file (UTF-8 with BOM), one row per matching control
+          headers:
+            Content-Disposition:
+              description: attachment; filename=audit-controls-<audit name>-YYYY-MM-DD.csv
+              schema:
+                type: string
+          content:
+            text/csv:
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: More than 5,000 controls match; narrow the filters and try again
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /api/v1/audits/{id}/controls/bulk:
     post:
       tags:
