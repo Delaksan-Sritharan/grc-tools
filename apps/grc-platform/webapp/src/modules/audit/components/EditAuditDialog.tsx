@@ -26,7 +26,7 @@ import {
   DialogTitle,
   TextField,
 } from "@wso2/oxygen-ui";
-import { type JSX, useState } from "react";
+import { type JSX, useEffect, useState } from "react";
 import { type EditAuditFields, useEditAudit } from "@modules/audit/api/useEditAudit";
 import { auditDisplayName } from "@modules/audit/utils/format";
 import type { Audit } from "@modules/audit/types/audit";
@@ -41,10 +41,15 @@ interface EditAuditDialogProps {
 }
 
 export default function EditAuditDialog({ audit, onClose, onSaved }: EditAuditDialogProps): JSX.Element {
+  // Escape/backdrop dismissal while a save is in flight would unmount the form and drop onSaved.
+  const [saving, setSaving] = useState(false);
+
   return (
-    <Dialog open={Boolean(audit)} onClose={onClose} maxWidth="sm" fullWidth>
+    <Dialog open={Boolean(audit)} onClose={saving ? undefined : onClose} maxWidth="sm" fullWidth>
       {/* Keyed by audit so the form state resets for each audit it opens on. */}
-      {audit && <EditForm key={audit.id} audit={audit} onClose={onClose} onSaved={onSaved} />}
+      {audit && (
+        <EditForm key={audit.id} audit={audit} onClose={onClose} onSaved={onSaved} onPendingChange={setSaving} />
+      )}
     </Dialog>
   );
 }
@@ -53,12 +58,18 @@ function EditForm({
   audit,
   onClose,
   onSaved,
+  onPendingChange,
 }: {
   audit: Audit;
   onClose: () => void;
   onSaved: () => void;
+  onPendingChange: (pending: boolean) => void;
 }): JSX.Element {
   const edit = useEditAudit();
+
+  useEffect(() => {
+    onPendingChange(edit.isPending);
+  }, [edit.isPending, onPendingChange]);
   const currentName = auditDisplayName(audit);
   const currentScope = audit.scopeDescription ?? "";
 

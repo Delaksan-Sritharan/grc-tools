@@ -1728,7 +1728,10 @@ function Step2Controls({
             renderValue={(v) =>
               v === ""
                 ? <span style={{ opacity: 0.5 }}>Select source audit</span>
-                : (sameFrameworkAudits.find((a) => String(a.id) === v)?.name ?? "")
+                : (() => {
+                    const source = sameFrameworkAudits.find((a) => String(a.id) === v);
+                    return source ? auditDisplayName(source) : "";
+                  })()
             }
           >
             {sameFrameworkAudits.length === 0 ? (
