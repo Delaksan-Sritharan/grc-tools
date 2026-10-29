@@ -24,6 +24,7 @@ function makeAudit(overrides: Partial<Audit> = {}): Audit {
   return {
     id: 1,
     name: "Asgardeo 2026",
+    displayName: null,
     framework: { id: 10, name: "SOC 2" },
     product: { id: 1, name: "Asgardeo" },
     periodStart: "2026-01-01",

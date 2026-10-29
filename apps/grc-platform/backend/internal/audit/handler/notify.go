@@ -229,7 +229,7 @@ func (d *Deps) auditName(ctx context.Context, auditID int) string {
 	if a == nil {
 		return ""
 	}
-	return a.Name
+	return a.EffectiveName()
 }
 
 // SendReminderDigestSync sends one recipient's full daily due-date reminder

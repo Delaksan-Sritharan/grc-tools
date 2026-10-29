@@ -278,7 +278,7 @@ func (r *dashboardRepo) queryActionItems(ctx context.Context, class domain.WorkQ
 		return []domain.DashboardControlItem{}, nil
 	}
 	q := fmt.Sprintf(`
-		SELECT c.id, c.audit_id, a.name,
+		SELECT c.id, c.audit_id, COALESCE(a.display_name, a.name),
 		       c.control_number,
 		       c.description,
 		       c.status,
@@ -299,7 +299,7 @@ func (r *dashboardRepo) queryActionItems(ctx context.Context, class domain.WorkQ
 // next action, so (unlike queryActionItems) it is not filtered by role/status.
 func (r *dashboardRepo) queryDueSoonItems(ctx context.Context, baseWhere string, scopeArgs []any) ([]domain.DashboardControlItem, error) {
 	q := fmt.Sprintf(`
-		SELECT c.id, c.audit_id, a.name,
+		SELECT c.id, c.audit_id, COALESCE(a.display_name, a.name),
 		       c.control_number,
 		       c.description,
 		       c.status,
@@ -464,7 +464,7 @@ func (r *dashboardRepo) GetWorkQueuePage(ctx context.Context, req domain.WorkQue
 		}
 		// page
 		q := fmt.Sprintf(`
-			SELECT c.id, c.audit_id, a.name,
+			SELECT c.id, c.audit_id, COALESCE(a.display_name, a.name),
 			       c.control_number,
 			       c.description,
 			       c.status,
@@ -490,7 +490,7 @@ func (r *dashboardRepo) GetWorkQueuePage(ctx context.Context, req domain.WorkQue
 			return nil, err
 		}
 		q := fmt.Sprintf(`
-			SELECT c.id, c.audit_id, a.name,
+			SELECT c.id, c.audit_id, COALESCE(a.display_name, a.name),
 			       c.control_number,
 			       c.description,
 			       c.status,
@@ -523,7 +523,7 @@ func (r *dashboardRepo) GetWorkQueuePage(ctx context.Context, req domain.WorkQue
 			return nil, err
 		}
 		q := fmt.Sprintf(`
-			SELECT c.id, c.audit_id, a.name,
+			SELECT c.id, c.audit_id, COALESCE(a.display_name, a.name),
 			       c.control_number,
 			       c.description,
 			       c.status,
@@ -547,7 +547,7 @@ func (r *dashboardRepo) GetWorkQueuePage(ctx context.Context, req domain.WorkQue
 			return nil, err
 		}
 		q := fmt.Sprintf(`
-			SELECT c.id, c.audit_id, a.name,
+			SELECT c.id, c.audit_id, COALESCE(a.display_name, a.name),
 			       c.control_number,
 			       c.description,
 			       c.status,
@@ -589,7 +589,7 @@ func (r *dashboardRepo) scanControlItems(ctx context.Context, q string, args []a
 
 func (r *dashboardRepo) queryOverdueControls(ctx context.Context, baseWhere string, scopeArgs []any) ([]domain.DashboardControlItem, error) {
 	q := fmt.Sprintf(`
-		SELECT c.id, c.audit_id, a.name,
+		SELECT c.id, c.audit_id, COALESCE(a.display_name, a.name),
 		       c.control_number,
 		       c.description,
 		       c.status,

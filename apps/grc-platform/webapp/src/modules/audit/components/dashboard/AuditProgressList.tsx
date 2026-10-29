@@ -19,6 +19,7 @@ import { AlertTriangle } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 import { useNavigate } from "react-router";
 import type { Audit } from "@modules/audit/types/audit";
+import { auditDisplayName } from "@modules/audit/utils/format";
 import { DUE_OVERDUE } from "./dueDate";
 import { auditPaths } from "@modules/audit/paths";
 
@@ -69,8 +70,8 @@ export default function AuditProgressList({ audits }: { audits: Audit[] }): JSX.
             }}
           >
             <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5 }}>
-              <Typography variant="body2" fontWeight={600} noWrap title={audit.name} sx={{ flex: 1 }}>
-                {audit.name}
+              <Typography variant="body2" fontWeight={600} noWrap title={auditDisplayName(audit)} sx={{ flex: 1 }}>
+                {auditDisplayName(audit)}
               </Typography>
               <Chip
                 label={audit.framework.name}

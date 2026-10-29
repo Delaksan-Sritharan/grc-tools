@@ -50,7 +50,7 @@ import { useAuditPrivileges } from "@modules/audit/hooks/useAuditPrivileges";
 import { AuditPrivilege } from "@modules/audit/privileges";
 import { useGetAudit } from "@modules/audit/api/useGetAudit";
 import { useGetControls } from "@modules/audit/api/useGetControls";
-import { daysLeft, formatDateRange } from "@modules/audit/utils/format";
+import { auditDisplayName, daysLeft, formatDateRange } from "@modules/audit/utils/format";
 import {
   EMPTY_CONTROL_FILTERS,
   applyControlFilters,
@@ -283,7 +283,7 @@ export default function AuditDetailPage(): JSX.Element {
               <Box sx={{ minWidth: 260 }}>
                 <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap" mb={0.75}>
                   <Typography variant="h5" fontWeight={700}>
-                    {audit.name}
+                    {auditDisplayName(audit)}
                   </Typography>
                   <AuditStatusChip status={audit.status} />
                 </Stack>

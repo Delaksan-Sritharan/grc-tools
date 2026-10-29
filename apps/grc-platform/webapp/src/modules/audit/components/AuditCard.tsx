@@ -29,11 +29,11 @@ import {
   Stack,
   Typography,
 } from "@wso2/oxygen-ui";
-import { AlertTriangle, Archive, ArchiveRestore, CalendarDays, MoreVertical, Trash2 } from "@wso2/oxygen-ui-icons-react";
+import { AlertTriangle, Archive, ArchiveRestore, CalendarDays, MoreVertical, Pencil, Trash2 } from "@wso2/oxygen-ui-icons-react";
 import { type JSX, useState } from "react";
 import AuditStatusChip from "@modules/audit/components/AuditStatusChip";
 import CompletionRing from "@modules/audit/components/dashboard/CompletionRing";
-import { daysLeft, formatDateRange } from "@modules/audit/utils/format";
+import { auditDisplayName, daysLeft, formatDateRange } from "@modules/audit/utils/format";
 import type { Audit, AuditStatus } from "@modules/audit/types/audit";
 
 // Status accent colors — match AuditStatusChip's palette intent.
@@ -54,6 +54,9 @@ interface AuditCardProps {
   /** Archives an active/completed audit, or restores an archived one to active. */
   onArchiveToggle?: () => void;
   canArchive?: boolean;
+  /** Opens the edit dialog (name, period, scope); offered for active audits only. */
+  onEdit?: () => void;
+  canEdit?: boolean;
 }
 
 export default function AuditCard({
@@ -63,6 +66,8 @@ export default function AuditCard({
   canDelete = false,
   onArchiveToggle,
   canArchive = false,
+  onEdit,
+  canEdit = false,
 }: AuditCardProps): JSX.Element {
   const { controlCounts } = audit;
   const approvedPct =
@@ -79,13 +84,18 @@ export default function AuditCard({
     setMenuAnchor(null);
     onDelete();
   };
+  const handleEdit = () => {
+    setMenuAnchor(null);
+    onEdit?.();
+  };
   const handleArchiveToggle = () => {
     setMenuAnchor(null);
     onArchiveToggle?.();
   };
 
-  const showMenu = canDelete || canArchive;
   const isArchived = audit.status === "ARCHIVED";
+  const showEdit = canEdit && audit.status === "ACTIVE";
+  const showMenu = canDelete || canArchive || showEdit;
 
   // Days-left hint for active audits (red when the period is nearly over).
   const remaining = audit.status === "ACTIVE" ? daysLeft(audit.periodEnd) : null;
@@ -115,6 +125,14 @@ export default function AuditCard({
             open={Boolean(menuAnchor)}
             onClose={() => setMenuAnchor(null)}
           >
+            {showEdit && (
+              <MenuItem onClick={handleEdit}>
+                <ListItemIcon>
+                  <Pencil size={16} />
+                </ListItemIcon>
+                Edit audit
+              </MenuItem>
+            )}
             {canArchive && (
               <MenuItem onClick={handleArchiveToggle}>
                 <ListItemIcon>
@@ -151,7 +169,7 @@ export default function AuditCard({
             variant="h6"
             sx={{ fontWeight: 600, lineHeight: 1.3, mt: -0.5 }}
           >
-            {audit.name}
+            {auditDisplayName(audit)}
           </Typography>
 
           {/* Framework · Product */}

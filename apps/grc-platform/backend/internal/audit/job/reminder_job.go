@@ -307,7 +307,7 @@ func (j *ReminderJob) runOnce(parent context.Context) (runErr error) {
 		if a.IsOngoing() {
 			activeAuditIDs[a.ID] = true
 		}
-		auditNames[a.ID] = a.Name
+		auditNames[a.ID] = a.EffectiveName()
 	}
 
 	// Resolved once per sweep, not per control. A failure here is logged and
