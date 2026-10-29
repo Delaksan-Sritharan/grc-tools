@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -107,22 +108,22 @@ func filterControls(controls []*model.AuditControl, p controlExportParams) []*mo
 		if len(p.Statuses) > 0 && !matchesStatusFilter(c, p.Statuses) {
 			continue
 		}
-		if len(p.RequirementTypes) > 0 && !contains(p.RequirementTypes, c.RequirementType) {
+		if len(p.RequirementTypes) > 0 && !slices.Contains(p.RequirementTypes, c.RequirementType) {
 			continue
 		}
-		if len(p.ControlTypes) > 0 && !contains(p.ControlTypes, c.ControlType) {
+		if len(p.ControlTypes) > 0 && !slices.Contains(p.ControlTypes, c.ControlType) {
 			continue
 		}
-		if len(p.Scopes) > 0 && !contains(p.Scopes, c.Scope) {
+		if len(p.Scopes) > 0 && !slices.Contains(p.Scopes, c.Scope) {
 			continue
 		}
-		if len(p.Teams) > 0 && !contains(p.Teams, csvexport.Deref(c.TeamName)) {
+		if len(p.Teams) > 0 && !slices.Contains(p.Teams, csvexport.Deref(c.TeamName)) {
 			continue
 		}
-		if len(p.Auditors) > 0 && !contains(p.Auditors, csvexport.Deref(c.AuditorName)) {
+		if len(p.Auditors) > 0 && !slices.Contains(p.Auditors, csvexport.Deref(c.AuditorName)) {
 			continue
 		}
-		if len(p.Owners) > 0 && !contains(p.Owners, csvexport.Deref(c.OwnerName)) {
+		if len(p.Owners) > 0 && !slices.Contains(p.Owners, csvexport.Deref(c.OwnerName)) {
 			continue
 		}
 		out = append(out, c)
@@ -153,15 +154,6 @@ func matchesStatusFilter(c *model.AuditControl, statuses []string) bool {
 				return true
 			}
 		} else if s == c.Status {
-			return true
-		}
-	}
-	return false
-}
-
-func contains(xs []string, want string) bool {
-	for _, x := range xs {
-		if x == want {
 			return true
 		}
 	}
@@ -310,6 +302,10 @@ func (h *controlHandler) exportControls(w http.ResponseWriter, r *http.Request) 
 		_ = cw.Write(controlExportRecord(c))
 	}
 	cw.Flush()
+	if err := cw.Error(); err != nil {
+		slog.WarnContext(ctx, "control export write failed", "auditId", auditID, "err", err)
+		return
+	}
 
 	h.recordExport(r, auditID, len(controls), params)
 }
