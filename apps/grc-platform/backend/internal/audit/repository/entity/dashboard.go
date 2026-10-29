@@ -42,6 +42,11 @@ func (r *dashboardRepo) Get(ctx context.Context, f model.DashboardFilter) (*mode
 		"userId":         f.UserID,
 		"scopeTeamIds":   f.ScopeTeamIDs,
 	}
+	// Sent only when filtering, so an unfiltered call is byte-identical to the
+	// pre-filter request and an entity that predates auditIds is unaffected.
+	if len(f.AuditIDs) > 0 {
+		body["auditIds"] = f.AuditIDs
+	}
 	var data model.DashboardData
 	if err := r.c.Post(ctx, "/audit/dashboard/search", body, &data); err != nil {
 		return nil, err

@@ -93,6 +93,18 @@ paths:
       tags:
       - Audit Dashboard
       summary: Get the Audit Hub dashboard
+      parameters:
+      - name: auditIds
+        in: query
+        description: Repeatable, at most 50 positive integers (otherwise 400); narrows every stat, chart and list to these audits. Display filter only — it never widens the caller's scope.
+        schema:
+          type: array
+          maxItems: 50
+          items:
+            type: integer
+            minimum: 1
+        style: form
+        explode: true
       description: Scoped to the caller's role (compliance admin/team, internal team, external auditor, management) derived from their JWT groups claim.
       operationId: getAuditDashboard
       responses:
@@ -102,6 +114,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DashboardData'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -124,6 +138,7 @@ paths:
           - action-items
           - due-soon
           - overdue
+          - completed
           default: action-items
       - name: page
         in: query
@@ -5658,6 +5673,28 @@ components:
           type: string
         count:
           type: integer
+    AssigneeStatusCount:
+      type: object
+      properties:
+        role:
+          type: string
+          enum:
+          - auditor
+          - owner
+          - compliance
+        assignee:
+          type: string
+          description: Display name (for compliance, the audit team awaiting internal review).
+        assigneeUuid:
+          type: string
+          description: Stable person id for auditor/owner rows; empty when no one is assigned.
+        assigneeUserType:
+          type: string
+          description: INTERNAL or EXTERNAL, for auditor/owner rows.
+        status:
+          type: string
+        count:
+          type: integer
     ActionItem:
       type: object
       properties:
@@ -5733,6 +5770,12 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TeamStatusCount'
+        assigneeStatusDistribution:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssigneeStatusCount'
+        completedCount:
+          type: integer
         actionItems:
           type: array
           items:

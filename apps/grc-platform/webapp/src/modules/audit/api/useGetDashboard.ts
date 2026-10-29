@@ -14,23 +14,30 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useAuthApiClient } from "@hooks/useAuthApiClient";
 import { BACKEND_BASE_URL } from "@config/apiConfig";
 import type { DashboardData } from "@modules/audit/types/dashboard";
 
 export const AUDIT_DASHBOARD_QUERY_KEY = ["audit", "dashboard"] as const;
 
-export function useGetDashboard() {
+// auditIds narrows the whole payload to those audits; empty = all programs.
+export function useGetDashboard(auditIds: number[] = []) {
   const authFetch = useAuthApiClient();
 
   return useQuery({
-    queryKey: AUDIT_DASHBOARD_QUERY_KEY,
+    queryKey: [...AUDIT_DASHBOARD_QUERY_KEY, auditIds] as const,
     queryFn: async (): Promise<DashboardData> => {
-      const res = await authFetch(`${BACKEND_BASE_URL}/api/v1/audits/dashboard`);
+      const params = new URLSearchParams();
+      auditIds.forEach((id) => params.append("auditIds", String(id)));
+      const qs = params.toString();
+      const res = await authFetch(`${BACKEND_BASE_URL}/api/v1/audits/dashboard${qs ? `?${qs}` : ""}`);
       if (!res.ok) throw new Error(`Failed to load dashboard (${res.status})`);
       return res.json() as Promise<DashboardData>;
     },
     staleTime: 2 * 60 * 1000,
+    // Keep the last result on screen while a different program's data loads, so
+    // switching the filter doesn't flash a skeleton.
+    placeholderData: keepPreviousData,
   });
 }

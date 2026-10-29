@@ -56,6 +56,22 @@ type TeamStatusCount struct {
 	Count  int    `json:"count"`
 }
 
+// AssigneeStatusCount is one assignee's control count for a single status — feeds
+// the Auditor / Process Owner / Compliance team views on the dashboard.
+type AssigneeStatusCount struct {
+	// Role is the assignee's capacity on the control: "auditor", "owner" or
+	// "compliance" (for compliance the assignee is the audit team awaiting
+	// internal review, since reviews are not assigned to an individual).
+	Role string `json:"role"`
+	// Assignee is a display name. For auditor/owner rows the service layer
+	// overwrites it from AssigneeUUID via the identity directory when known.
+	Assignee         string `json:"assignee"`
+	AssigneeUUID     string `json:"assigneeUuid"`
+	AssigneeUserType string `json:"assigneeUserType"`
+	Status           string `json:"status"`
+	Count            int    `json:"count"`
+}
+
 // ActionItem is a single entry in the "My Action Items" list.
 type ActionItem struct {
 	ControlID     int    `json:"controlId"`
@@ -102,10 +118,16 @@ type DashboardData struct {
 	StatusDistribution     []StatusCount     `json:"statusDistribution"`
 	TeamCompletion         []TeamCompletion  `json:"teamCompletion"`
 	TeamStatusDistribution []TeamStatusCount `json:"teamStatusDistribution"`
-	ActionItems            []ActionItem      `json:"actionItems"`
-	DueSoonItems           []ActionItem      `json:"dueSoonItems"`
-	PendingCount           int               `json:"pendingCount"`
-	ValidationCount        int               `json:"validationCount"`
+	// AssigneeStatusDistribution backs the Auditor / Process Owner / Compliance
+	// views. Additive: an older entity omits it and the webapp hides those views.
+	AssigneeStatusDistribution []AssigneeStatusCount `json:"assigneeStatusDistribution"`
+	ActionItems                []ActionItem          `json:"actionItems"`
+	DueSoonItems               []ActionItem          `json:"dueSoonItems"`
+	PendingCount               int                   `json:"pendingCount"`
+	ValidationCount            int                   `json:"validationCount"`
+	// CompletedCount is the count of controls in the terminal COMPLETE status —
+	// see WorkQueueTabCompleted.
+	CompletedCount int `json:"completedCount"`
 	// AllPendingCount is the count of controls in any non-terminal status,
 	// regardless of role/stage — see WorkQueueTabAllPending.
 	AllPendingCount int              `json:"allPendingCount"`
@@ -123,6 +145,8 @@ const (
 	WorkQueueTabOverdue     WorkQueueTab = "overdue"
 	// WorkQueueTabAllPending spans every non-terminal status, regardless of role/stage.
 	WorkQueueTabAllPending WorkQueueTab = "all-pending"
+	// WorkQueueTabCompleted lists controls in the terminal COMPLETE status.
+	WorkQueueTabCompleted WorkQueueTab = "completed"
 )
 
 // WorkQueuePage is the paginated response for GET /api/v1/audits/work-queue.

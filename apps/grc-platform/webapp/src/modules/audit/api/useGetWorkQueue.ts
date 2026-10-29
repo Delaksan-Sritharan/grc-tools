@@ -19,7 +19,7 @@ import { useAuthApiClient } from "@hooks/useAuthApiClient";
 import { BACKEND_BASE_URL } from "@config/apiConfig";
 import type { ActionItem } from "@modules/audit/types/dashboard";
 
-export type WorkQueueTab = "action-items" | "due-soon" | "pending" | "validation" | "overdue" | "all-pending";
+export type WorkQueueTab = "action-items" | "due-soon" | "pending" | "validation" | "overdue" | "all-pending" | "completed";
 
 export interface WorkQueuePage {
   items: ActionItem[];

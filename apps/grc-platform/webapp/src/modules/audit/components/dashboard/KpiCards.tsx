@@ -14,8 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Paper, Typography, useTheme } from "@wso2/oxygen-ui";
-import { AlertTriangle, CheckCircle, ClipboardList, Inbox } from "@wso2/oxygen-ui-icons-react";
+import { Box, Paper, Typography } from "@wso2/oxygen-ui";
 import type { JSX, KeyboardEvent, ReactNode } from "react";
 
 interface KpiCardProps {
@@ -42,9 +41,8 @@ function KpiCard({ icon, iconColor, value, label, sub, onClick, valueColor }: Kp
       })}
       sx={{
         borderRadius: 2,
-        p: 2.5,
-        flex: 1,
-        minWidth: 160,
+        p: 2,
+        minWidth: 0,
         display: "flex",
         alignItems: "center",
         gap: 2,
@@ -80,77 +78,25 @@ function KpiCard({ icon, iconColor, value, label, sub, onClick, valueColor }: Kp
   );
 }
 
-interface KpiCardsProps {
-  totalControls: number;
-  completedControls: number;
-  completionPercent: number;
-  overdueControls: number;
-  /** null hides the awaiting card entirely (e.g. management). */
-  awaitingCount: number | null;
-  awaitingLabel: string;
-  onTotalClick: () => void;
-  onAwaitingClick: () => void;
-  onOverdueClick: () => void;
+export interface KpiItem {
+  key: string;
+  icon: ReactNode;
+  iconColor: string;
+  value: number;
+  label: string;
+  sub?: string;
+  valueColor?: string;
+  onClick?: () => void;
 }
 
-export default function KpiCards({
-  totalControls,
-  completedControls,
-  completionPercent,
-  overdueControls,
-  awaitingCount,
-  awaitingLabel,
-  onTotalClick,
-  onAwaitingClick,
-  onOverdueClick,
-}: KpiCardsProps): JSX.Element {
-  const theme = useTheme();
-  const primary = theme.palette.primary.main;
-  const success = theme.palette.success.main;
-  const warning = theme.palette.warning.main;
-  const error = theme.palette.error.main;
-  // grey[500] (hex) rather than text.disabled (rgba) — KpiCard builds its icon
-  // background via the `${color}18` hex-alpha suffix, which needs a hex value.
-  const neutral = theme.palette.grey[500];
-
+// One card per work-queue tab, in tab order. Layout is a fluid grid so seven
+// cards wrap cleanly instead of squeezing.
+export default function KpiCards({ items }: { items: KpiItem[] }): JSX.Element {
   return (
-    <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
-      <KpiCard
-        icon={<ClipboardList size={22} />}
-        iconColor={primary}
-        value={totalControls}
-        label="Total Controls"
-        sub="click to view open items"
-        onClick={onTotalClick}
-      />
-      <KpiCard
-        icon={<CheckCircle size={22} />}
-        iconColor={success}
-        value={completedControls}
-        label="Completed"
-        sub={`${completionPercent.toFixed(1)}% of scope`}
-        valueColor={success}
-      />
-      {awaitingCount !== null && (
-        <KpiCard
-          icon={<Inbox size={22} />}
-          iconColor={warning}
-          value={awaitingCount}
-          label={awaitingLabel}
-          sub="click to view"
-          onClick={onAwaitingClick}
-          valueColor={awaitingCount > 0 ? warning : undefined}
-        />
-      )}
-      <KpiCard
-        icon={<AlertTriangle size={22} />}
-        iconColor={overdueControls > 0 ? error : neutral}
-        value={overdueControls}
-        label="Overdue"
-        sub={overdueControls > 0 ? "needs attention" : "all on schedule"}
-        onClick={onOverdueClick}
-        valueColor={overdueControls > 0 ? error : undefined}
-      />
+    <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 2 }}>
+      {items.map(({ key, ...item }) => (
+        <KpiCard key={key} {...item} />
+      ))}
     </Box>
   );
 }

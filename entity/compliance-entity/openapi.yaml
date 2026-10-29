@@ -7274,6 +7274,13 @@ components:
             Server-derived team(s) the caller manages, from the caller's
             grants — never from client input. Only read when scope or
             workQueueScope is "team".
+        auditIds:
+          type: array
+          items:
+            type: integer
+          description: >-
+            Optional display filter narrowing every stat, chart and list to
+            these audits; empty = all audits. Never widens row scope.
     AuditStats:
       type: object
       properties:
@@ -7365,6 +7372,13 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TeamStatusCount'
+        assigneeStatusDistribution:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssigneeStatusCount'
+        completedCount:
+          type: integer
+          description: In-scope controls in the terminal COMPLETE status.
         actionItems:
           type: array
           items:
@@ -7410,6 +7424,8 @@ components:
           - pending
           - validation
           - overdue
+          - all-pending
+          - completed
           default: action-items
         page:
           type: integer
@@ -7546,6 +7562,27 @@ components:
       properties:
         updatedBy:
           type: string
+    AssigneeStatusCount:
+      type: object
+      description: >-
+        One assignee's control count for a single status. For auditor and owner
+        rows the assignee is a uuid/type pair; for compliance rows it is the
+        audit team awaiting internal review. Status OVERDUE is a pseudo-status
+        counting an owner's past-due controls.
+      properties:
+        role:
+          type: string
+          enum: [auditor, owner, compliance]
+        assignee:
+          type: string
+        assigneeUuid:
+          type: string
+        assigneeUserType:
+          type: string
+        status:
+          type: string
+        count:
+          type: integer
     TeamStatusCount:
       type: object
       properties:

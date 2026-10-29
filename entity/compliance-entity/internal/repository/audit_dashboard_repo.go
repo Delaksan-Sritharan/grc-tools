@@ -88,6 +88,12 @@ func (r *dashboardRepo) Get(ctx context.Context, req domain.AuditDashboardReques
 	queueScope, queueArgs := r.scopeWhere(req.WorkQueueScope, req.UserID, req.ScopeTeamIDs)
 	queueWhere := "WHERE a.status = 'ACTIVE'" + queueScope
 
+	// Optional audit filter, appended after the scope fragment so the args stay
+	// in placeholder order. Empty AuditIDs adds nothing — the unfiltered query
+	// is unchanged.
+	baseWhere, args = applyAuditFilter(baseWhere, args, req.AuditIDs)
+	queueWhere, queueArgs = applyAuditFilter(queueWhere, queueArgs, req.AuditIDs)
+
 	// Status distribution.
 	statusRows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
 		SELECT c.status, COUNT(*) FROM audit_control c
@@ -205,6 +211,10 @@ func (r *dashboardRepo) Get(ctx context.Context, req domain.AuditDashboardReques
 	if err != nil {
 		return nil, err
 	}
+	assigneeDist, err := r.queryAssigneeStatusDistribution(ctx, baseWhere, args)
+	if err != nil {
+		return nil, err
+	}
 
 	completionPct := 0.0
 	if totalControls > 0 {
@@ -217,15 +227,17 @@ func (r *dashboardRepo) Get(ctx context.Context, req domain.AuditDashboardReques
 			OverdueControls: overdueCount, EvidenceRequiredControls: evidenceReqCount,
 			CompletionPercent: completionPct, TotalActionItems: totalActionItems,
 		},
-		StatusDistribution:     statusDist,
-		TeamCompletion:         teamCompletion,
-		TeamStatusDistribution: teamStatusDist,
-		ActionItems:            actionItems,
-		DueSoonItems:           dueSoonItems,
-		PendingCount:           pendingCount,
-		ValidationCount:        validationCount,
-		AllPendingCount:        allPendingCount,
-		OverdueControls:        overdueControls,
+		StatusDistribution:         statusDist,
+		TeamCompletion:             teamCompletion,
+		TeamStatusDistribution:     teamStatusDist,
+		ActionItems:                actionItems,
+		DueSoonItems:               dueSoonItems,
+		PendingCount:               pendingCount,
+		ValidationCount:            validationCount,
+		AllPendingCount:            allPendingCount,
+		CompletedCount:             completedControls,
+		AssigneeStatusDistribution: assigneeDist,
+		OverdueControls:            overdueControls,
 	}, nil
 }
 
@@ -339,6 +351,10 @@ const validationStatusFilter = "c.status IN ('EVIDENCE_UNDER_VALIDATION','POPULA
 // role-agnostic "All Pending" tab (WorkQueueTabAllPending).
 const allPendingStatusFilter = "c.status != 'COMPLETE'"
 
+// completedStatusFilter matches controls in the terminal status. Backs the
+// Completed tab (WorkQueueTabCompleted).
+const completedStatusFilter = "c.status = 'COMPLETE'"
+
 // queryStatusCount returns the count of in-scope controls matching statusFilter.
 // Backs the Pending, Under Validation and All Pending work-queue tab badges,
 // which — unlike Action Items — show the fixed status set to every role rather
@@ -368,6 +384,112 @@ func (r *dashboardRepo) queryActionItemsCount(ctx context.Context, class domain.
 		return 0, err
 	}
 	return count, nil
+}
+
+// Statuses each role view tracks. Auditors wait on validation, owners on
+// submission/clarification, and compliance on internal review.
+const (
+	auditorViewStatusFilter    = "c.status IN ('EVIDENCE_UNDER_VALIDATION','POPULATION_UNDER_VALIDATION')"
+	ownerViewStatusFilter      = "c.status IN ('POPULATION_PENDING','EVIDENCE_PENDING','EVIDENCE_NEED_CLARIFICATION','POPULATION_NEED_CLARIFICATION')"
+	complianceViewStatusFilter = "c.status IN ('EVIDENCE_INTERNAL_REVIEW','POPULATION_INTERNAL_REVIEW')"
+)
+
+// queryAssigneeStatusDistribution returns the per-assignee status counts behind
+// the Auditor / Process Owner / Compliance views, under the view scope and the
+// optional audit filter carried in baseWhere. Code-only: it groups existing
+// audit_control columns — no schema change.
+func (r *dashboardRepo) queryAssigneeStatusDistribution(ctx context.Context, baseWhere string, args []any) ([]domain.AssigneeStatusCount, error) {
+	out := []domain.AssigneeStatusCount{}
+
+	// Auditor and owner rows: grouped by the control's auditor / owner.
+	for _, v := range []struct {
+		role, col, statusFilter string
+	}{
+		{domain.AssigneeRoleAuditor, "c.auditor_id", auditorViewStatusFilter},
+		{domain.AssigneeRoleOwner, "c.owner_id", ownerViewStatusFilter},
+	} {
+		q := fmt.Sprintf(`
+			SELECT COALESCE(u.uuid,''), COALESCE(u.user_type,''), c.status, COUNT(*)
+			FROM audit_control c JOIN audit a ON a.id = c.audit_id
+			LEFT JOIN `+"`user`"+` u ON u.id = %s
+			%s AND %s GROUP BY %s, u.uuid, u.user_type, c.status`, v.col, baseWhere, v.statusFilter, v.col) // #nosec G201
+		rows, err := r.scanAssigneeRows(ctx, q, args, v.role)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, rows...)
+	}
+
+	// Owners' past-due controls, as the OVERDUE pseudo-status.
+	oq := fmt.Sprintf(`
+		SELECT COALESCE(u.uuid,''), COALESCE(u.user_type,''), COUNT(*)
+		FROM audit_control c JOIN audit a ON a.id = c.audit_id
+		LEFT JOIN `+"`user`"+` u ON u.id = c.owner_id
+		%s AND `+workDueDate+` IS NOT NULL AND `+workDueDate+` < CURDATE() AND c.status != 'COMPLETE'
+		GROUP BY c.owner_id, u.uuid, u.user_type`, baseWhere) // #nosec G201
+	orows, err := r.db.QueryContext(ctx, oq, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer orows.Close()
+	for orows.Next() {
+		a := domain.AssigneeStatusCount{Role: domain.AssigneeRoleOwner, Status: domain.AssigneeStatusOverdue}
+		if err := orows.Scan(&a.AssigneeUUID, &a.AssigneeUserType, &a.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	if err := orows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Compliance rows: reviews belong to no individual, so group by audit team.
+	cq := fmt.Sprintf(`
+		SELECT COALESCE(t.name,'Unassigned'), c.status, COUNT(*)
+		FROM audit_control c JOIN audit a ON a.id = c.audit_id
+		LEFT JOIN audit_team t ON t.id = c.team_id
+		%s AND %s GROUP BY c.team_id, t.name, c.status`, baseWhere, complianceViewStatusFilter) // #nosec G201
+	crows, err := r.db.QueryContext(ctx, cq, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer crows.Close()
+	for crows.Next() {
+		a := domain.AssigneeStatusCount{Role: domain.AssigneeRoleCompliance}
+		if err := crows.Scan(&a.Assignee, &a.Status, &a.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, crows.Err()
+}
+
+func (r *dashboardRepo) scanAssigneeRows(ctx context.Context, q string, args []any, role string) ([]domain.AssigneeStatusCount, error) {
+	rows, err := r.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.AssigneeStatusCount
+	for rows.Next() {
+		a := domain.AssigneeStatusCount{Role: role}
+		if err := rows.Scan(&a.AssigneeUUID, &a.AssigneeUserType, &a.Status, &a.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// applyAuditFilter appends the optional audit filter to a WHERE clause and its
+// args. The clause is built from placeholders only, and the args are copied
+// before appending so the caller's slice is never aliased. No ids = unchanged.
+func applyAuditFilter(where string, args []any, auditIDs []int) (string, []any) {
+	sql, extra := buildIntInFilter("c.audit_id", auditIDs)
+	if sql == "" {
+		return where, args
+	}
+	return where + sql, append(args[:len(args):len(args)], extra...)
 }
 
 // buildIntInFilter builds a SQL "AND col IN (?,?,...)" fragment and its args for a
@@ -506,7 +628,7 @@ func (r *dashboardRepo) GetWorkQueuePage(ctx context.Context, req domain.WorkQue
 		pageArgs := append(append(args, filterArgs...), limit, offset)
 		items, err = r.scanControlItems(ctx, q, pageArgs)
 
-	case domain.WorkQueueTabPending, domain.WorkQueueTabValidation, domain.WorkQueueTabAllPending:
+	case domain.WorkQueueTabPending, domain.WorkQueueTabValidation, domain.WorkQueueTabAllPending, domain.WorkQueueTabCompleted:
 		// All three are fixed status-set lists shown to every role the same way
 		// (unlike Action Items, which is role-scoped) — only the status set differs.
 		statusFilter := pendingStatusFilter
@@ -515,6 +637,8 @@ func (r *dashboardRepo) GetWorkQueuePage(ctx context.Context, req domain.WorkQue
 			statusFilter = validationStatusFilter
 		case domain.WorkQueueTabAllPending:
 			statusFilter = allPendingStatusFilter
+		case domain.WorkQueueTabCompleted:
+			statusFilter = completedStatusFilter
 		}
 		statusWhere := fmt.Sprintf(`%s AND %s%s`, baseWhere, statusFilter, filterSQL)                               // #nosec G201
 		cq := fmt.Sprintf(`SELECT COUNT(*) FROM audit_control c JOIN audit a ON a.id = c.audit_id %s`, statusWhere) // #nosec G201

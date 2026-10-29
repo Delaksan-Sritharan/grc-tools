@@ -50,6 +50,16 @@ import { useGetTeams } from "@modules/audit/api/useGetTeams";
 import { useGetUsers } from "@modules/audit/api/useGetUsers";
 import { useGetAudits } from "@modules/audit/api/useGetAudits";
 import { dueInfo } from "./dueDate";
+import {
+  isQueueTabVisible,
+  QUEUE_TAB_ALL_PENDING,
+  QUEUE_TAB_AWAITING,
+  QUEUE_TAB_COMPLETED,
+  QUEUE_TAB_DUE_SOON,
+  QUEUE_TAB_OVERDUE,
+  QUEUE_TAB_PENDING,
+  QUEUE_TAB_VALIDATION,
+} from "@modules/audit/utils/workQueueTabs";
 import { auditPaths } from "@modules/audit/paths";
 
 function actionLabel(status: string, canApprove: boolean): string {
@@ -59,6 +69,7 @@ function actionLabel(status: string, canApprove: boolean): string {
     case "EVIDENCE_NEED_CLARIFICATION":   return "Resubmit evidence";
     case "POPULATION_PENDING":            return "Submit population";
     case "POPULATION_NEED_CLARIFICATION": return "Resubmit population";
+    case "COMPLETE":                      return "Completed";
     case "EVIDENCE_INTERNAL_REVIEW":
     case "POPULATION_INTERNAL_REVIEW":
       return canApprove ? "Review & approve" : "Pending review";
@@ -95,6 +106,7 @@ const REVIEW_STATUSES: ControlStatus[] = ["EVIDENCE_INTERNAL_REVIEW", "POPULATIO
 // frontend already has).
 function statusesForTab(tab: WorkQueueTab, canApprove: boolean, canSubmit: boolean): ControlStatus[] {
   switch (tab) {
+    case "completed":  return ["COMPLETE"];
     case "pending":    return PENDING_STATUSES;
     case "validation": return VALIDATION_STATUSES;
     case "action-items":
@@ -534,13 +546,6 @@ function TabPanel({ tab, canApprove, canSubmit, emptyText }: TabPanelProps): JSX
 
 // ── WorkQueue ─────────────────────────────────────────────────────────────────
 
-export const QUEUE_TAB_AWAITING = 0;
-export const QUEUE_TAB_DUE_SOON = 1;
-export const QUEUE_TAB_PENDING = 2;
-export const QUEUE_TAB_VALIDATION = 3;
-export const QUEUE_TAB_OVERDUE = 4;
-export const QUEUE_TAB_ALL_PENDING = 5;
-
 interface WorkQueueProps {
   totalActionItems: number;
   totalDueSoonItems: number;
@@ -550,6 +555,8 @@ interface WorkQueueProps {
   // Count of controls in any non-terminal status, regardless of role/stage —
   // unlike totalPendingItems/totalValidationItems, which are single stages.
   totalAllPendingItems: number;
+  // Count of controls in the terminal COMPLETE status.
+  totalCompletedItems: number;
   // canViewAll (AUDIT_VIEW_ALL_AUDITS) sees the full tab set; a submitter without
   // it sees only Pending Submission; an auditor without it only Under Validation.
   canViewAll: boolean;
@@ -571,7 +578,7 @@ interface QueueTabDef {
 
 export default function WorkQueue({
   totalActionItems, totalDueSoonItems, totalPendingItems, totalValidationItems, totalOverdueControls,
-  totalAllPendingItems,
+  totalAllPendingItems, totalCompletedItems,
   canViewAll, canApprove, canSubmit, canValidate, queueTitle, tab, onTabChange,
 }: WorkQueueProps): JSX.Element {
   const allTabs: QueueTabDef[] = [
@@ -587,27 +594,13 @@ export default function WorkQueue({
       value: QUEUE_TAB_OVERDUE, label: `Overdue (${totalOverdueControls})`, tabKey: "overdue", emptyText: "No overdue controls",
       sx: totalOverdueControls > 0 ? { color: "#E53935", "&.Mui-selected": { color: "#E53935" } } : undefined,
     },
+    { value: QUEUE_TAB_COMPLETED, label: `Completed (${totalCompletedItems})`, tabKey: "completed", emptyText: "No completed controls yet" },
   ];
 
-  // Privilege-driven tab visibility: org-wide readers get everything;
-  // narrow roles get the union of tabs their privileges unlock — a reviewer sees
-  // Action Items, a submitter Pending Submission, an auditor Under Validation,
-  // and a caller holding more than one privilege sees all of them. Due Soon,
-  // Overdue and All Pending are just status/date views over rows the backend
-  // has already scoped to the caller (queueWhere in audit_dashboard_repo.go),
-  // so they stay visible alongside whatever privilege-gated tab the role has —
-  // otherwise HeroBand's Overdue/Awaiting tiles (which jump to these tabs
-  // unconditionally) become dead ends for narrow roles. Each Tab carries an
+  // Privilege-driven tab visibility — see isQueueTabVisible. Each Tab carries an
   // explicit `value` so hidden tabs don't shift the selected index.
-  const visibleTabs = canViewAll
-    ? allTabs
-    : allTabs.filter((t) => {
-        if (t.value === QUEUE_TAB_DUE_SOON || t.value === QUEUE_TAB_OVERDUE || t.value === QUEUE_TAB_ALL_PENDING) return true;
-        if (t.value === QUEUE_TAB_AWAITING) return canApprove;
-        if (t.value === QUEUE_TAB_PENDING) return canSubmit;
-        if (t.value === QUEUE_TAB_VALIDATION) return canValidate;
-        return false;
-      });
+  const access = { canViewAll, canApprove, canSubmit, canValidate };
+  const visibleTabs = allTabs.filter((t) => isQueueTabVisible(t.value, access));
 
   if (visibleTabs.length === 0) {
     return (
