@@ -253,6 +253,10 @@ type RiskListItem struct {
 	CustomerName     *string  `json:"customer_name"`
 	Environments     []string `json:"environments"`
 	PlatformNames    []string `json:"platform_names"`
+
+	// TreatmentStrategy is for the CSV export only; kept out of the list payload
+	// so GET /api/v1/risks is unchanged.
+	TreatmentStrategy *string `json:"-"`
 }
 
 // RiskDetail is the enriched DTO returned by GET /api/v1/risks/{id}.

@@ -49,8 +49,9 @@ func (r stubResolver) Resolve(roles []string) map[string]bool {
 func contextForRealGrants(t *testing.T, grants ...grant.Grant) context.Context {
 	t.Helper()
 	resolver := stubResolver{
-		"risk-owner":    {privilege.ViewRisks, privilege.OwnerApproveRisk},
-		"audit-auditor": {privilege.ViewAudits},
+		"risk-owner":           {privilege.ViewRisks, privilege.OwnerApproveRisk},
+		"risk-compliance-team": {privilege.ViewRisks, privilege.ViewAllRisks},
+		"audit-auditor":        {privilege.ViewAudits},
 	}
 	set := grant.Resolve(grants, resolver)
 	ctx := middleware.WithUserInfo(context.Background(), &middleware.UserInfo{Subject: "test-caller-uuid"})

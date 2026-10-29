@@ -229,6 +229,7 @@ func (r *riskRepository) List(ctx context.Context, filter model.ListRisksFilter)
 			CustomerName:       e.CustomerName,
 			Environments:       nonNilStrings(e.Environments),
 			PlatformNames:      nonNilStrings(e.PlatformNames),
+			TreatmentStrategy:  e.TreatmentStrategy,
 		})
 	}
 	return page, nil

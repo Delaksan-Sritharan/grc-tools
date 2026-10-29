@@ -31,6 +31,10 @@ import (
 
 type controlHandler struct {
 	svc service.ControlService
+	// auditSvc and trail serve the CSV export (control_export.go): the audit's
+	// scope check and name, and the EXPORTED activity-log entry.
+	auditSvc service.AuditService
+	trail    service.TrailService
 	// notify sends owner-assignment notification emails after addControl/
 	// bulkAddControls/updateControl — see notify.go.
 	notify *Deps
