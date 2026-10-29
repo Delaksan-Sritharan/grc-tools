@@ -191,3 +191,76 @@ func TestCreateRiskAssessment_HighWithApproverInRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestCreateRiskAssessment_AppliesAssignerAndActionOwner: the assigner rides in
+// the risk UPDATE and the action owner updates the risk's own STANDARD plan,
+// both inside the assessment's transaction.
+func TestCreateRiskAssessment_AppliesAssignerAndActionOwner(t *testing.T) {
+	repo, mock := newRiskAssessmentRepoMock(t)
+	assigner, actionOwner := 5, 6
+	req := assessmentReq()
+	req.AssignerID, req.ActionOwnerID = &assigner, &actionOwner
+
+	expectScoreLookup(mock)
+	mock.ExpectBegin()
+	mock.ExpectExec(re("INSERT INTO risk_assessment")).WillReturnResult(sqlmock.NewResult(9, 1))
+	mock.ExpectExec(re("UPDATE risk SET assigner_id = ?, updated_by = ?, updated_at = NOW() WHERE id = ?")).
+		WithArgs(5, "u-1", 42).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(re("UPDATE risk_action_plan SET action_owner_id = ?, updated_by = ?, updated_at = NOW() WHERE risk_id = ? AND plan_type = 'STANDARD' ORDER BY id LIMIT 1")).
+		WithArgs(6, "u-1", 42).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	expectAssessmentReadBack(mock)
+
+	if _, err := repo.CreateRiskAssessment(context.Background(), 42, req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestCreateRiskAssessment_RollsBackWhenActionPlanUpdateFails: a failed plan
+// update must not leave the assessment or the risk update behind.
+func TestCreateRiskAssessment_RollsBackWhenActionPlanUpdateFails(t *testing.T) {
+	repo, mock := newRiskAssessmentRepoMock(t)
+	actionOwner := 6
+	req := assessmentReq()
+	req.ActionOwnerID = &actionOwner
+
+	expectScoreLookup(mock)
+	mock.ExpectBegin()
+	mock.ExpectExec(re("INSERT INTO risk_assessment")).WillReturnResult(sqlmock.NewResult(9, 1))
+	mock.ExpectExec(re("UPDATE risk_action_plan SET")).WillReturnError(errors.New("boom"))
+	mock.ExpectRollback()
+
+	if _, err := repo.CreateRiskAssessment(context.Background(), 42, req); err == nil {
+		t.Fatal("expected an error")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestCreateRiskAssessment_RollsBackWhenRiskHasNoStandardPlan: an owner change
+// that matches no plan row must fail rather than commit a phantom change.
+func TestCreateRiskAssessment_RollsBackWhenRiskHasNoStandardPlan(t *testing.T) {
+	repo, mock := newRiskAssessmentRepoMock(t)
+	actionOwner := 6
+	req := assessmentReq()
+	req.ActionOwnerID = &actionOwner
+
+	expectScoreLookup(mock)
+	mock.ExpectBegin()
+	mock.ExpectExec(re("INSERT INTO risk_assessment")).WillReturnResult(sqlmock.NewResult(9, 1))
+	mock.ExpectExec(re("UPDATE risk_action_plan SET")).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectRollback()
+
+	_, err := repo.CreateRiskAssessment(context.Background(), 42, req)
+	var nf *apierror.NotFoundError
+	if !errors.As(err, &nf) {
+		t.Fatalf("expected NotFoundError, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}

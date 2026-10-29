@@ -1530,6 +1530,12 @@ type CreateRiskAssessmentRequest struct {
 	OwnerID              *int    `json:"ownerId"`
 	ManagementApproverID *int    `json:"managementApproverId"`
 	ImplementationDate   *string `json:"implementationDate"` // YYYY-MM-DD
+	// AssignerID is the risk's Risk Assigner. ActionOwnerID is the owner of the
+	// risk's own (first STANDARD) action plan, the plan RiskUpdate's ActionPlan
+	// edits; it writes nothing when the risk has no plan, so the caller checks
+	// for one first.
+	AssignerID    *int `json:"assignerId"`
+	ActionOwnerID *int `json:"actionOwnerId"`
 	// ChangeLog is written verbatim to risk_change_log, in order, alongside
 	// the field updates above.
 	ChangeLog []ChangeLogEntry `json:"changeLog"`

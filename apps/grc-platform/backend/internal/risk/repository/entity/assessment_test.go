@@ -48,6 +48,24 @@ func TestAssessmentChangeLog(t *testing.T) {
 		}
 	})
 
+	t.Run("assigner and action owner are logged", func(t *testing.T) {
+		withPlan := &model.RiskDetail{AssignerID: 7, ActionPlan: &model.ActionPlanDetail{ActionOwnerID: i(9)}}
+		got := assessmentChangeLog(withPlan, model.CreateAssessmentRequest{AssignerID: i(8), ActionOwnerID: i(10)})
+		want := map[string][2]string{
+			"assigner_id":     {`"7"`, `"8"`},
+			"action_owner_id": {`"9"`, `"10"`},
+		}
+		if len(got) != len(want) {
+			t.Fatalf("got %d entries, want %d: %v", len(got), len(want), got)
+		}
+		for _, e := range got {
+			w, ok := want[e["fieldChanged"].(string)]
+			if !ok || e["oldValue"] != w[0] || e["newValue"] != w[1] {
+				t.Errorf("unexpected entry %v", e)
+			}
+		}
+	})
+
 	t.Run("unchanged and omitted fields log nothing", func(t *testing.T) {
 		got := assessmentChangeLog(current, model.CreateAssessmentRequest{
 			OwnerID: i(11), ImplementationDate: s("2026-11-30"),

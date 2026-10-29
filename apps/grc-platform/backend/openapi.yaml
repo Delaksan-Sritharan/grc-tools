@@ -3739,7 +3739,7 @@ paths:
       tags:
       - Risk Assessment
       summary: Record a residual risk assessment
-      description: Distinct from "Submit for Approval" — stores a new risk_assessment row (likelihood, impact, progress, reassessment_date). Only the risk's Risk Owner or Risk Assigner (or a compliance admin in its source register) may call it, on top of RISK_ASSESS. The optional owner_id, management_approver_id and implementation_date change the risk in the same transaction, never trigger re-approval, are written to the risk's history, and may be sent by the Risk Assigner (or compliance admin) only — 403 otherwise. A value equal to the risk's current one is ignored. A reassessment that results in a HIGH level is rejected with 400 unless the risk already has a Management Approver or the request names one.
+      description: Distinct from "Submit for Approval" — stores a new risk_assessment row (likelihood, impact, progress, reassessment_date). Only the risk's Risk Owner or Risk Assigner (or a compliance admin in its source register) may call it, on top of RISK_ASSESS. The optional owner_id, management_approver_id, implementation_date, assigner_id and action_owner_id change the risk in the same transaction, never trigger re-approval, are written to the risk's history, and may be sent by the Risk Assigner (or compliance admin) only — 403 otherwise. A value equal to the risk's current one is ignored. action_owner_id answers 409 when the risk has no action plan. A reassessment that results in a HIGH level is rejected with 400 unless the risk already has a Management Approver or the request names one.
       operationId: assessRisk
       parameters:
       - $ref: '#/components/parameters/RiskId'
@@ -3764,6 +3764,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '422':
@@ -6838,6 +6840,12 @@ components:
           type: string
           format: date
           description: Optional. New implementation date. Assigner only.
+        assigner_id:
+          type: integer
+          description: Optional. New Risk Assigner. Assigner only; the caller loses assigner access to the risk once it lands.
+        action_owner_id:
+          type: integer
+          description: Optional. New owner of the risk's own action plan. Assigner only; 409 if the risk has no action plan.
     # --- Risk Hub: action plans / escalations ----------------------------------
     ActionPlan:
       type: object

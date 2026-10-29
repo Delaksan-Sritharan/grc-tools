@@ -121,6 +121,12 @@ func (r *assessmentRepository) Create(ctx context.Context, riskID int, req model
 	if req.ImplementationDate != nil {
 		body["implementationDate"] = *req.ImplementationDate
 	}
+	if req.AssignerID != nil {
+		body["assignerId"] = *req.AssignerID
+	}
+	if req.ActionOwnerID != nil {
+		body["actionOwnerId"] = *req.ActionOwnerID
+	}
 	if req.Current != nil {
 		if changeLog := assessmentChangeLog(req.Current, req); len(changeLog) > 0 {
 			body["changeLog"] = changeLog
@@ -150,13 +156,15 @@ func (r *assessmentRepository) ListByRiskID(ctx context.Context, riskID int) ([]
 }
 
 // assessmentChangeLog records a history entry for each of owner, management
-// approver and implementation date that req actually changes. Owner and
-// approver reuse assigneeChangeLog so their entries read exactly like those
-// of an assignee correction.
+// approver, assigner, action owner and implementation date that req actually
+// changes. The people fields reuse assigneeChangeLog so their entries read
+// exactly like those of an assignee correction.
 func assessmentChangeLog(current *model.RiskDetail, req model.CreateAssessmentRequest) []map[string]any {
 	entries := assigneeChangeLog(current, model.UpdateAssigneesRequest{
 		OwnerID:              req.OwnerID,
 		ManagementApproverID: req.ManagementApproverID,
+		AssignerID:           req.AssignerID,
+		ActionOwnerID:        req.ActionOwnerID,
 	})
 	if req.ImplementationDate != nil &&
 		(current.ImplementationDate == nil || !model.SameCalendarDate(*req.ImplementationDate, *current.ImplementationDate)) {

@@ -101,11 +101,33 @@ func TestHandleAssessRisk(t *testing.T) {
 			`{` + base + `,"implementation_date":"` + date + `"}`, http.StatusForbidden, false, nil,
 		},
 		{
+			"assigner changes assigner and action owner", assignerID, assessIn(asgardeo),
+			`{` + base + `,"assigner_id":31,"action_owner_id":32}`, http.StatusCreated, true,
+			func(t *testing.T, got model.CreateAssessmentRequest) {
+				if got.AssignerID == nil || *got.AssignerID != 31 || got.ActionOwnerID == nil || *got.ActionOwnerID != 32 {
+					t.Errorf("fields not passed through: %+v", got)
+				}
+			},
+		},
+		{
+			"owner cannot change assigner", ownerID, assessIn(asgardeo),
+			`{` + base + `,"assigner_id":31}`, http.StatusForbidden, false, nil,
+		},
+		{
+			"owner cannot change action owner", ownerID, assessIn(asgardeo),
+			`{` + base + `,"action_owner_id":32}`, http.StatusForbidden, false, nil,
+		},
+		{
+			"action owner needs an action plan", assignerID, assessIn(asgardeo),
+			`{` + base + `,"action_owner_id":32}`, http.StatusConflict, false, nil,
+		},
+		{
 			"owner echoing unchanged values is not a change", ownerID, assessIn(asgardeo),
-			`{` + base + `,"owner_id":11,"management_approver_id":12,"implementation_date":"2026-11-30"}`,
+			`{` + base + `,"owner_id":11,"management_approver_id":12,"implementation_date":"2026-11-30","assigner_id":7,"action_owner_id":9}`,
 			http.StatusCreated, true,
 			func(t *testing.T, got model.CreateAssessmentRequest) {
-				if got.OwnerID != nil || got.ManagementApproverID != nil || got.ImplementationDate != nil {
+				if got.OwnerID != nil || got.ManagementApproverID != nil || got.ImplementationDate != nil ||
+					got.AssignerID != nil || got.ActionOwnerID != nil {
 					t.Errorf("unchanged fields were not dropped: %+v", got)
 				}
 			},
@@ -114,10 +136,15 @@ func TestHandleAssessRisk(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			current := "2026-11-30T00:00:00Z"
+			plan := &model.ActionPlanDetail{ID: 1, ActionOwnerID: new(int)}
+			*plan.ActionOwnerID = 9
+			if c.name == "action owner needs an action plan" {
+				plan = nil
+			}
 			risk := &fakeRiskSvc{byID: map[int]*model.RiskDetail{
 				1: {
 					ID: 1, SourceRegisterID: asgardeo, AssignmentTeamID: choreo,
-					AssignerID: assignerID, OwnerID: ownerID, ManagementApproverID: 12, ImplementationDate: &current,
+					AssignerID: assignerID, OwnerID: ownerID, ManagementApproverID: 12, ImplementationDate: &current, ActionPlan: plan,
 				},
 			}}
 			assess := &fakeAssessmentSvc{}
