@@ -240,3 +240,27 @@ func TestCreateRiskAssessment_RollsBackWhenActionPlanUpdateFails(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestCreateRiskAssessment_RollsBackWhenRiskHasNoStandardPlan: an owner change
+// that matches no plan row must fail rather than commit a phantom change.
+func TestCreateRiskAssessment_RollsBackWhenRiskHasNoStandardPlan(t *testing.T) {
+	repo, mock := newRiskAssessmentRepoMock(t)
+	actionOwner := 6
+	req := assessmentReq()
+	req.ActionOwnerID = &actionOwner
+
+	expectScoreLookup(mock)
+	mock.ExpectBegin()
+	mock.ExpectExec(re("INSERT INTO risk_assessment")).WillReturnResult(sqlmock.NewResult(9, 1))
+	mock.ExpectExec(re("UPDATE risk_action_plan SET")).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectRollback()
+
+	_, err := repo.CreateRiskAssessment(context.Background(), 42, req)
+	var nf *apierror.NotFoundError
+	if !errors.As(err, &nf) {
+		t.Fatalf("expected NotFoundError, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}

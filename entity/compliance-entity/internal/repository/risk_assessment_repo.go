@@ -148,15 +148,21 @@ func (r *riskAssessmentRepo) CreateRiskAssessment(ctx context.Context, riskID in
 	// The risk's own plan is its first STANDARD one — the same pick as
 	// risk.Update, so the owner written here is the one the risk shows.
 	if req.ActionOwnerID != nil {
-		if _, err = tx.ExecContext(ctx, `
+		planRes, err := tx.ExecContext(ctx, `
 			UPDATE risk_action_plan SET action_owner_id = ?, updated_by = ?, updated_at = NOW()
 			WHERE risk_id = ? AND plan_type = 'STANDARD'
 			ORDER BY id LIMIT 1`,
-			*req.ActionOwnerID, req.CreatedBy, riskID); err != nil {
+			*req.ActionOwnerID, req.CreatedBy, riskID)
+		if err != nil {
 			if isFKViolation(err) {
 				return nil, &apierror.ValidationError{Msg: "actionOwnerId does not match a user"}
 			}
 			return nil, fmt.Errorf("risk_assessment.Create update action plan: %w", err)
+		}
+		// No STANDARD plan means nothing was written; committing would log an
+		// Action Owner change that never happened.
+		if n, _ := planRes.RowsAffected(); n == 0 {
+			return nil, &apierror.NotFoundError{Msg: fmt.Sprintf("risk %d has no standard action plan", riskID)}
 		}
 	}
 
