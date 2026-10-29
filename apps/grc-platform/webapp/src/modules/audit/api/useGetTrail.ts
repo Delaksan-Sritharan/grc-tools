@@ -56,8 +56,9 @@ export interface TrailDetails {
   files?: string[];
   controlNumber?: string;
   // Audit-level CREATED/DELETED carry name; UPDATED carries whichever fields
-  // changed (periodStart/periodEnd/scopeDescription/status).
+  // changed (displayName/periodStart/periodEnd/scopeDescription/status).
   name?: string;
+  displayName?: string;
   periodStart?: string;
   periodEnd?: string;
   scopeDescription?: string;

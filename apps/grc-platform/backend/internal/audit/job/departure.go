@@ -106,7 +106,7 @@ func (h *DepartureHub) Assignments(ctx context.Context, userIDs []int) (map[int]
 		if a.IsOngoing() {
 			liveAuditIDs[a.ID] = true
 		}
-		auditNames[a.ID] = a.Name
+		auditNames[a.ID] = a.EffectiveName()
 	}
 
 	controls, err := h.controls.ListAllForReminders(ctx)

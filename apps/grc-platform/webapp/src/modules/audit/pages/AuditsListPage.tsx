@@ -45,6 +45,8 @@ import { useGetAudits } from "@modules/audit/api/useGetAudits";
 import { useGetFrameworks } from "@modules/audit/api/useGetFrameworks";
 import { useDeleteAudit } from "@modules/audit/api/useDeleteAudit";
 import { useUpdateAuditStatus } from "@modules/audit/api/useUpdateAuditStatus";
+import EditAuditDialog from "@modules/audit/components/EditAuditDialog";
+import { auditDisplayName } from "@modules/audit/utils/format";
 import type { Audit, AuditFramework, AuditStatus } from "@modules/audit/types/audit";
 import { useAuditPrivileges } from "@modules/audit/hooks/useAuditPrivileges";
 import { AuditPrivilege } from "@modules/audit/privileges";
@@ -58,6 +60,11 @@ const STATUS_FILTER_LABELS: Record<StatusFilter, string> = {
   ARCHIVED: "Archived",
   ALL: "All",
 };
+
+/** Search matches either the audit name or its display name. */
+function matchesSearch(a: Audit, q: string): boolean {
+  return a.name.toLowerCase().includes(q) || (a.displayName ?? "").toLowerCase().includes(q);
+}
 
 function filterByStatus(audits: Audit[], statusFilter: StatusFilter): Audit[] {
   const visible = audits.filter((a) => a.status !== "REMOVED");
@@ -163,8 +170,8 @@ function FrameworkCard({ framework, activeAudits, hasAudits, onClick }: Framewor
                 return (
                   <Box key={a.id}>
                     <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5, gap: 1 }}>
-                      <Typography variant="caption" color="text.secondary" noWrap title={a.name}>
-                        {a.name}
+                      <Typography variant="caption" color="text.secondary" noWrap title={auditDisplayName(a)}>
+                        {auditDisplayName(a)}
                       </Typography>
                       <Typography variant="caption" fontWeight={700} sx={{ color, flexShrink: 0 }}>
                         {pct}%
@@ -226,6 +233,7 @@ export default function AuditsListPage(): JSX.Element {
 
   const [search, setSearch] = useState("");
   const [auditToDelete, setAuditToDelete] = useState<Audit | null>(null);
+  const [auditToEdit, setAuditToEdit] = useState<Audit | null>(null);
 
   const allAudits = auditsData?.items ?? [];
   const allFrameworks = frameworksData ?? [];
@@ -255,14 +263,14 @@ export default function AuditsListPage(): JSX.Element {
 
   // Global search (framework overview level): flat results across all audits.
   const globalMatches = q && !selectedFramework
-    ? allAudits.filter((a) => a.status !== "REMOVED" && a.name.toLowerCase().includes(q))
+    ? allAudits.filter((a) => a.status !== "REMOVED" && matchesSearch(a, q))
     : [];
 
   const frameworkAudits = selectedFrameworkId !== null
     ? allAudits.filter((a) => a.framework.id === selectedFrameworkId)
     : [];
   const statusFiltered = filterByStatus(frameworkAudits, statusFilter);
-  const displayed = q ? statusFiltered.filter((a) => a.name.toLowerCase().includes(q)) : statusFiltered;
+  const displayed = q ? statusFiltered.filter((a) => matchesSearch(a, q)) : statusFiltered;
 
   const statusCounts = Object.fromEntries(
     STATUS_FILTERS.map((sf) => [sf, filterByStatus(frameworkAudits, sf).length]),
@@ -294,8 +302,8 @@ export default function AuditsListPage(): JSX.Element {
           setArchiveSnack({
             severity: "success",
             message: archiving
-              ? `"${audit.name}" archived.`
-              : `"${audit.name}" restored to ${restoreStatus === "COMPLETED" ? "completed" : "active"}.`,
+              ? `"${auditDisplayName(audit)}" archived.`
+              : `"${auditDisplayName(audit)}" restored to ${restoreStatus === "COMPLETED" ? "completed" : "active"}.`,
           }),
         onError: () =>
           setArchiveSnack({
@@ -431,6 +439,8 @@ export default function AuditsListPage(): JSX.Element {
                   canDelete={canCreateAudit}
                   onArchiveToggle={() => handleArchiveToggle(audit)}
                   canArchive={canUpdateAudit}
+                  onEdit={() => setAuditToEdit(audit)}
+                  canEdit={canUpdateAudit}
                 />
               ))}
             </Box>
@@ -565,6 +575,8 @@ export default function AuditsListPage(): JSX.Element {
                   canDelete={canCreateAudit}
                   onArchiveToggle={() => handleArchiveToggle(audit)}
                   canArchive={canUpdateAudit}
+                  onEdit={() => setAuditToEdit(audit)}
+                  canEdit={canUpdateAudit}
                 />
               ))}
             </Box>
@@ -614,7 +626,7 @@ export default function AuditsListPage(): JSX.Element {
         <DialogTitle>Delete audit?</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            <strong>{auditToDelete?.name}</strong> and all its controls will be permanently deleted.
+            <strong>{auditToDelete ? auditDisplayName(auditToDelete) : ""}</strong> and all its controls will be permanently deleted.
             This cannot be undone.
           </DialogContentText>
           {deleteAudit.isError && (
@@ -637,6 +649,15 @@ export default function AuditsListPage(): JSX.Element {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <EditAuditDialog
+        audit={auditToEdit}
+        onClose={() => setAuditToEdit(null)}
+        onSaved={() => {
+          setAuditToEdit(null);
+          setArchiveSnack({ severity: "success", message: "Audit updated." });
+        }}
+      />
 
       {/* Archive / restore result snackbar */}
       <Snackbar

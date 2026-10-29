@@ -92,6 +92,8 @@ export interface ControlCounts {
 export interface Audit {
   id: number;
   name: string;
+  /** User-facing name set by a rename; null means show `name`. */
+  displayName: string | null;
   framework: AuditFramework;
   product: AuditProduct;
   periodStart: string;

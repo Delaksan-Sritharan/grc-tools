@@ -72,3 +72,11 @@ export function formatDateRange(start: string, end: string): string {
   });
   return `${startStr} – ${endStr}`;
 }
+
+/**
+ * The name people see for an audit: its display name once renamed, otherwise
+ * its name. `name` is the evidence storage key and must not be shown after a rename.
+ */
+export function auditDisplayName(audit: { name: string; displayName?: string | null }): string {
+  return audit.displayName || audit.name;
+}
